@@ -1,0 +1,38 @@
+# CloudPrism Windows 客户端工程配置
+# 遵循 PEP 621 元数据规范
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cloudprism"
+version = "0.1.0"
+description = "CloudPrism 端到端加密云盘客户端（Windows 端）"
+requires-python = ">=3.12"
+# 运行时依赖：pycryptodome 提供 AES-CTR/GCM 与 PBKDF2
+dependencies = [
+    "pycryptodome>=3.20",
+]
+
+[project.optional-dependencies]
+# GUI 与测试相关依赖（开发期）
+gui = ["PySide6>=6.6"]
+dev = [
+    "pytest>=8",
+    "pytest-qt>=4.4",
+    "wsgidav>=4.0",        # WebDAV 后端集成测试用，后续步骤
+]
+
+[project.scripts]
+cloudprism = "cloudprism.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# pytest 配置：把 src 加入导入路径，测试目录指向 tests
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"

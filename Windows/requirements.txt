@@ -1,0 +1,7 @@
+# CloudPrism Windows 客户端运行依赖
+# 安装到根 .venv：python -m pip install -r requirements.txt
+pycryptodome>=3.20
+
+# 测试依赖（开发期）
+pytest>=8
+pytest-qt>=4.4
