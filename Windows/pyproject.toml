@@ -30,9 +30,9 @@ cloudprism = "cloudprism.app:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# pytest 配置：把 src 加入导入路径，测试目录指向 tests
+# pytest 配置：把 src 与 tests 加入导入路径，测试目录指向 tests
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-q"
