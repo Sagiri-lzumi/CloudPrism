@@ -81,6 +81,8 @@ class Encryptor:
         cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
 
         # 5. 流式加密：读一块明文 -> 加密 -> 累积密文
+        #    进度加权：加密阶段占前半（0~0.5），上传阶段占后半（0.5~1.0），
+        #    保证整体进度单调递增
         total = os.path.getsize(local_path)
         ciphertext = bytearray(header)        # 先放文件头
         with open(local_path, "rb") as f:
@@ -91,7 +93,7 @@ class Encryptor:
                     break
                 ciphertext.extend(cipher.encrypt(plain))
                 written += len(plain)
-                yield written / total if total else 1.0
+                yield 0.5 * (written / total) if total else 0.5
 
         # 6. 上传：把完整密文（头+密文主体）写入后端
         #    本实现用临时文件中转，便于复用后端的分块上传
@@ -105,7 +107,7 @@ class Encryptor:
 
         try:
             for p in self.backend.upload_chunked(tmp_path, remote_path, chunk=self.chunk):
-                yield p
+                yield 0.5 + 0.5 * p
         finally:
             try:
                 os.unlink(tmp_path)
