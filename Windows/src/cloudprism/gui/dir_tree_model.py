@@ -19,7 +19,7 @@ from typing import Callable
 from PySide6.QtCore import QAbstractItemModel, QModelIndex, Qt
 
 from cloudprism import constants
-from cloudprism.storage.backend import RemoteEntry, StorageBackend
+from cloudprism.storage.backend import StorageBackend
 
 
 class DirNode:
@@ -146,6 +146,10 @@ class DirTreeModel(QAbstractItemModel):
         if node is None or node.loaded:
             return
         entries = self.backend.list_dir(self._remote_path(node))
+        # 过滤金库标识文件（系统内部文件，不在界面展示）
+        entries = [
+            e for e in entries if e.name != constants.VAULT_MARKER_NAME
+        ]
         children = [
             DirNode(e.name, e.is_dir, e.size, parent=node) for e in entries
         ]

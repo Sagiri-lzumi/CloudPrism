@@ -209,10 +209,16 @@ def start_proxy(
     返回:
         (server, port)：port 为实际监听端口；
         停止代理调用 server.shutdown() + server.server_close()
+        （或使用 stop_proxy 辅助函数）
     """
-    # 注入共享状态到 handler 类
-    DecryptingProxyHandler.state = ProxyState(session, backend)
-    server = ThreadingHTTPServer((host, port), DecryptingProxyHandler)
+    # 每次调用生成独立 handler 子类并绑定各自状态，
+    # 避免多个代理实例共存时共享类属性 state 互相覆盖
+    handler = type(
+        "BoundDecryptingProxyHandler",
+        (DecryptingProxyHandler,),
+        {"state": ProxyState(session, backend)},
+    )
+    server = ThreadingHTTPServer((host, port), handler)
     actual_port = server.server_address[1]
     # 后台线程运行服务循环；daemon 线程随主进程退出
     service_thread = threading.Thread(
