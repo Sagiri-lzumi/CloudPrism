@@ -1,7 +1,7 @@
-"""侧面板容器：文件树 / 传输队列 / 设置。
+"""侧面板容器：文件树 / 传输队列 / 密库信息 / 设置。
 
-QStackedWidget 容纳三个子面板，由活动栏（ActivityBar）切换。
-设置页包含连接信息与缓存管理（大小限制、路径配置、清除缓存）。
+QStackedWidget 容纳四个子面板，由活动栏（ActivityBar）切换。
+设置页包含外观、连接信息、缓存管理、传输设置、安全设置。
 """
 
 from __future__ import annotations
@@ -9,11 +9,11 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
-from typing import Callable
 
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from cloudprism.gui.dir_tree_model import DirTreeModel
-from cloudprism.storage.backend import StorageBackend
+from cloudprism.gui.vault_info_page import VaultInfoPage
 
 
 # ---------------------------------------------------------------------------
@@ -39,12 +39,13 @@ from cloudprism.storage.backend import StorageBackend
 
 
 class SidePanel(QStackedWidget):
-    """侧面板：三页切换（文件树 / 传输队列 / 设置）。"""
+    """侧面板：四页切换（文件树 / 传输队列 / 密库信息 / 设置）。"""
 
     # 页面索引
     PAGE_FILES = 0
     PAGE_TRANSFERS = 1
-    PAGE_SETTINGS = 2
+    PAGE_VAULTS = 2
+    PAGE_SETTINGS = 3
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -56,6 +57,10 @@ class SidePanel(QStackedWidget):
         # 传输队列页
         self.transfers_page = TransfersPage()
         self.addWidget(self.transfers_page)
+
+        # 密库信息页
+        self.vault_info_page = VaultInfoPage()
+        self.addWidget(self.vault_info_page)
 
         # 设置页
         self.settings_page = SettingsPage()
@@ -69,6 +74,7 @@ class SidePanel(QStackedWidget):
         mapping = {
             "files": self.PAGE_FILES,
             "transfers": self.PAGE_TRANSFERS,
+            "vaults": self.PAGE_VAULTS,
             "settings": self.PAGE_SETTINGS,
         }
         self.setCurrentIndex(mapping.get(page_id, self.PAGE_FILES))
@@ -109,13 +115,19 @@ class TransfersPage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(8)
 
         header = QLabel("传输队列", self)
-        header.setStyleSheet("font-weight: bold; font-size: 14px;")
+        header.setStyleSheet("font-weight: bold; font-size: 16px;")
         lay.addWidget(header)
 
+        desc = QLabel("上传和下载任务将显示在此处", self)
+        desc.setStyleSheet("color: #888; font-size: 13px;")
+        lay.addWidget(desc)
+
         self.task_list = QListWidget(self)
+        self.task_list.setAlternatingRowColors(True)
         lay.addWidget(self.task_list)
 
     def add_task(self, name: str, direction: str) -> QListWidgetItem:
@@ -143,12 +155,13 @@ class TransfersPage(QWidget):
 
 
 class SettingsPage(QWidget):
-    """设置面板：连接信息 + 缓存管理。"""
+    """设置面板：外观 + 连接信息 + 缓存 + 传输 + 安全。"""
 
-    # 缓存设置变更信号
+    # 信号
     cacheSettingsChanged = Signal(int, str)  # (cache_limit_mb, cache_path)
-    # 清除缓存请求信号
     clearCacheRequested = Signal()
+    themeChanged = Signal(str)       # "dark" / "light" / "system"
+    fontSizeChanged = Signal(int)    # 12 / 14 / 16 / 18
 
     # 默认缓存配置
     DEFAULT_CACHE_LIMIT_MB = 512
@@ -156,12 +169,37 @@ class SettingsPage(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(8, 8, 8, 8)
-        lay.setSpacing(12)
 
-        # ---- 连接信息区 ----
-        conn_group = QGroupBox("连接信息", self)
+        # 可滚动区域
+        from PySide6.QtWidgets import QScrollArea
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+
+        content = QWidget()
+        lay = QVBoxLayout(content)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(16)
+
+        # ---- 外观设置 ----
+        appearance_group = QGroupBox("外观", content)
+        appearance_form = QFormLayout(appearance_group)
+
+        self._theme_combo = QComboBox(self)
+        self._theme_combo.addItems(["跟随系统", "深色", "浅色"])
+        self._theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        appearance_form.addRow("主题：", self._theme_combo)
+
+        self._font_size_combo = QComboBox(self)
+        self._font_size_combo.addItems(["小 (12px)", "中 (14px)", "大 (16px)", "特大 (18px)"])
+        self._font_size_combo.setCurrentIndex(1)  # 默认中
+        self._font_size_combo.currentIndexChanged.connect(self._on_font_size_changed)
+        appearance_form.addRow("字体大小：", self._font_size_combo)
+
+        lay.addWidget(appearance_group)
+
+        # ---- 连接信息 ----
+        conn_group = QGroupBox("连接信息", content)
         conn_form = QFormLayout(conn_group)
 
         self._backend_type_label = QLabel("未连接", self)
@@ -173,7 +211,6 @@ class SettingsPage(QWidget):
         self._filename_enc_label = QLabel("-", self)
         conn_form.addRow("文件名加密：", self._filename_enc_label)
 
-        # 断开/重连按钮
         btn_row = QHBoxLayout()
         self._reconnect_btn = QPushButton("重新连接", self)
         self._reconnect_btn.clicked.connect(lambda: self._reconnect_requested.emit())
@@ -183,11 +220,10 @@ class SettingsPage(QWidget):
 
         lay.addWidget(conn_group)
 
-        # ---- 缓存设置区 ----
-        cache_group = QGroupBox("缓存设置", self)
+        # ---- 缓存设置 ----
+        cache_group = QGroupBox("缓存设置", content)
         cache_form = QFormLayout(cache_group)
 
-        # 缓存大小限制
         self._cache_limit_spin = QSpinBox(self)
         self._cache_limit_spin.setRange(64, 4096)
         self._cache_limit_spin.setValue(self.DEFAULT_CACHE_LIMIT_MB)
@@ -196,7 +232,6 @@ class SettingsPage(QWidget):
         self._cache_limit_spin.valueChanged.connect(self._emit_cache_settings)
         cache_form.addRow("缓存大小限制：", self._cache_limit_spin)
 
-        # 缓存位置
         cache_path_row = QHBoxLayout()
         self._cache_path_edit = QLineEdit(self)
         self._cache_path_edit.setText(self._default_cache_path())
@@ -209,22 +244,55 @@ class SettingsPage(QWidget):
         cache_path_row.addWidget(browse_btn)
         cache_form.addRow("缓存位置：", cache_path_row)
 
-        # 当前缓存占用
         self._cache_usage_label = QLabel("计算中…", self)
         cache_form.addRow("当前缓存占用：", self._cache_usage_label)
 
-        # 清除缓存按钮
         clear_btn = QPushButton("清除缓存", self)
         clear_btn.clicked.connect(self._on_clear_cache)
         cache_form.addRow(clear_btn)
 
         lay.addWidget(cache_group)
+
+        # ---- 传输设置 ----
+        transfer_group = QGroupBox("传输", content)
+        transfer_form = QFormLayout(transfer_group)
+
+        self._chunk_size_combo = QComboBox(self)
+        self._chunk_size_combo.addItems(["256 KB", "512 KB", "1 MB", "4 MB"])
+        self._chunk_size_combo.setCurrentIndex(1)  # 默认 512KB
+        transfer_form.addRow("分块大小：", self._chunk_size_combo)
+
+        self._concurrent_spin = QSpinBox(self)
+        self._concurrent_spin.setRange(1, 4)
+        self._concurrent_spin.setValue(1)
+        self._concurrent_spin.setToolTip("同时进行的传输任务数")
+        transfer_form.addRow("并发传输数：", self._concurrent_spin)
+
+        lay.addWidget(transfer_group)
+
+        # ---- 安全设置 ----
+        security_group = QGroupBox("安全", content)
+        security_form = QFormLayout(security_group)
+
+        self._auto_lock_combo = QComboBox(self)
+        self._auto_lock_combo.addItems(["从不", "5 分钟", "15 分钟", "30 分钟"])
+        self._auto_lock_combo.setToolTip("无操作后自动锁定密库的时间")
+        security_form.addRow("自动锁定：", self._auto_lock_combo)
+
+        lay.addWidget(security_group)
+
         lay.addStretch()
+
+        scroll.setWidget(content)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
 
         # 刷新缓存占用显示
         self._refresh_cache_usage()
 
-    # 内部信号（供 MainWindow 连接）
+    # 内部信号
     _reconnect_requested = Signal()
 
     # ------------------------------------------------------------------
@@ -255,6 +323,18 @@ class SettingsPage(QWidget):
     # ------------------------------------------------------------------
     # 内部方法
     # ------------------------------------------------------------------
+
+    def _on_theme_changed(self, index: int) -> None:
+        """主题切换。"""
+        themes = ["system", "dark", "light"]
+        if 0 <= index < len(themes):
+            self.themeChanged.emit(themes[index])
+
+    def _on_font_size_changed(self, index: int) -> None:
+        """字体大小切换。"""
+        sizes = [12, 14, 16, 18]
+        if 0 <= index < len(sizes):
+            self.fontSizeChanged.emit(sizes[index])
 
     def _default_cache_path(self) -> str:
         """默认缓存路径。"""

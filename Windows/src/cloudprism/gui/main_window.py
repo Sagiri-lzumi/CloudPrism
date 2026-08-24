@@ -1,18 +1,23 @@
-"""CloudPrism 主窗口（IDE 风格三栏布局）。
+"""CloudPrism 主窗口（IDE 风格动态布局）。
 
-布局：
+文件页：活动栏 + 侧面板（文件树）+ 预览面板
+其他页：活动栏 + 全宽内容（传输/密库/设置）
+
+  [文件页]
   +------+-----------------+------------------------------------------+
   |      |                 |                                          |
-  | 活动 |   侧面板        |           预览区                          |
+  | 活动 |   文件树        |           预览区                          |
   | 栏   |                 |                                          |
-  |      | [文件] [传输]    |  - 视频/音频: 内嵌播放器                  |
-  | [文件]| 文件树          |  - 图片: 图片查看器                       |
-  | [传输]| 上传/下载进度   |  - 文本: 文本查看器                       |
-  | [设置]| 连接/缓存设置   |  - 其他: 文件信息                         |
-  |      |                 |                                          |
   +------+-----------------+------------------------------------------+
-  | 连接状态 | 传输速度 | 缓存占用 | CPU 占用                         |
-  +-------------------------------------------------------------------+
+
+  [传输/密库/设置页]
+  +------+-----------------------------------------------------------+
+  |      |                                                           |
+  | 活动 |   全宽内容区                                               |
+  | 栏   |                                                           |
+  +------+-----------------------------------------------------------+
+
+  底部状态栏：连接状态 | 传输速度 | 缓存占用 | CPU
 """
 
 from __future__ import annotations
@@ -24,9 +29,10 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMenuBar,
-    QMessageBox,
     QSplitter,
+    QStackedWidget,
     QStatusBar,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -39,14 +45,10 @@ from cloudprism.gui.side_panel import SidePanel
 class MainWindow(QMainWindow):
     """CloudPrism 主窗口。"""
 
-    # ---- 占位信号：后续步骤连接 ----
-    # 初始化/连接Mi库请求（InitWizard 接管）
+    # ---- 信号 ----
     initRequested = Signal()
-    # 上传请求（参数：选中的后端路径，None = 未选中）
     uploadRequested = Signal(str)
-    # 下载请求（参数：选中的后端路径）
     downloadRequested = Signal(str)
-    # 播放请求（参数：选中的后端路径）
     playRequested = Signal(str)
 
     def __init__(self, parent=None) -> None:
@@ -66,7 +68,7 @@ class MainWindow(QMainWindow):
         """构建菜单栏。"""
         menu_bar: QMenuBar = self.menuBar()
 
-        # Mi库菜单：初始化/连接、刷新
+        # Mi库菜单
         vault_menu = QMenu("Mi库(&M)", self)
         init_action = vault_menu.addAction("初始化/连接(&I)...")
         init_action.triggered.connect(self.initRequested.emit)
@@ -75,26 +77,36 @@ class MainWindow(QMainWindow):
         refresh_action.triggered.connect(self._refresh_tree)
         menu_bar.addMenu(vault_menu)
 
-        # 文件菜单：上传、下载
+        # 文件菜单
         file_menu = QMenu("文件(&F)", self)
         upload_action = file_menu.addAction("上传(&U)...")
-        upload_action.triggered.connect(lambda: self.uploadRequested.emit(self._selected_path()))
+        upload_action.triggered.connect(
+            lambda: self.uploadRequested.emit(self._selected_path())
+        )
         download_action = file_menu.addAction("下载(&D)...")
-        download_action.triggered.connect(lambda: self.downloadRequested.emit(self._selected_path()))
+        download_action.triggered.connect(
+            lambda: self.downloadRequested.emit(self._selected_path())
+        )
         menu_bar.addMenu(file_menu)
 
         # 播放菜单
         play_menu = QMenu("播放(&P)", self)
         play_action = play_menu.addAction("播放当前(&P)")
-        play_action.triggered.connect(lambda: self.playRequested.emit(self._selected_path()))
+        play_action.triggered.connect(
+            lambda: self.playRequested.emit(self._selected_path())
+        )
         menu_bar.addMenu(play_menu)
 
     # ==================================================================
-    # 中央区域：活动栏 + 侧面板 + 预览面板
+    # 中央区域：动态布局
     # ==================================================================
 
     def _build_central(self) -> None:
-        """构建三栏 IDE 布局。"""
+        """构建动态 IDE 布局。
+
+        文件页 -> 显示 side_panel（文件树）+ 预览面板
+        其他页 -> 显示 side_panel 全宽（传输/密库/设置，无预览）
+        """
         central = QWidget(self)
         main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -104,24 +116,57 @@ class MainWindow(QMainWindow):
         self.activity_bar = ActivityBar(central)
         main_layout.addWidget(self.activity_bar)
 
-        # 分隔器：侧面板 | 预览面板
-        self.splitter = QSplitter(Qt.Horizontal, central)
+        # 侧面板（始终存在，包含所有四个页面）
         self.side_panel = SidePanel(central)
-        self.preview_panel = PreviewPanel(central)
-        self.splitter.addWidget(self.side_panel)
-        self.splitter.addWidget(self.preview_panel)
-        # 初始比例：侧面板 1/3，预览 2/3
-        self.splitter.setStretchFactor(0, 1)
-        self.splitter.setStretchFactor(1, 2)
-        main_layout.addWidget(self.splitter, stretch=1)
 
+        # 预览面板
+        self.preview_panel = PreviewPanel(central)
+
+        # 内容容器：动态切换
+        # - 文件模式：side_panel(文件页) + preview_panel
+        # - 全宽模式：side_panel(其他页) 占满
+        self._content_widget = QWidget(central)
+        self._content_layout = QHBoxLayout(self._content_widget)
+        self._content_layout.setContentsMargins(0, 0, 0, 0)
+        self._content_layout.setSpacing(0)
+        self._content_layout.addWidget(self.side_panel, stretch=1)
+
+        main_layout.addWidget(self._content_widget, stretch=1)
         self.setCentralWidget(central)
 
-        # 活动栏切换 -> 侧面板页面切换
-        self.activity_bar.currentChanged.connect(self.side_panel.show_page)
+        # 活动栏切换 -> 动态布局
+        self.activity_bar.currentChanged.connect(self._on_page_changed)
+        # 默认文件模式
+        self._show_file_mode()
+
+    def _on_page_changed(self, page_id: str) -> None:
+        """活动栏切换：动态调整布局。"""
+        if page_id == ActivityBar.PAGE_FILES:
+            self._show_file_mode()
+        else:
+            self._show_fullwidth_mode(page_id)
+
+    def _show_file_mode(self) -> None:
+        """文件模式：侧面板（文件树）+ 预览面板。"""
+        # 切换到文件页
+        self.side_panel.setCurrentIndex(self.side_panel.PAGE_FILES)
+        # 添加预览面板（如果尚未添加）
+        if self.preview_panel.parent() != self._content_widget:
+            self._content_layout.addWidget(self.preview_panel, stretch=2)
+        self.preview_panel.show()
+        self.side_panel.setMaximumWidth(400)
+
+    def _show_fullwidth_mode(self, page_id: str) -> None:
+        """全宽模式：侧面板占满，无预览面板。"""
+        # 移除预览面板
+        self.preview_panel.hide()
+        # 切换到对应页面
+        self.side_panel.show_page(page_id)
+        # 取消宽度限制
+        self.side_panel.setMaximumWidth(16777215)
 
     # ==================================================================
-    # 状态栏：连接状态 + 传输速度 + 缓存占用 + CPU 占用
+    # 状态栏
     # ==================================================================
 
     def _build_status_bar(self) -> None:
@@ -129,11 +174,9 @@ class MainWindow(QMainWindow):
         sb = QStatusBar(self)
         self.setStatusBar(sb)
 
-        # 左侧：连接状态
         self._status_conn = QLabel("未连接")
         sb.addWidget(self._status_conn)
 
-        # 右侧：性能指标
         self._status_speed = QLabel("速度: --")
         sb.addPermanentWidget(self._status_speed)
 
@@ -149,7 +192,7 @@ class MainWindow(QMainWindow):
         cache_bytes: int,
         cpu_pct: float,
     ) -> None:
-        """更新状态栏性能指标（由 PerfMonitor 信号触发）。"""
+        """更新状态栏性能指标。"""
         self._status_speed.setText(format_speed(speed_mb))
         self._status_cache.setText(format_cache(cache_bytes))
         self._status_cpu.setText(format_cpu(cpu_pct))
@@ -163,15 +206,15 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _selected_path(self) -> str:
-        """获取当前文件树选中路径（占位，后续步骤完善）。"""
+        """获取当前文件树选中路径。"""
         return ""
 
     def _refresh_tree(self) -> None:
-        """刷新文件树（占位，后续步骤完善）。"""
+        """刷新文件树。"""
         pass
 
     # ==================================================================
-    # 便捷属性（供 AppController 访问）
+    # 便捷属性
     # ==================================================================
 
     @property
@@ -183,6 +226,11 @@ class MainWindow(QMainWindow):
     def transfers_page(self):
         """传输队列页。"""
         return self.side_panel.transfers_page
+
+    @property
+    def vault_info_page(self):
+        """密库信息页。"""
+        return self.side_panel.vault_info_page
 
     @property
     def settings_page(self):

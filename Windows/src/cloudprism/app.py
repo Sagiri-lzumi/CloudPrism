@@ -25,6 +25,16 @@ from cloudprism.gui.transfer_worker import TransferWorker, start_transfer
 from cloudprism.storage.backend import StorageBackend
 
 
+def _human_size(n: int) -> str:
+    """字节数 -> 人类可读大小。"""
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{n} B"
+
+
 class AppController:
     """应用控制器：连接窗口信号与各功能模块。"""
 
@@ -55,6 +65,10 @@ class AppController:
 
         # 设置页更新连接信息
         window.settings_page.cacheSettingsChanged.connect(self._on_cache_settings_changed)
+
+        # 密库信息页信号
+        window.vault_info_page.connectRequested.connect(self.show_init_wizard)
+        window.vault_info_page.refreshRequested.connect(self._refresh_vault_info)
 
         # 启动性能监控
         self._perf.start()
@@ -106,6 +120,9 @@ class AppController:
             filename_enc=self.metadata.filename_enc,
         )
         self.window.settings_page._refresh_cache_usage()
+
+        # 更新密库信息页
+        self._update_vault_info_page()
 
     # ------------------------------------------------------------------
     # 文件树选中 -> 预览
@@ -211,6 +228,66 @@ class AppController:
         """刷新文件树。"""
         if self._tree_model is not None:
             self._tree_model.reload()
+
+    def _refresh_vault_info(self) -> None:
+        """刷新密库信息页。"""
+        self._update_vault_info_page()
+
+    def _update_vault_info_page(self) -> None:
+        """更新密库信息页显示。"""
+        if self.session is None or self.backend is None:
+            self.window.vault_info_page.show_disconnected()
+            return
+
+        self.window.vault_info_page.show_connected()
+
+        # 计算库名称（vault_id 截短）
+        vault_id_hex = self.metadata.vault_id.hex() if self.metadata else "-"
+        vault_name = vault_id_hex[:8] + "..." if len(vault_id_hex) > 8 else vault_id_hex
+
+        # 后端信息
+        backend_type = type(self.backend).__name__
+        backend_path = getattr(self.backend, "_root", "") or getattr(self.backend, "_url", "")
+
+        # 估算云端大小（遍历后端文件）
+        cloud_size = "计算中…"
+        file_count = "-"
+        try:
+            entries = self.backend.list_dir("")
+            total_size = 0
+            count = 0
+            for e in entries:
+                if not e.is_dir:
+                    total_size += e.size
+                    count += 1
+            cloud_size = _human_size(total_size)
+            file_count = str(count)
+        except Exception:
+            cloud_size = "-"
+
+        # 本地缓存大小
+        cache_path = self.window.settings_page.cache_path
+        cache_size = "-"
+        import os
+        if cache_path and os.path.isdir(cache_path):
+            total = 0
+            for dirpath, _dirs, files in os.walk(cache_path):
+                for f in files:
+                    try:
+                        total += os.path.getsize(os.path.join(dirpath, f))
+                    except OSError:
+                        pass
+            cache_size = _human_size(total)
+
+        self.window.vault_info_page.update_info(
+            vault_name=vault_name,
+            backend_type=backend_type,
+            backend_path=backend_path,
+            filename_enc=self.metadata.filename_enc if self.metadata else False,
+            cloud_size=cloud_size,
+            cache_size=cache_size,
+            file_count=file_count,
+        )
 
 
 def main() -> int:

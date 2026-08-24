@@ -161,11 +161,31 @@ class TestMainWindow:
         qtbot.addWidget(win)
         # 活动栏存在
         assert win.activity_bar is not None
-        # 侧面板存在且可切换
+        # 侧面板存在且可切换（含密库页）
         win.side_panel.show_page("transfers")
         assert win.side_panel.currentIndex() == win.side_panel.PAGE_TRANSFERS
+        win.side_panel.show_page("vaults")
+        assert win.side_panel.currentIndex() == win.side_panel.PAGE_VAULTS
         win.side_panel.show_page("settings")
         assert win.side_panel.currentIndex() == win.side_panel.PAGE_SETTINGS
+
+    def test_dynamic_layout_file_mode(self, qtbot):
+        """文件页显示侧面板 + 预览区。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        # 默认文件页：预览面板可见
+        assert win.preview_panel.isVisibleTo(win._content_widget)
+
+    def test_dynamic_layout_fullwidth_mode(self, qtbot):
+        """传输/密库/设置页隐藏预览区。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        win.activity_bar.currentChanged.emit("transfers")
+        assert not win.preview_panel.isVisibleTo(win._content_widget)
+        win.activity_bar.currentChanged.emit("vaults")
+        assert not win.preview_panel.isVisibleTo(win._content_widget)
+        win.activity_bar.currentChanged.emit("settings")
+        assert not win.preview_panel.isVisibleTo(win._content_widget)
 
     def test_preview_panel_welcome(self, qtbot):
         """预览面板初始显示欢迎页。"""
@@ -181,3 +201,34 @@ class TestMainWindow:
         assert "1.5" in win._status_speed.text()
         assert "1.0" in win._status_cache.text()
         assert "25" in win._status_cpu.text()
+
+    def test_vault_info_page_exists(self, qtbot):
+        """密库信息页存在且可访问。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        assert win.vault_info_page is not None
+        # 默认显示引导页（未连接）——检查内部状态而非 isVisible
+        assert win.vault_info_page._guide_widget.isVisibleTo(win.vault_info_page)
+        assert not win.vault_info_page._info_widget.isVisibleTo(win.vault_info_page)
+
+    def test_vault_info_page_connected(self, qtbot):
+        """密库信息页切换到已连接状态。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        win.vault_info_page.show_connected()
+        assert not win.vault_info_page._guide_widget.isVisibleTo(win.vault_info_page)
+        assert win.vault_info_page._info_widget.isVisibleTo(win.vault_info_page)
+
+    def test_settings_page_has_new_sections(self, qtbot):
+        """设置页包含外观/传输/安全设置。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        sp = win.settings_page
+        # 外观设置
+        assert sp._theme_combo is not None
+        assert sp._font_size_combo is not None
+        # 传输设置
+        assert sp._chunk_size_combo is not None
+        assert sp._concurrent_spin is not None
+        # 安全设置
+        assert sp._auto_lock_combo is not None
