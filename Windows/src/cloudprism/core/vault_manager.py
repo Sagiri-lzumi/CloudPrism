@@ -10,7 +10,6 @@ InitWizard 与后续 CLI 场景复用本模块；GUI 不直接操作 VaultMarker
 from __future__ import annotations
 
 import os
-import tempfile
 
 from cloudprism import constants
 from cloudprism.crypto.vault import VaultMarker, VaultMetadata
@@ -73,17 +72,19 @@ class VaultManager:
         data = VaultMarker.create(meta, master_password)
 
         # 经临时文件上传（复用后端分块上传）
-        with tempfile.NamedTemporaryFile(
-            delete=False, suffix=".vault"
-        ) as tmp:
-            tmp.write(data)
-            tmp_path = tmp.name
+        # Vault Marker 很小（约 101 字节），临时文件仅用于适配后端接口
+        import tempfile as _tf
+
+        fd, tmp_path = _tf.mkstemp(suffix=".vault")
         try:
+            with os.fdopen(fd, "wb") as tmp:
+                tmp.write(data)
             for _ in self.backend.upload_chunked(
                 tmp_path, constants.VAULT_MARKER_NAME
             ):
                 pass
         finally:
+            # 安全删除临时文件（含 Vault Marker 的 salt/密文）
             try:
                 os.unlink(tmp_path)
             except OSError:

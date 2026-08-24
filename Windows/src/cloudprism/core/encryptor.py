@@ -59,7 +59,13 @@ class Encryptor:
 
         yield:
             进度 0.0~1.0
+
+        安全要点:
+            密文流式写入临时文件（不在内存中累积），上传后安全删除。
         """
+        import tempfile
+        from Crypto.Util import Counter
+
         # 1. 生成随机 salt + iv
         salt = get_random_bytes(constants.SALT_LEN)
         iv = get_random_bytes(constants.IV_LEN)
@@ -71,48 +77,46 @@ class Encryptor:
         header = FileHeader.build(salt, iv, flags=flags, version=version)
 
         # 4. 准备 CTR 加密器：用 iv 作计数器初值
-        #    PyCryptodome CTR Counter 与 AesCtrStreamCipher 用同一计数器方案
-        from Crypto.Util import Counter
-
         initial_value = int.from_bytes(iv, "big")
         ctr = Counter.new(
             128, initial_value=initial_value, allow_wraparound=True
         )
         cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
 
-        # 5. 流式加密：读一块明文 -> 加密 -> 累积密文
-        #    进度加权：加密阶段占前半（0~0.5），上传阶段占后半（0.5~1.0），
-        #    保证整体进度单调递增
+        # 5. 流式加密：读一块明文 -> 加密 -> 直接写入临时文件
+        #    不在内存中累积密文，避免大文件 OOM
         total = os.path.getsize(local_path)
-        ciphertext = bytearray(header)        # 先放文件头
-        with open(local_path, "rb") as f:
-            written = 0
-            while True:
-                plain = f.read(self.chunk)
-                if not plain:
-                    break
-                ciphertext.extend(cipher.encrypt(plain))
-                written += len(plain)
-                yield 0.5 * (written / total) if total else 0.5
-
-        # 6. 上传：把完整密文（头+密文主体）写入后端
-        #    本实现用临时文件中转，便于复用后端的分块上传
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(
-            delete=False, suffix=".cpenc"
-        ) as tmp:
-            tmp.write(ciphertext)
-            tmp_path = tmp.name
-
+        tmp_path = None
         try:
+            fd, tmp_path = tempfile.mkstemp(suffix=".cpenc")
+            with os.fdopen(fd, "wb") as tmp:
+                # 先写文件头
+                tmp.write(header)
+                # 流式加密明文主体
+                with open(local_path, "rb") as f:
+                    written = 0
+                    while True:
+                        plain = f.read(self.chunk)
+                        if not plain:
+                            break
+                        tmp.write(cipher.encrypt(plain))
+                        written += len(plain)
+                        # 加密阶段占前半（0~0.5）
+                        yield 0.5 * (written / total) if total else 0.5
+
+            # 加密完成，cipher 对象不再需要，解除引用
+            del cipher
+
+            # 6. 上传临时文件（头+密文）到后端
             for p in self.backend.upload_chunked(tmp_path, remote_path, chunk=self.chunk):
                 yield 0.5 + 0.5 * p
         finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+            # 安全删除临时文件：无论成功或异常都确保清理
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
         if total == 0:
             yield 1.0

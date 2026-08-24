@@ -146,7 +146,11 @@ def main() -> int:
     window = MainWindow()
     controller = AppController(window)  # noqa: F841  控制器需保持引用
     window.show()
-    return app.exec()
+    exit_code = app.exec()
+    # 退出时清零主密码与派生密钥，防止内存残留
+    if controller.session is not None:
+        controller.session.close()
+    return exit_code
 
 
 if __name__ == "__main__":
