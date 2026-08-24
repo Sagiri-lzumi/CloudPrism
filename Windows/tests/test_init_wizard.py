@@ -77,24 +77,33 @@ def _make_wizard(qtbot):
     return w
 
 
+def _setup_local_backend(wizard, tmp_path):
+    """辅助：为向导配置本地后端并通过测试连接。"""
+    root = tmp_path / "vault_root"
+    root.mkdir(exist_ok=True)
+    wizard.page_backend_type.radio_local.setChecked(True)
+    wizard.backend_type = "local"
+    wizard.page_backend_cfg.local_dir_edit.setText(str(root))
+    # 模拟测试连接通过
+    wizard.page_backend_cfg._test_passed = True
+    return root
+
+
 class TestInitWizardNewVault:
     """新建Mi库向导流程。"""
 
     def test_new_vault_flow(self, qtbot, tmp_path):
-        """新建：目录 -> 密码确认 -> 文件名加密关闭 -> 完成。"""
-        root = tmp_path / "vault_root"
-        root.mkdir()
+        """新建：选类型 -> 配置目录 -> 密码确认 -> 文件名加密关闭 -> 完成。"""
         w = _make_wizard(qtbot)
 
         # 页1：新建模式（默认）
         assert w.is_new_mode() is True
-        # 页2：本地后端
-        w.page_backend.radio_local.setChecked(True)
-        w.page_backend.local_dir_edit.setText(str(root))
-        # 页3：密码
+        # 页2+3：本地后端配置
+        root = _setup_local_backend(w, tmp_path)
+        # 页4：密码
         w.page_password.pw_edit.setText("secret-pw")
         w.page_password.confirm_edit.setText("secret-pw")
-        # 页4：文件名加密关闭
+        # 页5：文件名加密关闭
         w.page_enc.radio_off.setChecked(True)
 
         # 执行完成
@@ -109,10 +118,8 @@ class TestInitWizardNewVault:
 
     def test_new_vault_filename_enc_on(self, qtbot, tmp_path):
         """新建：开启文件名加密。"""
-        root = tmp_path / "vault_root"
-        root.mkdir()
         w = _make_wizard(qtbot)
-        w.page_backend.local_dir_edit.setText(str(root))
+        _setup_local_backend(w, tmp_path)
         w.page_password.pw_edit.setText("pw")
         w.page_password.confirm_edit.setText("pw")
         w.page_enc.radio_on.setChecked(True)
@@ -121,11 +128,9 @@ class TestInitWizardNewVault:
         assert w.metadata.filename_enc is True
 
     def test_mismatched_password_not_complete(self, qtbot, tmp_path):
-        """新建：两次密码不一致时页 3 不完整。"""
-        root = tmp_path / "vault_root"
-        root.mkdir()
+        """新建：两次密码不一致时页 4 不完整。"""
         w = _make_wizard(qtbot)
-        w.page_backend.local_dir_edit.setText(str(root))
+        _setup_local_backend(w, tmp_path)
         w.page_password.pw_edit.setText("a")
         w.page_password.confirm_edit.setText("b")
         assert w.page_password.isComplete() is False
@@ -140,7 +145,7 @@ class TestInitWizardNewVault:
         VaultManager(LocalFolderBackend(root)).create_vault("old", filename_enc=False)
 
         w = _make_wizard(qtbot)
-        w.page_backend.local_dir_edit.setText(str(root))
+        _setup_local_backend(w, tmp_path)
         w.page_password.pw_edit.setText("new")
         w.page_password.confirm_edit.setText("new")
         w.accept()
@@ -164,10 +169,15 @@ class TestInitWizardConnect:
         w = _make_wizard(qtbot)
         w.page_mode.radio_connect.setChecked(True)
         assert w.is_new_mode() is False
-        # 导航：模式页 -> 后端页
+        # 导航：模式页 -> 后端类型页
         w.next()
-        w.page_backend.local_dir_edit.setText(str(root))
-        # 后端页 -> 密码页（触发 initializePage 隐藏确认框）
+        # 后端类型页：默认本地
+        assert w.backend_type == "local"
+        # 导航：后端类型页 -> 后端配置页
+        w.next()
+        w.page_backend_cfg.local_dir_edit.setText(str(root))
+        w.page_backend_cfg._test_passed = True
+        # 导航：后端配置页 -> 密码页
         w.next()
         assert w.page_password.confirm_edit.isVisibleTo(w.page_password) is False
         w.page_password.pw_edit.setText(pw)
@@ -180,9 +190,78 @@ class TestInitWizardConnect:
         root, _pw = self._prepare_vault(tmp_path)
         w = _make_wizard(qtbot)
         w.page_mode.radio_connect.setChecked(True)
-        w.page_backend.local_dir_edit.setText(str(root))
+        _setup_local_backend(w, tmp_path)
         w.page_password.pw_edit.setText("wrong-pw")
         w.accept()
         assert w.metadata is None
         assert w.session is None
         assert "密码错误" in w.error_label_text
+
+
+# ---------------------------------------------------------------------------
+# 新增：后端类型页 & 测试连接
+# ---------------------------------------------------------------------------
+
+
+class TestBackendTypePage:
+    """后端类型选择页测试。"""
+
+    def test_backend_type_page_default_local(self, qtbot):
+        """默认选中本地文件夹。"""
+        w = _make_wizard(qtbot)
+        assert w.page_backend_type.radio_local.isChecked()
+        assert w.backend_type == "local"
+
+    def test_backend_type_page_select_webdav(self, qtbot):
+        """选中 WebDAV 时更新 backend_type。"""
+        w = _make_wizard(qtbot)
+        w.page_backend_type.radio_webdav.setChecked(True)
+        assert w.backend_type == "webdav"
+
+
+class TestBackendConfigPage:
+    """后端配置页 & 测试连接测试。"""
+
+    def test_backend_config_test_connection_local(self, qtbot, tmp_path):
+        """本地后端：目录存在时测试连接成功。"""
+        root = tmp_path / "vault_root"
+        root.mkdir()
+        w = _make_wizard(qtbot)
+        w.backend_type = "local"
+        w.page_backend_cfg.local_dir_edit.setText(str(root))
+        # 点击测试连接
+        w.page_backend_cfg._test_connection()
+        assert w.page_backend_cfg._test_passed is True
+        assert "成功" in w.page_backend_cfg.test_status.text()
+
+    def test_backend_config_test_connection_local_invalid(self, qtbot):
+        """本地后端：目录不存在时测试连接失败。"""
+        w = _make_wizard(qtbot)
+        w.backend_type = "local"
+        w.page_backend_cfg.local_dir_edit.setText("/nonexistent/path/abc123")
+        w.page_backend_cfg._test_connection()
+        assert w.page_backend_cfg._test_passed is False
+        assert "失败" in w.page_backend_cfg.test_status.text()
+
+    def test_backend_config_incomplete_without_test(self, qtbot, tmp_path):
+        """未通过测试连接时 isComplete 返回 False。"""
+        root = tmp_path / "vault_root"
+        root.mkdir()
+        w = _make_wizard(qtbot)
+        w.backend_type = "local"
+        w.page_backend_cfg.local_dir_edit.setText(str(root))
+        # 未点击测试连接
+        assert w.page_backend_cfg._test_passed is False
+        assert w.page_backend_cfg.isComplete() is False
+
+    def test_backend_config_config_changed_resets_test(self, qtbot, tmp_path):
+        """配置变更后测试状态被重置。"""
+        root = tmp_path / "vault_root"
+        root.mkdir()
+        w = _make_wizard(qtbot)
+        w.backend_type = "local"
+        w.page_backend_cfg.local_dir_edit.setText(str(root))
+        w.page_backend_cfg._test_passed = True
+        # 修改配置 -> 测试状态重置
+        w.page_backend_cfg.local_dir_edit.setText(str(root) + "/sub")
+        assert w.page_backend_cfg._test_passed is False
