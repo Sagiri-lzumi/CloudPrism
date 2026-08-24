@@ -1,4 +1,4 @@
-"""金库管理器：新建 / 连接金库的核心流程（非 GUI）。
+"""Mi库管理器：新建 / 连接Mi库的核心流程（非 GUI）。
 
 - 新建：生成 VaultMetadata（随机 vault_id/salt/iv）-> 创建 Vault Marker ->
   上传到后端根目录
@@ -17,11 +17,11 @@ from cloudprism.storage.backend import StorageBackend
 
 
 class VaultError(Exception):
-    """金库操作异常。"""
+    """Mi库操作异常。"""
 
 
 class VaultManager:
-    """金库生命周期管理。"""
+    """Mi库生命周期管理。"""
 
     def __init__(self, backend: StorageBackend) -> None:
         self.backend = backend
@@ -53,7 +53,7 @@ class VaultManager:
         master_password: str,
         filename_enc: bool,
     ) -> VaultMetadata:
-        """新建金库：生成并上传 Vault Marker。
+        """新建Mi库：生成并上传 Vault Marker。
 
         参数:
             master_password: 用户主密码
@@ -63,10 +63,10 @@ class VaultManager:
             VaultMetadata
 
         异常:
-            VaultError: 后端已存在金库（防止覆盖）
+            VaultError: 后端已存在Mi库（防止覆盖）
         """
         if self.has_vault():
-            raise VaultError("后端已存在金库，请选择「连接」或更换后端")
+            raise VaultError("后端已存在Mi库，请选择「连接」或更换后端")
 
         meta = VaultMarker.generate_metadata(filename_enc=filename_enc)
         data = VaultMarker.create(meta, master_password)
@@ -96,10 +96,10 @@ class VaultManager:
     # ------------------------------------------------------------------
 
     def open_vault(self, master_password: str) -> VaultMetadata | None:
-        """连接金库：下载并校验 Vault Marker。
+        """连接Mi库：下载并校验 Vault Marker。
 
         返回:
-            校验通过返回 VaultMetadata；密码错误或无金库返回 None
+            校验通过返回 VaultMetadata；密码错误或无Mi库返回 None
         """
         data = self._download_marker()
         if data is None:

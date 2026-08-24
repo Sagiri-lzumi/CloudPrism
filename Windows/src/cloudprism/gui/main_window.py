@@ -1,151 +1,190 @@
-"""主窗口。
+"""CloudPrism 主窗口（IDE 风格三栏布局）。
 
-菜单 + 目录树视图 + 状态栏的骨架。上传/下载/播放/初始化向导等动作用
-信号占位（后续步骤连接 TransferWorker / PlayerView / InitWizard）。
+布局：
+  +------+-----------------+------------------------------------------+
+  |      |                 |                                          |
+  | 活动 |   侧面板        |           预览区                          |
+  | 栏   |                 |                                          |
+  |      | [文件] [传输]    |  - 视频/音频: 内嵌播放器                  |
+  | [文件]| 文件树          |  - 图片: 图片查看器                       |
+  | [传输]| 上传/下载进度   |  - 文本: 文本查看器                       |
+  | [设置]| 连接/缓存设置   |  - 其他: 文件信息                         |
+  |      |                 |                                          |
+  +------+-----------------+------------------------------------------+
+  | 连接状态 | 传输速度 | 缓存占用 | CPU 占用                         |
+  +-------------------------------------------------------------------+
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
-from PySide6.QtGui import QAction
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMenu,
+    QMenuBar,
+    QMessageBox,
+    QSplitter,
     QStatusBar,
-    QTreeView,
+    QWidget,
 )
 
-from cloudprism.gui.dir_tree_model import DirTreeModel
-from cloudprism.storage.backend import StorageBackend
+from cloudprism.gui.activity_bar import ActivityBar
+from cloudprism.gui.perf_monitor import format_cache, format_cpu, format_speed
+from cloudprism.gui.preview_panel import PreviewPanel
+from cloudprism.gui.side_panel import SidePanel
 
 
 class MainWindow(QMainWindow):
     """CloudPrism 主窗口。"""
 
     # ---- 占位信号：后续步骤连接 ----
-    # 初始化/连接金库请求（InitWizard 接管）
+    # 初始化/连接Mi库请求（InitWizard 接管）
     initRequested = Signal()
     # 上传请求（参数：选中的后端路径，None = 未选中）
     uploadRequested = Signal(str)
     # 下载请求（参数：选中的后端路径）
     downloadRequested = Signal(str)
-    # 流式播放请求（参数：选中的后端路径）
+    # 播放请求（参数：选中的后端路径）
     playRequested = Signal(str)
 
-    def __init__(
-        self,
-        backend: StorageBackend | None = None,
-        name_decryptor=None,
-        parent=None,
-    ) -> None:
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("CloudPrism - 端到端加密云盘")
-        self.resize(900, 600)
+        self.setWindowTitle("CloudPrism")
+        self.resize(1200, 700)
 
-        self._backend = backend
-        self._model: DirTreeModel | None = None
-
-        # ---- 中央目录树 ----
-        self.tree = QTreeView(self)
-        self.tree.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        # 懒加载由视图自动触发 canFetchMore/fetchMore
-        self.tree.setUniformRowHeights(True)
-        self.setCentralWidget(self.tree)
-
-        # ---- 状态栏 ----
-        self.status = QStatusBar(self)
-        self.setStatusBar(self.status)
-        self._status_label = QLabel("未连接", self)
-        self.status.addWidget(self._status_label)
-
-        # ---- 菜单 ----
         self._build_menus()
+        self._build_central()
+        self._build_status_bar()
 
-        # 有后端则立即装载数据
-        if backend is not None:
-            self.set_backend(backend, name_decryptor)
-
-    # ------------------------------------------------------------------
-    # 构建
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # 菜单
+    # ==================================================================
 
     def _build_menus(self) -> None:
         """构建菜单栏。"""
-        # 金库菜单：初始化/连接、刷新
-        vault_menu = QMenu("金库(&V)", self)
-        init_action = QAction("初始化/连接(&I)...", self)
+        menu_bar: QMenuBar = self.menuBar()
+
+        # Mi库菜单：初始化/连接、刷新
+        vault_menu = QMenu("Mi库(&M)", self)
+        init_action = vault_menu.addAction("初始化/连接(&I)...")
         init_action.triggered.connect(self.initRequested.emit)
-        vault_menu.addAction(init_action)
         vault_menu.addSeparator()
-        refresh_action = QAction("刷新(&R)", self)
-        refresh_action.triggered.connect(self.refresh)
-        vault_menu.addAction(refresh_action)
-        self.menuBar().addMenu(vault_menu)
+        refresh_action = vault_menu.addAction("刷新(&R)")
+        refresh_action.triggered.connect(self._refresh_tree)
+        menu_bar.addMenu(vault_menu)
 
-        # 文件菜单：上传、下载（占位）
+        # 文件菜单：上传、下载
         file_menu = QMenu("文件(&F)", self)
-        upload_action = QAction("上传(&U)...", self)
-        upload_action.triggered.connect(
-            lambda: self.uploadRequested.emit(self._selected_remote_path() or "")
-        )
-        file_menu.addAction(upload_action)
-        download_action = QAction("下载(&D)...", self)
-        download_action.triggered.connect(
-            lambda: self.downloadRequested.emit(self._selected_remote_path() or "")
-        )
-        file_menu.addAction(download_action)
-        file_menu.addSeparator()
-        quit_action = QAction("退出(&Q)", self)
-        quit_action.triggered.connect(self.close)
-        file_menu.addAction(quit_action)
-        self.menuBar().addMenu(file_menu)
+        upload_action = file_menu.addAction("上传(&U)...")
+        upload_action.triggered.connect(lambda: self.uploadRequested.emit(self._selected_path()))
+        download_action = file_menu.addAction("下载(&D)...")
+        download_action.triggered.connect(lambda: self.downloadRequested.emit(self._selected_path()))
+        menu_bar.addMenu(file_menu)
 
-        # 播放菜单：流式播放（占位）
+        # 播放菜单
         play_menu = QMenu("播放(&P)", self)
-        play_action = QAction("流式播放(&M)", self)
-        play_action.triggered.connect(
-            lambda: self.playRequested.emit(self._selected_remote_path() or "")
-        )
-        play_menu.addAction(play_action)
-        self.menuBar().addMenu(play_menu)
+        play_action = play_menu.addAction("播放当前(&P)")
+        play_action.triggered.connect(lambda: self.playRequested.emit(self._selected_path()))
+        menu_bar.addMenu(play_menu)
 
-    # ------------------------------------------------------------------
-    # 后端与数据
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # 中央区域：活动栏 + 侧面板 + 预览面板
+    # ==================================================================
 
-    def set_backend(
-        self, backend: StorageBackend, name_decryptor=None
+    def _build_central(self) -> None:
+        """构建三栏 IDE 布局。"""
+        central = QWidget(self)
+        main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # 活动栏（固定宽度）
+        self.activity_bar = ActivityBar(central)
+        main_layout.addWidget(self.activity_bar)
+
+        # 分隔器：侧面板 | 预览面板
+        self.splitter = QSplitter(Qt.Horizontal, central)
+        self.side_panel = SidePanel(central)
+        self.preview_panel = PreviewPanel(central)
+        self.splitter.addWidget(self.side_panel)
+        self.splitter.addWidget(self.preview_panel)
+        # 初始比例：侧面板 1/3，预览 2/3
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 2)
+        main_layout.addWidget(self.splitter, stretch=1)
+
+        self.setCentralWidget(central)
+
+        # 活动栏切换 -> 侧面板页面切换
+        self.activity_bar.currentChanged.connect(self.side_panel.show_page)
+
+    # ==================================================================
+    # 状态栏：连接状态 + 传输速度 + 缓存占用 + CPU 占用
+    # ==================================================================
+
+    def _build_status_bar(self) -> None:
+        """构建多段状态栏。"""
+        sb = QStatusBar(self)
+        self.setStatusBar(sb)
+
+        # 左侧：连接状态
+        self._status_conn = QLabel("未连接")
+        sb.addWidget(self._status_conn)
+
+        # 右侧：性能指标
+        self._status_speed = QLabel("速度: --")
+        sb.addPermanentWidget(self._status_speed)
+
+        self._status_cache = QLabel("缓存: --")
+        sb.addPermanentWidget(self._status_cache)
+
+        self._status_cpu = QLabel("CPU: --")
+        sb.addPermanentWidget(self._status_cpu)
+
+    def update_perf_stats(
+        self,
+        speed_mb: float,
+        cache_bytes: int,
+        cpu_pct: float,
     ) -> None:
-        """（重新）设置后端并装载目录树。"""
-        self._backend = backend
-        self._model = DirTreeModel(backend, name_decryptor=name_decryptor)
-        self.tree.setModel(self._model)
-        self._status_label.setText("已连接")
+        """更新状态栏性能指标（由 PerfMonitor 信号触发）。"""
+        self._status_speed.setText(format_speed(speed_mb))
+        self._status_cache.setText(format_cache(cache_bytes))
+        self._status_cpu.setText(format_cpu(cpu_pct))
 
-    def refresh(self) -> None:
-        """刷新目录树。"""
-        if self._model is not None:
-            self._model.reload()
-            # 重新装载触发根目录懒加载
-            self.tree.expand(self.tree.model().index(0, 0))
+    def set_connected(self, connected: bool) -> None:
+        """更新连接状态显示。"""
+        self._status_conn.setText("已连接" if connected else "未连接")
 
-    # ------------------------------------------------------------------
-    # 选中与状态
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # 辅助
+    # ==================================================================
 
-    def _selected_remote_path(self) -> str | None:
-        """当前选中条目的后端相对路径（未选中返回 None）。"""
-        if self._model is None:
-            return None
-        idx = self.tree.currentIndex()
-        node = self._model.node_for_index(idx)
-        if node is None:
-            return None
-        return self._model._remote_path(node)
+    def _selected_path(self) -> str:
+        """获取当前文件树选中路径（占位，后续步骤完善）。"""
+        return ""
 
-    def set_status(self, text: str) -> None:
-        """更新状态栏文本。"""
-        self._status_label.setText(text)
+    def _refresh_tree(self) -> None:
+        """刷新文件树（占位，后续步骤完善）。"""
+        pass
+
+    # ==================================================================
+    # 便捷属性（供 AppController 访问）
+    # ==================================================================
+
+    @property
+    def file_tree(self):
+        """文件树视图。"""
+        return self.side_panel.files_page.tree
+
+    @property
+    def transfers_page(self):
+        """传输队列页。"""
+        return self.side_panel.transfers_page
+
+    @property
+    def settings_page(self):
+        """设置页。"""
+        return self.side_panel.settings_page

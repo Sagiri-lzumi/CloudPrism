@@ -146,7 +146,7 @@ class DirTreeModel(QAbstractItemModel):
         if node is None or node.loaded:
             return
         entries = self.backend.list_dir(self._remote_path(node))
-        # 过滤金库标识文件（系统内部文件，不在界面展示）
+        # 过滤Mi库标识文件（系统内部文件，不在界面展示）
         entries = [
             e for e in entries if e.name != constants.VAULT_MARKER_NAME
         ]

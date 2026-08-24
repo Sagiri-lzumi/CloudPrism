@@ -1,11 +1,14 @@
-"""流式预览播放器。
+"""流式预览播放器组件。
 
-PlayerView 组合本地解密代理与 QMediaPlayer：
+PlayerWidget（QWidget）：可嵌入的流式解密播放器，供预览面板使用。
+PlayerView（QDialog）：独立窗口包装，向后兼容测试与旧调用方式。
+
+工作原理：
   1. 启动 DecryptingProxyServer（本地 HTTP）
   2. 把代理 URL 喂给 QMediaPlayer（播放器按 Range 请求按需拉流）
   3. 播放器 Seek -> 新 Range 请求 -> 代理即时换算密文偏移解密
 
-明文仅在内存中流动，不落盘；关闭窗口即停止代理与播放。
+明文仅在内存中流动，不落盘。
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSlider,
     QVBoxLayout,
+    QWidget,
 )
 
 from cloudprism.core.session import Session
@@ -29,8 +33,12 @@ from cloudprism.storage.backend import StorageBackend
 from cloudprism.streaming.proxy_server import start_proxy, stop_proxy
 
 
-class PlayerView(QDialog):
-    """流式解密播放窗口（视频/音频通用）。"""
+class PlayerWidget(QWidget):
+    """可嵌入的流式解密播放器组件。
+
+    保留全部播放控制逻辑（代理启停、Range、Seek），
+    代理生命周期由外部（PreviewPanel 或 PlayerView）管理。
+    """
 
     def __init__(
         self,
@@ -40,8 +48,6 @@ class PlayerView(QDialog):
         parent=None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(f"播放 - {remote_path.rsplit('/', 1)[-1]}")
-        self.resize(720, 480)
 
         self._session = session
         self._backend = backend
@@ -74,6 +80,7 @@ class PlayerView(QDialog):
         controls.addWidget(self._time_label)
 
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.video_widget, stretch=1)
         lay.addLayout(controls)
 
@@ -128,13 +135,48 @@ class PlayerView(QDialog):
             self._play_btn.setText("播放")
 
     # ------------------------------------------------------------------
-    # 生命周期
+    # 代理管理（供外部调用）
     # ------------------------------------------------------------------
+
+    def stop_proxy(self) -> None:
+        """停止代理（释放端口）。"""
+        self.player.stop()
+        stop_proxy(self._server)
+
+
+class PlayerView(QDialog):
+    """独立播放窗口（向后兼容）。
+
+    内部使用 PlayerWidget，保留原有 QDialog 行为。
+    """
+
+    def __init__(
+        self,
+        session: Session,
+        backend: StorageBackend,
+        remote_path: str,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"播放 - {remote_path.rsplit('/', 1)[-1]}")
+        self.resize(720, 480)
+
+        self._remote_path = remote_path
+
+        # 内嵌 PlayerWidget
+        self._widget = PlayerWidget(session, backend, remote_path, self)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self._widget)
+
+    @property
+    def media_url(self) -> str:
+        """播放器实际请求的本地代理 URL（测试与调试用）。"""
+        return self._widget.media_url
 
     def closeEvent(self, event) -> None:  # noqa: N802
         """关闭：停止播放并停掉代理（释放端口）。"""
-        self.player.stop()
-        stop_proxy(self._server)
+        self._widget.stop_proxy()
         super().closeEvent(event)
 
 

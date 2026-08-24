@@ -1,7 +1,7 @@
 """初始化向导。
 
 四步向导：
-  1. 模式：新建金库 / 连接已有金库
+  1. 模式：新建Mi库 / 连接已有Mi库
   2. 后端：本地文件夹（选择目录） / WebDAV（URL+账号密码）
   3. 主密码：新建时输入+二次确认；连接时单次输入
   4. 文件名加密开关：仅新建模式（不可逆提示）；连接模式自动跳过
@@ -48,11 +48,11 @@ class ModePage(QWizardPage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setTitle("初始化 CloudPrism")
-        self.setSubTitle("选择新建金库，或连接已有加密云盘")
+        self.setSubTitle("选择新建Mi库，或连接已有加密云盘")
 
         lay = QVBoxLayout(self)
-        self.radio_new = QRadioButton("新建金库（首次使用，设置主密码）", self)
-        self.radio_connect = QRadioButton("连接已有金库（输入主密码验证）", self)
+        self.radio_new = QRadioButton("新建Mi库（首次使用，设置主密码）", self)
+        self.radio_connect = QRadioButton("连接已有Mi库（输入主密码验证）", self)
         self.radio_new.setChecked(True)
         group = QButtonGroup(self)
         group.addButton(self.radio_new)
@@ -202,7 +202,7 @@ class FilenameEncPage(QWizardPage):
         # 不可逆警告
         warn = QLabel(
             "⚠ 此选择初始化后【无法中途修改】！\n"
-            "如需变更必须新建金库并重新加密上传所有文件。",
+            "如需变更必须新建Mi库并重新加密上传所有文件。",
             self,
         )
         warn.setStyleSheet("color: #b00; font-weight: bold;")
@@ -274,18 +274,18 @@ class InitWizard(QWizard):
         vm = VaultManager(backend)
 
         if self.is_new_mode():
-            # 新建金库
+            # 新建Mi库
             filename_enc = self.page_enc.radio_on.isChecked()
             try:
                 meta = vm.create_vault(pw, filename_enc)
             except Exception as e:
-                self._error(f"新建金库失败：{e}")
+                self._error(f"新建Mi库失败：{e}")
                 return
         else:
-            # 连接已有金库
+            # 连接已有Mi库
             meta = vm.open_vault(pw)
             if meta is None:
-                self._error("密码错误或后端无金库，请检查后重试")
+                self._error("密码错误或后端无Mi库，请检查后重试")
                 return
 
         self.backend = backend

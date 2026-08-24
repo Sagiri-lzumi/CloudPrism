@@ -122,44 +122,62 @@ class TestDirTreeModel:
 
 
 class TestMainWindow:
-    """主窗口骨架。"""
+    """主窗口骨架（IDE 风格）。"""
 
-    def test_construct_with_backend(self, qtbot, local_backend):
-        """带后端构造：菜单齐备，目录树装载。"""
-        win = MainWindow(backend=local_backend)
-        qtbot.addWidget(win)
-        # 菜单存在
-        titles = [m.text() for m in win.menuBar().actions()]
-        assert any("金库" in t for t in titles)
-        assert any("文件" in t for t in titles)
-        assert any("播放" in t for t in titles)
-        # 状态栏已连接
-        assert win._status_label.text() == "已连接"
-
-    def test_construct_without_backend(self, qtbot):
-        """无后端构造：显示未连接，不崩溃。"""
+    def test_construct_menus(self, qtbot):
+        """无后端构造：菜单齐备（Mi库/文件/播放）。"""
         win = MainWindow()
         qtbot.addWidget(win)
-        assert win._status_label.text() == "未连接"
+        titles = [m.text() for m in win.menuBar().actions()]
+        assert any("Mi库" in t for t in titles)
+        assert any("文件" in t for t in titles)
+        assert any("播放" in t for t in titles)
 
-    def test_signals_emitted(self, qtbot, local_backend):
-        """占位信号可发射（后续步骤连接）。"""
-        win = MainWindow(backend=local_backend)
+    def test_construct_status_unconnected(self, qtbot):
+        """无后端构造：状态栏显示未连接。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        assert win._status_conn.text() == "未连接"
+
+    def test_set_connected(self, qtbot):
+        """set_connected 更新连接状态。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        win.set_connected(True)
+        assert win._status_conn.text() == "已连接"
+        win.set_connected(False)
+        assert win._status_conn.text() == "未连接"
+
+    def test_signals_emitted(self, qtbot):
+        """占位信号可发射。"""
+        win = MainWindow()
         qtbot.addWidget(win)
         with qtbot.waitSignal(win.initRequested, timeout=1000):
             win.initRequested.emit()
 
-    def test_set_backend_replaces_model(self, qtbot, local_backend):
-        """set_backend 重新装载模型。"""
+    def test_activity_bar_and_side_panel(self, qtbot):
+        """活动栏与侧面板存在且可切换。"""
         win = MainWindow()
         qtbot.addWidget(win)
-        assert win._status_label.text() == "未连接"
-        win.set_backend(local_backend)
-        assert win._status_label.text() == "已连接"
-        assert win.tree.model() is not None
+        # 活动栏存在
+        assert win.activity_bar is not None
+        # 侧面板存在且可切换
+        win.side_panel.show_page("transfers")
+        assert win.side_panel.currentIndex() == win.side_panel.PAGE_TRANSFERS
+        win.side_panel.show_page("settings")
+        assert win.side_panel.currentIndex() == win.side_panel.PAGE_SETTINGS
 
-    def test_refresh_keeps_working(self, qtbot, local_backend):
-        """refresh() 不崩溃且模型重置。"""
-        win = MainWindow(backend=local_backend)
+    def test_preview_panel_welcome(self, qtbot):
+        """预览面板初始显示欢迎页。"""
+        win = MainWindow()
         qtbot.addWidget(win)
-        win.refresh()      # 不崩溃即可
+        assert win.preview_panel.currentIndex() == win.preview_panel.PAGE_WELCOME
+
+    def test_update_perf_stats(self, qtbot):
+        """状态栏性能指标更新。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        win.update_perf_stats(1.5, 1024 * 1024, 25.0)
+        assert "1.5" in win._status_speed.text()
+        assert "1.0" in win._status_cache.text()
+        assert "25" in win._status_cpu.text()

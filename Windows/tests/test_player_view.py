@@ -22,7 +22,7 @@ from cloudprism.core.encryptor import Encryptor
 from cloudprism.core.session import Session
 from cloudprism.crypto.filename import FilenameCipher
 from cloudprism.gui.main_window import MainWindow
-from cloudprism.gui.player_view import PlayerView
+from cloudprism.gui.player_view import PlayerView, PlayerWidget
 from cloudprism.storage.local_backend import LocalFolderBackend
 
 
@@ -61,7 +61,7 @@ def _http_get(url: str, headers: dict | None = None):
 
 
 class TestPlayerView:
-    """流式播放窗口。"""
+    """流式播放窗口（向后兼容）。"""
 
     def test_media_url_is_local_proxy(self, qtbot, session, backend_with_media):
         """媒体 URL 指向本地代理且路径已编码。"""
@@ -144,6 +144,31 @@ class TestPlayerView:
             assert data == plaintext[:100]
 
 
+class TestPlayerWidget:
+    """可嵌入播放器组件。"""
+
+    def test_widget_media_url(self, qtbot, session, backend_with_media):
+        """PlayerWidget 的媒体 URL 指向本地代理。"""
+        backend, _ = backend_with_media
+        widget = PlayerWidget(session, backend, "videos/sample.cpenc")
+        qtbot.addWidget(widget)
+        url = widget.media_url
+        assert url.startswith("http://127.0.0.1:")
+        assert "videos/sample.cpenc" in url
+        # 清理
+        widget.stop_proxy()
+
+    def test_widget_serves_plaintext(self, qtbot, session, backend_with_media):
+        """PlayerWidget 的代理返回解密明文。"""
+        backend, plaintext = backend_with_media
+        widget = PlayerWidget(session, backend, "videos/sample.cpenc")
+        qtbot.addWidget(widget)
+        status, data, _ = _http_get(widget.media_url)
+        assert status == 206
+        assert data == plaintext
+        widget.stop_proxy()
+
+
 class TestAppController:
     """应用组装。"""
 
@@ -178,7 +203,8 @@ class TestAppController:
         ctrl._apply_setup(wizard)
         assert ctrl.session is not None
         assert ctrl._require_vault() is True      # 已连接
-        assert "文件名加密" in win._status_label.text()
+        # 状态栏已连接
+        assert win._status_conn.text() == "已连接"
 
     def test_apply_setup_with_filename_enc(self, qtbot, tmp_path):
         """文件名加密开启时目录树注入解密器（显示原始名）。"""
@@ -208,7 +234,7 @@ class TestAppController:
         ctrl._apply_setup(wizard)
 
         # 目录树显示解密后的原始名
-        model = win.tree.model()
+        model = win.side_panel.files_page.tree.model()
         from PySide6.QtCore import QModelIndex, Qt
         model.fetchMore(QModelIndex())
         assert model.rowCount() == 1

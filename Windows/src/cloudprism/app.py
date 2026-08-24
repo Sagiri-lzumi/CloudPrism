@@ -1,24 +1,26 @@
 """CloudPrism Windows 客户端入口（组合根）。
 
 组装各模块：
-  MainWindow（界面骨架）
+  MainWindow（IDE 风格三栏界面）
     + InitWizard（初始化/连接，产出 session/backend/metadata）
     + TransferWorker（上传/下载，进度对话框）
-    + PlayerView（流式解密播放）
-    + DecryptingProxyServer（由 PlayerView 按需启停）
+    + PreviewPanel（内嵌预览与播放）
+    + PerfMonitor（状态栏性能指标）
 """
 
 from __future__ import annotations
 
 import sys
 
+from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from cloudprism.core.session import Session
 from cloudprism.crypto.filename import FilenameCipher
+from cloudprism.gui.dir_tree_model import DirTreeModel
 from cloudprism.gui.init_wizard import InitWizard
 from cloudprism.gui.main_window import MainWindow
-from cloudprism.gui.player_view import PlayerView
+from cloudprism.gui.perf_monitor import PerfMonitor
 from cloudprism.gui.transfer_worker import TransferWorker, start_transfer
 from cloudprism.storage.backend import StorageBackend
 
@@ -28,18 +30,34 @@ class AppController:
 
     def __init__(self, window: MainWindow) -> None:
         self.window = window
-        # 向导产出（连接金库后填充）
+        # 向导产出（连接Mi库后填充）
         self.session: Session | None = None
         self.backend: StorageBackend | None = None
         self.metadata = None
-        # 播放器窗口（同一时间一个）
-        self._player: PlayerView | None = None
+
+        # 目录树模型
+        self._tree_model: DirTreeModel | None = None
+
+        # 性能监控
+        self._perf = PerfMonitor(parent=window)
+        self._perf.statsUpdated.connect(window.update_perf_stats)
 
         # 信号接线
         window.initRequested.connect(self.show_init_wizard)
         window.uploadRequested.connect(self.upload_file)
         window.downloadRequested.connect(self.download_file)
         window.playRequested.connect(self.play_file)
+
+        # 文件树选中 -> 预览
+        window.file_tree.selectionModel().selectionChanged.connect(
+            self._on_tree_selection
+        ) if window.file_tree.selectionModel() else None
+
+        # 设置页更新连接信息
+        window.settings_page.cacheSettingsChanged.connect(self._on_cache_settings_changed)
+
+        # 启动性能监控
+        self._perf.start()
 
     # ------------------------------------------------------------------
     # 初始化 / 连接
@@ -67,11 +85,57 @@ class AppController:
                 key = self.session.derive_key(salt)
                 return FilenameCipher.decrypt(enc_name, key)
 
-        self.window.set_backend(self.backend, name_decryptor=name_decryptor)
-        mode = "新建" if wizard.is_new_mode() else "连接"
-        self.window.set_status(
-            f"{mode}成功 · 文件名加密：{'开' if self.metadata.filename_enc else '关'}"
+        # 装载目录树模型
+        self._tree_model = DirTreeModel(self.backend, name_decryptor=name_decryptor)
+        self.window.side_panel.files_page.set_model(self._tree_model)
+
+        # 连接文件树选中信号
+        sel_model = self.window.file_tree.selectionModel()
+        if sel_model:
+            sel_model.selectionChanged.connect(self._on_tree_selection)
+
+        # 更新状态栏
+        self.window.set_connected(True)
+
+        # 更新设置页连接信息
+        backend_type = type(self.backend).__name__
+        backend_path = getattr(self.backend, "_root", "") or getattr(self.backend, "_url", "")
+        self.window.settings_page.update_connection_info(
+            backend_type=backend_type,
+            backend_path=backend_path,
+            filename_enc=self.metadata.filename_enc,
         )
+        self.window.settings_page._refresh_cache_usage()
+
+    # ------------------------------------------------------------------
+    # 文件树选中 -> 预览
+    # ------------------------------------------------------------------
+
+    def _on_tree_selection(self, selected, deselected) -> None:
+        """文件树选中变更：更新预览面板。"""
+        indexes = selected.indexes()
+        if not indexes or self.session is None or self.backend is None:
+            self.window.preview_panel.show_welcome()
+            return
+
+        index = indexes[0]
+        node = index.internalPointer()
+        if node is None or node.is_dir:
+            self.window.preview_panel.show_welcome()
+            return
+
+        remote_path = self._build_remote_path(node)
+        self.window.preview_panel.show_file(self.session, self.backend, remote_path)
+
+    def _build_remote_path(self, node) -> str:
+        """从树节点构建远端路径。"""
+        parts = []
+        current = node
+        while current is not None and current.name:
+            parts.append(current.name)
+            current = current.parent
+        parts.reverse()
+        return "/".join(parts)
 
     # ------------------------------------------------------------------
     # 上传 / 下载
@@ -92,7 +156,7 @@ class AppController:
                     path, remote,
                 )
                 dlg.exec()
-                self.window.refresh()
+                self._refresh_tree()
 
     def download_file(self, remote_path: str = "") -> None:
         """选择保存位置 -> 下载解密选中文件。"""
@@ -116,28 +180,37 @@ class AppController:
     # ------------------------------------------------------------------
 
     def play_file(self, remote_path: str = "") -> None:
-        """流式播放选中的加密媒体文件。"""
+        """在预览面板中播放选中的加密媒体文件。"""
         if self._require_vault() and remote_path:
-            # 关闭旧播放窗口（同时停旧代理）
-            if self._player is not None:
-                self._player.close()
-            self._player = PlayerView(
-                self.session, self.backend, remote_path, parent=self.window
+            self.window.preview_panel.show_media(
+                self.session, self.backend, remote_path
             )
-            self._player.show()
+
+    # ------------------------------------------------------------------
+    # 缓存设置
+    # ------------------------------------------------------------------
+
+    def _on_cache_settings_changed(self, limit_mb: int, cache_path: str) -> None:
+        """缓存设置变更：更新性能监控的缓存路径。"""
+        self._perf.set_cache_path(cache_path)
 
     # ------------------------------------------------------------------
     # 辅助
     # ------------------------------------------------------------------
 
     def _require_vault(self) -> bool:
-        """未连接金库时提示并返回 False。"""
+        """未连接Mi库时提示并返回 False。"""
         if self.session is None or self.backend is None:
             QMessageBox.information(
-                self.window, "提示", "请先通过「金库 - 初始化/连接」连接云盘"
+                self.window, "提示", "请先通过「Mi库 - 初始化/连接」连接云盘"
             )
             return False
         return True
+
+    def _refresh_tree(self) -> None:
+        """刷新文件树。"""
+        if self._tree_model is not None:
+            self._tree_model.reload()
 
 
 def main() -> int:
@@ -147,6 +220,8 @@ def main() -> int:
     controller = AppController(window)  # noqa: F841  控制器需保持引用
     window.show()
     exit_code = app.exec()
+    # 停止性能监控
+    controller._perf.stop()
     # 退出时清零主密码与派生密钥，防止内存残留
     if controller.session is not None:
         controller.session.close()
