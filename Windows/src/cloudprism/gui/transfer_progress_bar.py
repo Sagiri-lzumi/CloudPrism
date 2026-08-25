@@ -70,6 +70,8 @@ class TransferProgressBar(QWidget):
         self._current_index = 0
         self._total_count = 0
         self._current_cancel_fn = None  # 当前任务的取消函数
+        self._last_name = ""            # 最近一次任务名（完成后展示用）
+        self._hide_timer = None         # 完成后延迟隐藏的定时器
 
     # ------------------------------------------------------------------
     # 公开方法
@@ -95,6 +97,7 @@ class TransferProgressBar(QWidget):
         self._current_index = current
         self._total_count = total
         self._current_cancel_fn = cancel_fn
+        self._last_name = file_name
 
         action = "加密上传" if direction == "upload" else "下载解密"
         self._name_label.setText(f"{action}：{file_name}")
@@ -104,6 +107,9 @@ class TransferProgressBar(QWidget):
         else:
             self._queue_label.setText("")
 
+        # 新任务开始：取消待定的隐藏
+        if self._hide_timer is not None:
+            self._hide_timer.stop()
         self._bar.setValue(0)
         self._cancel_btn.setEnabled(True)
         self._cancel_btn.setText("取消")
@@ -114,13 +120,24 @@ class TransferProgressBar(QWidget):
         self._bar.setValue(int(progress * 100))
 
     def task_finished(self, success: bool = True) -> None:
-        """当前任务完成或失败。"""
+        """当前任务完成或失败；全部结束时短暂停留展示结果后隐藏。"""
         if success:
             self._bar.setValue(100)
-        # 如果还有后续任务，由外部调用 show_task 更新
-        # 否则隐藏
         if self._current_index >= self._total_count:
-            self._finish_all()
+            # 本批全部结束：展示结果并停留 3 秒后隐藏（避免瞬间消失）
+            suffix = f"：{self._last_name}" if self._last_name else ""
+            self._name_label.setText(
+                ("✓ 传输完成" if success else "✗ 传输失败") + suffix
+            )
+            self._queue_label.setText("")
+            self._cancel_btn.setEnabled(False)
+            from PySide6.QtCore import QTimer
+
+            if self._hide_timer is None:
+                self._hide_timer = QTimer(self)
+                self._hide_timer.setSingleShot(True)
+                self._hide_timer.timeout.connect(self._finish_all)
+            self._hide_timer.start(3000)
 
     def hide_bar(self) -> None:
         """强制隐藏进度条。"""
@@ -131,9 +148,11 @@ class TransferProgressBar(QWidget):
     # ------------------------------------------------------------------
 
     def _finish_all(self) -> None:
-        """所有任务完成，隐藏进度条。"""
+        """所有任务完成，隐藏进度条并重置状态。"""
         self.setVisible(False)
         self._current_cancel_fn = None
+        self._last_name = ""
+        self._queue_label.setText("")
         self._bar.setValue(0)
 
     def _on_cancel(self) -> None:

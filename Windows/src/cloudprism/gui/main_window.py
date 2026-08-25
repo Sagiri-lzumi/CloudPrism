@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal, Qt
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -48,9 +49,11 @@ class MainWindow(QMainWindow):
 
     # ---- 信号 ----
     initRequested = Signal()
-    uploadRequested = Signal(str)
-    downloadRequested = Signal(str)
+    uploadRequested = Signal(str)     # 参数：目标目录（选中文件时为其所在目录）
+    downloadRequested = Signal(str)   # 参数：选中文件路径（空串表示未选中）
     playRequested = Signal(str)
+    refreshRequested = Signal()       # 刷新文件树（菜单/快捷键）
+    lockRequested = Signal()          # 锁定密库（菜单/快捷键）
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -75,22 +78,28 @@ class MainWindow(QMainWindow):
         init_action.triggered.connect(self.initRequested.emit)
         vault_menu.addSeparator()
         refresh_action = vault_menu.addAction("刷新(&R)")
-        refresh_action.triggered.connect(self._refresh_tree)
+        refresh_action.setShortcut(QKeySequence("F5"))
+        refresh_action.triggered.connect(self.refreshRequested.emit)
+        lock_action = vault_menu.addAction("锁定密库(&L)")
+        lock_action.setShortcut(QKeySequence("Ctrl+L"))
+        lock_action.triggered.connect(self.lockRequested.emit)
         menu_bar.addMenu(vault_menu)
 
-        # 文件菜单
+        # 文件菜单（快捷键：Ctrl+U 上传 / Ctrl+D 下载）
         file_menu = QMenu("文件(&F)", self)
         upload_action = file_menu.addAction("上传(&U)...")
+        upload_action.setShortcut(QKeySequence("Ctrl+U"))
         upload_action.triggered.connect(
-            lambda: self.uploadRequested.emit(self._selected_path())
+            lambda: self.uploadRequested.emit(self._selected_remote_dir())
         )
         download_action = file_menu.addAction("下载(&D)...")
+        download_action.setShortcut(QKeySequence("Ctrl+D"))
         download_action.triggered.connect(
             lambda: self.downloadRequested.emit(self._selected_path())
         )
         menu_bar.addMenu(file_menu)
 
-        # 播放菜单
+        # 播放菜单（双击文件树文件同样触发预览）
         play_menu = QMenu("播放(&P)", self)
         play_action = play_menu.addAction("播放当前(&P)")
         play_action.triggered.connect(
@@ -220,12 +229,41 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _selected_path(self) -> str:
-        """获取当前文件树选中路径。"""
-        return ""
+        """获取当前文件树选中项的远端路径（未选中返回空串）。"""
+        indexes = self.file_tree.selectedIndexes()
+        if not indexes:
+            return ""
+        node = indexes[0].internalPointer()
+        if node is None:
+            return ""
+        # 沿父链拼接后端原始名（文件名加密时为密文名）
+        parts: list[str] = []
+        cur = node
+        while cur is not None and cur.name:
+            parts.append(cur.name)
+            cur = cur.parent
+        parts.reverse()
+        return "/".join(parts)
 
-    def _refresh_tree(self) -> None:
-        """刷新文件树。"""
-        pass
+    def _selected_remote_dir(self) -> str:
+        """上传目标目录：选中目录本身，选中文件则为其所在目录。"""
+        indexes = self.file_tree.selectedIndexes()
+        if not indexes:
+            return ""
+        node = indexes[0].internalPointer()
+        if node is None:
+            return ""
+        if not node.is_dir:
+            node = node.parent
+        if node is None:
+            return ""
+        parts: list[str] = []
+        cur = node
+        while cur is not None and cur.name:
+            parts.append(cur.name)
+            cur = cur.parent
+        parts.reverse()
+        return "/".join(parts)
 
     # ==================================================================
     # 便捷属性

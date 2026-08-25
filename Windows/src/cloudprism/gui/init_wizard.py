@@ -32,7 +32,12 @@ from PySide6.QtWidgets import (
 
 from cloudprism.core.session import Session
 from cloudprism.core.vault_manager import VaultManager
+from cloudprism.gui.baidu_auth import BaiduAuthDialog
 from cloudprism.storage.backend import StorageBackend
+from cloudprism.storage.baidu_backend import (
+    BaiduCredentialStore,
+    BaiduNetdiskBackend,
+)
 from cloudprism.storage.local_backend import LocalFolderBackend
 from cloudprism.storage.webdav_backend import WebDavBackend
 
@@ -86,22 +91,18 @@ class BackendTypePage(QWizardPage):
         # WebDAV
         self.radio_webdav = QRadioButton("WebDAV（填写服务器地址与账号）", self)
 
-        # 更多云盘 API（预留占位，暂不可用）
-        self.radio_more = QRadioButton("更多云盘 API（阿里云盘、百度网盘等）", self)
-        self.radio_more.setEnabled(False)
-        more_hint = QLabel("即将推出，敬请期待…", self)
-        more_hint.setStyleSheet("color: #5c5c5c; margin-left: 20px;")
+        # 百度网盘（需在开放平台申请应用凭证，见 Plan/百度网盘开放平台申请指南.md）
+        self.radio_baidu = QRadioButton("百度网盘（需开放平台应用凭证）", self)
 
         group = QButtonGroup(self)
         group.addButton(self.radio_local)
         group.addButton(self.radio_webdav)
-        group.addButton(self.radio_more)
+        group.addButton(self.radio_baidu)
         group.buttonToggled.connect(self._on_type_changed)
 
         lay.addWidget(self.radio_local)
         lay.addWidget(self.radio_webdav)
-        lay.addWidget(self.radio_more)
-        lay.addWidget(more_hint)
+        lay.addWidget(self.radio_baidu)
         lay.addStretch()
 
     def _on_type_changed(self, btn, checked: bool) -> None:
@@ -115,11 +116,26 @@ class BackendTypePage(QWizardPage):
             wizard.backend_type = "local"
         elif btn == self.radio_webdav:
             wizard.backend_type = "webdav"
+        elif btn == self.radio_baidu:
+            wizard.backend_type = "baidu"
 
     def initializePage(self) -> None:
-        """确保默认值写入向导。"""
+        """恢复上次选择；默认本地文件夹。"""
         wizard = self.wizard()
-        if wizard is not None:
+        if wizard is None:
+            return
+        saved = "local"
+        store = getattr(wizard, "store", None)
+        if store is not None:
+            saved = store.backend_type() or "local"
+        if saved == "webdav":
+            self.radio_webdav.setChecked(True)
+            wizard.backend_type = "webdav"
+        elif saved == "baidu":
+            self.radio_baidu.setChecked(True)
+            wizard.backend_type = "baidu"
+        else:
+            self.radio_local.setChecked(True)
             wizard.backend_type = "local"
 
     def nextId(self) -> int:
@@ -149,6 +165,10 @@ class BackendConfigPage(QWizardPage):
         # --- 索引 1：WebDAV 配置 ---
         webdav_widget = self._build_webdav_page()
         self._stack.addWidget(webdav_widget)
+
+        # --- 索引 2：百度网盘配置 ---
+        baidu_widget = self._build_baidu_page()
+        self._stack.addWidget(baidu_widget)
 
         # 测试连接区域（所有类型共用）
         test_row = QHBoxLayout()
@@ -217,6 +237,49 @@ class BackendConfigPage(QWizardPage):
         return w
 
     # ------------------------------------------------------------------
+    # 百度网盘配置子页
+    # ------------------------------------------------------------------
+
+    def _build_baidu_page(self):
+        """构造百度网盘配置子页（引导授权，凭证加密落盘）。"""
+        from PySide6.QtWidgets import QWidget
+        w = QWidget(self)
+        lay = QVBoxLayout(w)
+        hint = QLabel(
+            "使用百度网盘需在开放平台创建应用并取得凭证\n"
+            "（Appid / AppKey / SecretKey），申请流程见\n"
+            "《Plan/百度网盘开放平台申请指南》。",
+            w,
+        )
+        hint.setStyleSheet("color: #5c5c5c;")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+
+        self.baidu_status = QLabel("尚未授权", w)
+        self.baidu_status.setStyleSheet("color: #c00;")
+        lay.addWidget(self.baidu_status)
+
+        self.baidu_auth_btn = QPushButton("授权 / 更新凭证…", w)
+        self.baidu_auth_btn.clicked.connect(self._open_baidu_auth)
+        lay.addWidget(self.baidu_auth_btn)
+        lay.addStretch()
+
+        self._baidu_creds: dict | None = None  # 授权成功后的凭证（含 token）
+        return w
+
+    def _open_baidu_auth(self) -> None:
+        """打开百度授权对话框；成功后记录凭证并刷新状态。"""
+        dlg = BaiduAuthDialog(parent=self)
+        if dlg.exec() and dlg.token_data is not None:
+            self._baidu_creds = dlg._store.load()
+            self.baidu_status.setText("✓ 已授权（凭证已加密保存）")
+            self.baidu_status.setStyleSheet("color: #0a0; font-weight: bold;")
+        self._test_passed = False
+        self.test_status.setText("请点击上方「测试连接」验证")
+        self.test_status.setStyleSheet("color: #5c5c5c;")
+        self.completeChanged.emit()
+
+    # ------------------------------------------------------------------
     # 配置变更 & 测试连接
     # ------------------------------------------------------------------
 
@@ -232,8 +295,8 @@ class BackendConfigPage(QWizardPage):
         try:
             backend = self.build_backend()
             # 本地后端：构造成功即通过（目录存在且可访问）
-            # WebDAV：尝试列出根目录验证连通性
-            if isinstance(backend, WebDavBackend):
+            # WebDAV / 百度网盘：尝试列出根目录验证连通性
+            if isinstance(backend, (WebDavBackend, BaiduNetdiskBackend)):
                 backend.list_dir("")
             self._test_passed = True
             self.test_status.setText("连接成功")
@@ -251,18 +314,37 @@ class BackendConfigPage(QWizardPage):
     def initializePage(self) -> None:
         """根据向导的 backend_type 切换到对应配置子页。"""
         wizard = self.wizard()
-        if wizard is not None:
-            idx = 0 if wizard.backend_type == "local" else 1
-            self._stack.setCurrentIndex(idx)
-            # 更新副标题提示
-            if wizard.backend_type == "local":
-                self.setSubTitle("选择本地文件夹作为云盘根目录")
-            else:
-                self.setSubTitle("填写 WebDAV 服务器地址与账号")
+        store = getattr(wizard, "store", None) if wizard else None
+        btype = wizard.backend_type if wizard else "local"
+        idx = {"local": 0, "webdav": 1, "baidu": 2}.get(btype, 0)
+        self._stack.setCurrentIndex(idx)
+        # 更新副标题提示并回填上次配置
+        if btype == "local":
+            self.setSubTitle("选择本地文件夹作为云盘根目录")
+            if store is not None and not self.local_dir_edit.text().strip():
+                self.local_dir_edit.setText(store.local_dir())
+        elif btype == "webdav":
+            self.setSubTitle("填写 WebDAV 服务器地址与账号")
+            if store is not None and not self.webdav_url_edit.text().strip():
+                self.webdav_url_edit.setText(store.webdav_url())
+                self.webdav_user_edit.setText(store.webdav_user())
+        else:
+            self.setSubTitle("完成百度网盘授权后测试连接")
+            self._refresh_baidu_status()
         # 重置测试状态
         self._test_passed = False
         self.test_status.setText("请填写信息后点击「测试连接」")
         self.test_status.setStyleSheet("color: #5c5c5c;")
+
+    def _refresh_baidu_status(self) -> None:
+        """按磁盘凭证刷新百度授权状态（用于页面进入时）。"""
+        self._baidu_creds = BaiduCredentialStore().load()
+        if self._baidu_creds and self._baidu_creds.get("access_token"):
+            self.baidu_status.setText("✓ 已授权（凭证已加密保存）")
+            self.baidu_status.setStyleSheet("color: #0a0; font-weight: bold;")
+        else:
+            self.baidu_status.setText("尚未授权")
+            self.baidu_status.setStyleSheet("color: #c00;")
 
     def isComplete(self) -> bool:  # noqa: N802
         """配置已填写且测试连接通过。"""
@@ -273,6 +355,8 @@ class BackendConfigPage(QWizardPage):
             return False
         if wizard.backend_type == "local":
             return bool(self.local_dir_edit.text().strip())
+        if wizard.backend_type == "baidu":
+            return bool(self._baidu_creds and self._baidu_creds.get("access_token"))
         return all(
             w.text().strip()
             for w in (self.webdav_url_edit, self.webdav_user_edit, self.webdav_pass_edit)
@@ -287,6 +371,22 @@ class BackendConfigPage(QWizardPage):
         backend_type = wizard.backend_type if wizard else "local"
         if backend_type == "local":
             return LocalFolderBackend(self.local_dir_edit.text().strip())
+        if backend_type == "baidu":
+            creds = self._baidu_creds or BaiduCredentialStore().load()
+            if not creds or not creds.get("access_token"):
+                raise ConnectionError(
+                    "尚未配置百度网盘凭证，请先按《百度网盘开放平台申请指南》"
+                    "申请凭证并完成授权"
+                )
+            return BaiduNetdiskBackend(
+                app_key=creds.get("app_key", ""),
+                secret_key=creds.get("secret_key", ""),
+                access_token=creds["access_token"],
+                app_id=creds.get("app_id", ""),
+                refresh_token=creds.get("refresh_token", ""),
+                expires_at=float(creds.get("expires_at", 0.0)),
+                credential_store=BaiduCredentialStore(),
+            )
         return WebDavBackend(
             self.webdav_url_edit.text().strip(),
             auth=(
@@ -379,10 +479,13 @@ class InitWizard(QWizard):
     # 完成信号（供 MainWindow 刷新界面）
     finishedSetup = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, store=None):
         super().__init__(parent)
         self.setWindowTitle("CloudPrism 初始化")
         self.setOption(QWizard.NoBackButtonOnStartPage)
+
+        # 设置持久化存储（回填上次连接参数 / 保存本次选择）
+        self.store = store
 
         # 完成后的产物
         self.session: Session | None = None
@@ -450,5 +553,21 @@ class InitWizard(QWizard):
         self.backend = backend
         self.metadata = meta
         self.session = Session(pw)
+
+        # 保存本次连接参数（密码不落盘）
+        if self.store is not None:
+            self.store.set_backend_type(self.backend_type)
+            if self.backend_type == "local":
+                self.store.set_local_dir(
+                    self.page_backend_cfg.local_dir_edit.text().strip()
+                )
+            elif self.backend_type == "webdav":
+                self.store.set_webdav_url(
+                    self.page_backend_cfg.webdav_url_edit.text().strip()
+                )
+                self.store.set_webdav_user(
+                    self.page_backend_cfg.webdav_user_edit.text().strip()
+                )
+
         self.finishedSetup.emit()
         super().accept()

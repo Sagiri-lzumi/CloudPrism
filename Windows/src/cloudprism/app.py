@@ -11,11 +11,13 @@
 from __future__ import annotations
 
 import sys
+import time
 
-from PySide6.QtCore import QModelIndex, Qt
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PySide6.QtCore import QEvent, QModelIndex, QObject, Signal, Qt, QTimer
+from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
 
 from cloudprism.core.session import Session
+from cloudprism.core.settings_store import SettingsStore
 from cloudprism.crypto.filename import FilenameCipher
 from cloudprism.gui.dir_tree_model import DirTreeModel
 from cloudprism.gui.init_wizard import InitWizard
@@ -36,10 +38,11 @@ def _human_size(n: int) -> str:
     return f"{n} B"
 
 
-class AppController:
+class AppController(QObject):
     """应用控制器：连接窗口信号与各功能模块。"""
 
     def __init__(self, window: MainWindow) -> None:
+        super().__init__(window)  # QObject 父级：随窗口销毁，支持事件过滤
         self.window = window
         # 向导产出（连接Mi库后填充）
         self.session: Session | None = None
@@ -48,6 +51,29 @@ class AppController:
 
         # 目录树模型
         self._tree_model: DirTreeModel | None = None
+
+        # 传输队列状态（串行调度：同时只有一个任务在跑）
+        self._transfer_queue: list[tuple[str, str, str, str]] = []
+        self._transfer_total = 0
+        self._transfer_current = 0
+        self._transfer_busy = False
+        self._active_threads: list = []
+        self._current_queue_item = None  # 传输队列页当前条目（TransfersPage 联动）
+
+        # 接入设置持久化存储（须在自动锁定定时器同步前完成载入）
+        self._store = SettingsStore()
+        window.settings_page.attach_store(self._store)
+
+        # 自动锁定：每 60 秒检查一次空闲时长；事件过滤器刷新最后活跃时间
+        self._last_active = time.monotonic()
+        self._lock_timer = QTimer(self.window)
+        self._lock_timer.setInterval(60_000)
+        self._lock_timer.timeout.connect(self._check_auto_lock)
+        self._setup_auto_lock()
+
+        # 密库统计后台线程引用（防回收）
+        self._stats_thread = None
+        self._stats_seq = 0  # 统计序号：仅最新一次的结果回填界面
 
         # 性能监控
         self._perf = PerfMonitor(parent=window)
@@ -58,14 +84,20 @@ class AppController:
         window.uploadRequested.connect(self.upload_file)
         window.downloadRequested.connect(self.download_file)
         window.playRequested.connect(self.play_file)
+        window.refreshRequested.connect(self._refresh_tree)
+        window.lockRequested.connect(self._lock_vault)
 
         # 文件树选中 -> 预览
         window.file_tree.selectionModel().selectionChanged.connect(
             self._on_tree_selection
         ) if window.file_tree.selectionModel() else None
 
-        # 设置页更新连接信息
+        # 设置页更新连接信息 / 重连请求 / 自动锁定变更 / 主题与字体
         window.settings_page.cacheSettingsChanged.connect(self._on_cache_settings_changed)
+        window.settings_page.reconnectRequested.connect(self.show_init_wizard)
+        window.settings_page.themeChanged.connect(self._on_theme_changed)
+        window.settings_page.fontSizeChanged.connect(self._on_font_size_changed)
+        window.settings_page.autoLockChanged.connect(self._sync_lock_timer)
 
         # 密库信息页信号
         window.vault_info_page.connectRequested.connect(self.show_init_wizard)
@@ -76,8 +108,69 @@ class AppController:
         window.file_tree.filesDropped.connect(self._on_files_dropped)
         window.file_tree.filesDraggedOut.connect(self._on_files_dragged_out)
 
+        # 文件树右键菜单信号
+        window.file_tree.downloadRequested.connect(self._ctx_download)
+        window.file_tree.uploadHereRequested.connect(self.upload_file)
+        window.file_tree.newFolderRequested.connect(self._new_folder)
+        window.file_tree.renameRequested.connect(self._rename_remote)
+        window.file_tree.deleteRequested.connect(self._delete_remote)
+        window.file_tree.refreshRequested.connect(self._refresh_tree)
+
         # 启动性能监控
         self._perf.start()
+
+    # ------------------------------------------------------------------
+    # 自动锁定
+    # ------------------------------------------------------------------
+
+    def _setup_auto_lock(self) -> None:
+        """安装事件过滤器记录用户活动，并按设置启动/停止检查定时器。"""
+        self.window.installEventFilter(self)
+        self._sync_lock_timer()
+
+    def _sync_lock_timer(self) -> None:
+        """根据设置页的自动锁定时长启停定时器。"""
+        if self.window.settings_page.auto_lock_minutes > 0:
+            self._lock_timer.start()
+        else:
+            self._lock_timer.stop()
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        """用户输入（鼠标/键盘）时刷新最后活跃时间。"""
+        etype = event.type()
+        if etype in (
+            QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove, QEvent.Type.Wheel,
+            QEvent.Type.KeyPress, QEvent.Type.KeyRelease,
+        ):
+            self._last_active = time.monotonic()
+        return False  # 不拦截事件，仅记录
+
+    def _check_auto_lock(self) -> None:
+        """定时检查：空闲超时且已连接密库时自动锁定。"""
+        minutes = self.window.settings_page.auto_lock_minutes
+        if minutes <= 0 or self.session is None:
+            return
+        if time.monotonic() - self._last_active >= minutes * 60:
+            self._lock_vault()
+
+    # ------------------------------------------------------------------
+    # 主题与字体（设置页接线）
+    # ------------------------------------------------------------------
+
+    def _on_theme_changed(self, theme: str) -> None:
+        """主题切换：当前版本仅提供浅色 Fluent 主题。"""
+        if theme == "dark":
+            QMessageBox.information(
+                self.window, "提示", "当前版本仅提供浅色主题，深色主题敬请期待"
+            )
+
+    def _on_font_size_changed(self, size: int) -> None:
+        """字体大小切换：应用到整个应用。"""
+        app = QApplication.instance()
+        if app is not None:
+            font = app.font()
+            font.setPointSize(size)
+            app.setFont(font)
 
     # ------------------------------------------------------------------
     # 初始化 / 连接
@@ -85,7 +178,7 @@ class AppController:
 
     def show_init_wizard(self) -> None:
         """弹出初始化向导；成功后装载后端与目录树。"""
-        wizard = InitWizard(self.window)
+        wizard = InitWizard(self.window, store=self._store)
         wizard.finishedSetup.connect(lambda: self._apply_setup(wizard))
         if wizard.exec() == InitWizard.Accepted and wizard.metadata is not None:
             self._apply_setup(wizard)
@@ -176,11 +269,11 @@ class AppController:
         self._upload_paths(paths, remote_dir)
 
     def upload_files(self, local_paths: list[str], remote_dir: str = "") -> None:
-        """批量上传文件（供拖放调用）。"""
+        """批量上传（供拖放调用），支持文件与文件夹。"""
         if not self._require_vault() or not local_paths:
             return
         import os
-        valid_paths = [p for p in local_paths if os.path.isfile(p)]
+        valid_paths = [p for p in local_paths if os.path.exists(p)]
         if valid_paths:
             self._upload_paths(valid_paths, remote_dir)
 
@@ -196,7 +289,7 @@ class AppController:
             )
             if path:
                 self._start_bg_transfer(
-                    TransferWorker.KIND_DOWNLOAD, path, remote_path,
+                    path, remote_path,
                     file_name=default, direction="download",
                 )
 
@@ -254,7 +347,7 @@ class AppController:
                 fname = fname[: -len(".cpenc")]
             local_path = os.path.join(save_dir, fname)
             self._start_bg_transfer(
-                TransferWorker.KIND_DOWNLOAD, local_path, rp,
+                local_path, rp,
                 file_name=fname, direction="download",
             )
 
@@ -307,90 +400,268 @@ class AppController:
             self._tree_model.reload()
 
     # ------------------------------------------------------------------
+    # 右键菜单操作（新建/重命名/删除/下载）
+    # ------------------------------------------------------------------
+
+    def _resolve_remote_path(self, display_path: str) -> str:
+        """把树上传来的路径解析为后端真实路径。
+
+        文件名加密开启时树节点展示的是解密名，需还原为密文段；
+        优先原样尝试（未加密库直接命中），否则对文件段/目录段逐级加密。
+        """
+        if self.backend is None:
+            return display_path
+        if self._exists_safe(display_path):
+            return display_path
+        if not self._is_filename_enc():
+            return display_path
+
+        segments = display_path.split("/")
+
+        def _enc_seg(seg: str) -> str:
+            try:
+                return self._encrypt_filename(seg)
+            except Exception:
+                return seg
+
+        # 文件路径：最后一段为 <原名>.cpenc 形式，加密后加扩展名；目录名直接加密
+        last = segments[-1]
+        if last.endswith(".cpenc"):
+            base = last[: -len(".cpenc")]
+            cand_file = _enc_seg(base) + ".cpenc"
+        else:
+            cand_file = _enc_seg(last)
+        enc_dirs = [_enc_seg(s) for s in segments[:-1]]
+        cand = "/".join(enc_dirs + [cand_file]) if enc_dirs else cand_file
+        if self._exists_safe(cand):
+            return cand
+
+        # 回退：目录段未加密（旧库/混合场景）
+        cand2 = "/".join(segments[:-1] + [cand_file])
+        return cand2
+
+    def _exists_safe(self, path: str) -> bool:
+        """安全判断远端路径是否存在（异常视为不存在）。"""
+        try:
+            return self.backend.exists(path)
+        except Exception:
+            return False
+
+    def _new_folder(self, display_dir: str) -> None:
+        """右键新建文件夹。"""
+        if not self._require_vault():
+            return
+        name, ok = QInputDialog.getText(
+            self.window, "新建文件夹", "文件夹名称："
+        )
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        if "/" in name:
+            QMessageBox.warning(self.window, "提示", "文件夹名称不能包含 /")
+            return
+        enc_name = self._encrypt_filename(name) if self._is_filename_enc() else name
+        base = self._resolve_remote_path(display_dir) if display_dir else ""
+        remote = f"{base}/{enc_name}" if base else enc_name
+        try:
+            self.backend.mkdir(remote)
+        except Exception as e:
+            QMessageBox.warning(self.window, "新建失败", str(e))
+            return
+        self._refresh_tree()
+
+    def _rename_remote(self, display_path: str) -> None:
+        """右键重命名（文件/目录）。"""
+        if not self._require_vault():
+            return
+        old_display = display_path.rsplit("/", 1)[-1]
+        if old_display.endswith(".cpenc"):
+            old_display = old_display[: -len(".cpenc")]
+        new_name, ok = QInputDialog.getText(
+            self.window, "重命名", "新名称：", text=old_display
+        )
+        if not ok or not new_name.strip():
+            return
+        new_name = new_name.strip()
+        if "/" in new_name:
+            QMessageBox.warning(self.window, "提示", "名称不能包含 /")
+            return
+
+        old_remote = self._resolve_remote_path(display_path)
+        is_file = old_remote.endswith(".cpenc")
+        enc_new = (
+            self._encrypt_filename(new_name) if self._is_filename_enc() else new_name
+        )
+        new_leaf = enc_new + ".cpenc" if is_file else enc_new
+        parent = old_remote.rsplit("/", 1)[0] if "/" in old_remote else ""
+        new_remote = f"{parent}/{new_leaf}" if parent else new_leaf
+        try:
+            self.backend.rename(old_remote, new_remote)
+        except Exception as e:
+            QMessageBox.warning(self.window, "重命名失败", str(e))
+            return
+        self._refresh_tree()
+
+    def _delete_remote(self, display_path: str) -> None:
+        """右键删除（弹确认框）。"""
+        if not self._require_vault():
+            return
+        name = display_path.rsplit("/", 1)[-1]
+        ret = QMessageBox.question(
+            self.window, "确认删除",
+            f"确定删除「{name}」吗？\n此操作不可撤销。",
+        )
+        if ret != QMessageBox.Yes:
+            return
+        remote = self._resolve_remote_path(display_path)
+        try:
+            self.backend.delete(remote)
+        except Exception as e:
+            QMessageBox.warning(self.window, "删除失败", str(e))
+            return
+        self._refresh_tree()
+
+    def _ctx_download(self, display_path: str) -> None:
+        """右键下载单个文件。"""
+        self.download_file(self._resolve_remote_path(display_path))
+
+    # ------------------------------------------------------------------
     # 后台传输管理
     # ------------------------------------------------------------------
 
     def _upload_paths(self, paths: list[str], remote_dir: str) -> None:
-        """批量后台上传文件列表。"""
+        """批量入队本地路径（文件或文件夹）后台加密上传。"""
         import os
-        total = len(paths)
-        self._transfer_queue: list[tuple[str, str, str, str]] = []
-        for i, path in enumerate(paths):
-            name = os.path.basename(path)
-            enc_name = self._encrypt_filename(name) if self._is_filename_enc() else name
-            remote = f"{remote_dir}/{enc_name}.cpenc" if remote_dir else f"{enc_name}.cpenc"
-            self._transfer_queue.append((path, remote, name, "upload"))
-        # 启动第一个任务
-        self._run_next_transfer()
+        tasks: list[tuple[str, str, str, str]] = []
+        for path in paths:
+            if os.path.isfile(path):
+                tasks.append(self._make_upload_task(path, remote_dir))
+            elif os.path.isdir(path):
+                tasks.extend(self._expand_dir_tasks(path, remote_dir))
+        if not tasks:
+            return
+        self._transfer_total += len(tasks)
+        self._transfer_queue.extend(tasks)
+        if not self._transfer_busy:
+            self._run_next_transfer()
+
+    def _make_upload_task(self, local_path: str, remote_dir: str) -> tuple:
+        """构造单文件上传任务：(本地路径, 远端路径, 显示名, 方向)。"""
+        import os
+        name = os.path.basename(local_path)
+        enc_name = self._encrypt_filename(name) if self._is_filename_enc() else name
+        remote = f"{remote_dir}/{enc_name}.cpenc" if remote_dir else f"{enc_name}.cpenc"
+        return (local_path, remote, name, "upload")
+
+    def _expand_dir_tasks(self, dir_path: str, remote_dir: str) -> list[tuple]:
+        """展开目录为上传任务：逐级创建远端目录后逐文件入队。
+
+        目录名按文件名加密设置处理；已存在的目录容错跳过。
+        """
+        import os
+        tasks: list[tuple] = []
+        base_name = os.path.basename(dir_path.rstrip(os.sep))
+        root_enc = self._encrypt_filename(base_name) if self._is_filename_enc() else base_name
+        root_remote = f"{remote_dir}/{root_enc}" if remote_dir else root_enc
+
+        def _mkdir_ignore(remote: str) -> None:
+            try:
+                self.backend.mkdir(remote)
+            except Exception:
+                pass  # 已存在等错误不影响后续上传
+
+        _mkdir_ignore(root_remote)
+        for dirpath, _dirnames, filenames in os.walk(dir_path):
+            rel = os.path.relpath(dirpath, dir_path).replace(os.sep, "/")
+            if rel == ".":
+                target_dir = root_remote
+            else:
+                # 子目录各段按需加密后逐级创建
+                segs = rel.split("/")
+                enc_segs = [
+                    self._encrypt_filename(s) if self._is_filename_enc() else s
+                    for s in segs
+                ]
+                target_dir = root_remote + "/" + "/".join(enc_segs)
+                _mkdir_ignore(target_dir)
+            for fname in filenames:
+                tasks.append(
+                    self._make_upload_task(os.path.join(dirpath, fname), target_dir)
+                )
+        return tasks
 
     def _start_bg_transfer(
         self,
-        kind: str,
         local_path: str,
         remote_path: str,
         file_name: str = "",
         direction: str = "upload",
     ) -> None:
-        """启动单个后台传输任务。"""
-        self._transfer_queue = [(local_path, remote_path, file_name, direction)]
-        self._run_next_transfer()
+        """入队并启动单个后台传输任务（追加式，不打断现有队列）。"""
+        self._transfer_total += 1
+        self._transfer_queue.append((local_path, remote_path, file_name, direction))
+        if not self._transfer_busy:
+            self._run_next_transfer()
 
     def _run_next_transfer(self) -> None:
-        """执行队列中的下一个传输任务。"""
-        if not hasattr(self, '_transfer_queue') or not self._transfer_queue:
+        """执行队列中的下一个传输任务（串行）。"""
+        if not self._transfer_queue:
+            self._transfer_busy = False
             return
+        self._transfer_busy = True
         local_path, remote_path, file_name, direction = self._transfer_queue.pop(0)
-        idx = len(self._transfer_queue)
-        total = idx + 1
-        # 计算当前是第几个
-        if hasattr(self, '_transfer_total'):
-            current = self._transfer_total - idx
-        else:
-            self._transfer_total = total
-            current = 1
+        self._transfer_current += 1
 
+        chunk = self.window.settings_page.chunk_size
         max_workers = self.window.settings_page.max_cores
-        kind = TransferWorker.KIND_UPLOAD if direction == "upload" else TransferWorker.KIND_DOWNLOAD
+        kind = (
+            TransferWorker.KIND_UPLOAD
+            if direction == "upload"
+            else TransferWorker.KIND_DOWNLOAD
+        )
         worker, thread = start_transfer_bg(
             kind,
             self.session, self.backend,
             local_path, remote_path,
-            max_workers=max_workers,
+            chunk=chunk, max_workers=max_workers,
             parent=self.window,
         )
-        # 保持线程引用
-        if not hasattr(self, '_active_threads'):
-            self._active_threads = []
+        # 保持线程引用防止被回收
         self._active_threads.append(thread)
-        thread.finished.connect(lambda t=thread: self._active_threads.remove(t) if t in self._active_threads else None)
+        thread.finished.connect(
+            lambda t=thread: self._active_threads.remove(t)
+            if t in self._active_threads else None
+        )
 
-        # 更新进度条
+        # 传输队列页 + 底部进度条联动（item 闭包捕获，避免被后续任务覆盖）
+        transfers_page = self.window.transfers_page
+        item = transfers_page.add_task(file_name, direction)
         self.window.transfer_progress.show_task(
             file_name, direction=direction,
-            current=current, total=self._transfer_total,
+            current=self._transfer_current, total=self._transfer_total,
             cancel_fn=worker.cancel,
         )
-        worker.progress.connect(self.window.transfer_progress.update_progress)
 
-        def _on_finished():
-            self.window.transfer_progress.task_finished(success=True)
+        def _on_progress(p: float) -> None:
+            self.window.transfer_progress.update_progress(p)
+            transfers_page.update_task(item, p)
+
+        def _finish(success: bool) -> None:
+            transfers_page.finish_task(item, success)
+            self.window.transfer_progress.task_finished(success)
             if not self._transfer_queue:
-                self._refresh_tree()
+                # 本批全部结束：重置计数并刷新文件树（上传后新文件可见）
                 self._transfer_total = 0
+                self._transfer_current = 0
+                self._transfer_busy = False
+                self._refresh_tree()
             else:
                 self._run_next_transfer()
 
-        def _on_error(msg):
-            self.window.transfer_progress.task_finished(success=False)
-            if not self._transfer_queue:
-                self._refresh_tree()
-                self._transfer_total = 0
-            else:
-                self._run_next_transfer()
-
-        worker.finished.connect(_on_finished)
-        worker.cancelled.connect(_on_finished)
-        worker.error.connect(_on_error)
+        worker.progress.connect(_on_progress)
+        worker.finished.connect(lambda: _finish(True))
+        worker.cancelled.connect(lambda: _finish(False))
+        worker.error.connect(lambda msg: _finish(False))
 
     def _refresh_vault_info(self) -> None:
         """刷新密库信息页。"""
@@ -404,14 +675,20 @@ class AppController:
         self.backend = None
         self.metadata = None
         self._tree_model = None
+        # 重置传输队列状态（进行中的任务会因会话失效而报错结束）
+        self._transfer_queue.clear()
+        self._transfer_total = 0
+        self._transfer_current = 0
+        self._transfer_busy = False
         self.window.set_connected(False)
         self.window.vault_info_page.show_disconnected()
         self.window.preview_panel.show_welcome()
+        self.window.transfer_progress.hide_bar()
         # 清空文件树模型
         self.window.side_panel.files_page.tree.setModel(None)
 
     def _update_vault_info_page(self) -> None:
-        """更新密库信息页显示。"""
+        """更新密库信息页显示（云端占用/文件数在后台线程递归统计）。"""
         if self.session is None or self.backend is None:
             self.window.vault_info_page.show_disconnected()
             return
@@ -426,23 +703,7 @@ class AppController:
         backend_type = type(self.backend).__name__
         backend_path = getattr(self.backend, "_root", "") or getattr(self.backend, "_url", "")
 
-        # 估算云端大小（遍历后端文件）
-        cloud_size = "计算中…"
-        file_count = "-"
-        try:
-            entries = self.backend.list_dir("")
-            total_size = 0
-            count = 0
-            for e in entries:
-                if not e.is_dir:
-                    total_size += e.size
-                    count += 1
-            cloud_size = _human_size(total_size)
-            file_count = str(count)
-        except Exception:
-            cloud_size = "-"
-
-        # 本地缓存大小
+        # 本地缓存大小（本地磁盘遍历，很快）
         cache_path = self.window.settings_page.cache_path
         cache_size = "-"
         import os
@@ -461,17 +722,94 @@ class AppController:
             backend_type=backend_type,
             backend_path=backend_path,
             filename_enc=self.metadata.filename_enc if self.metadata else False,
-            cloud_size=cloud_size,
+            cloud_size="计算中…",
             cache_size=cache_size,
-            file_count=file_count,
+            file_count="计算中…",
         )
+
+        # 云端占用递归统计放到后台线程，避免远程后端阻塞 UI
+        self._start_stats_worker()
+
+    def _start_stats_worker(self) -> None:
+        """后台线程递归遍历后端，统计总大小与文件数。
+
+        统计在工作线程执行，结果经 Qt 信号排队投递回主线程回填界面。
+        """
+        from PySide6.QtCore import QObject
+
+        backend = self.backend
+        if backend is None:
+            return
+        self._stats_seq += 1
+        seq = self._stats_seq
+
+        class _StatsEmitter(QObject):
+            done = Signal(int, int)  # (总字节数, 文件数)
+
+        emitter = _StatsEmitter()
+
+        def _on_done(total_size: int, count: int) -> None:
+            # 仅最新一次统计的结果才回填（避免旧结果覆盖）
+            if seq == self._stats_seq and self.session is not None:
+                self.window.vault_info_page.update_info(
+                    cloud_size=_human_size(total_size),
+                    file_count=str(count),
+                )
+
+        emitter.done.connect(_on_done)
+
+        def _bg() -> None:
+            total_size = 0
+            count = 0
+            stack = [""]
+            while stack:
+                cur = stack.pop()
+                try:
+                    entries = backend.list_dir(cur)
+                except Exception:
+                    continue
+                for e in entries:
+                    if e.is_dir:
+                        stack.append(f"{cur}/{e.name}" if cur else e.name)
+                    else:
+                        total_size += e.size
+                        count += 1
+            emitter.done.emit(total_size, count)
+
+        import threading
+
+        th = threading.Thread(target=_bg, daemon=True)
+        # 保持引用防止线程/发射器被回收
+        self._stats_thread = (th, emitter)  # type: ignore[assignment]
+        th.start()
 
 
 def main() -> int:
     """程序入口。"""
+    import os
+
     app = QApplication(sys.argv)
     # 应用 Fluent 风格主题
     apply_fluent_style(app)
+    # 恢复持久化的字体大小
+    store = SettingsStore()
+    font = app.font()
+    font.setPointSize(store.font_size())
+    app.setFont(font)
+
+    # 窗口图标：优先打包内嵌资源，其次源码目录的 assets/
+    from PySide6.QtGui import QIcon
+
+    base = getattr(sys, "_MEIPASS", os.path.join(os.path.dirname(__file__)))
+    for cand in (
+        os.path.join(base, "assets", "icon.png"),
+        os.path.join(os.path.dirname(base), "assets", "icon.png"),
+        os.path.join(base, "..", "..", "assets", "icon.png"),
+    ):
+        if os.path.exists(cand):
+            app.setWindowIcon(QIcon(cand))
+            break
+
     window = MainWindow()
     controller = AppController(window)  # noqa: F841  控制器需保持引用
     window.show()

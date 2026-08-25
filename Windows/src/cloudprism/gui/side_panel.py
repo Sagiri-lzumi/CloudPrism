@@ -162,6 +162,8 @@ class SettingsPage(QWidget):
     clearCacheRequested = Signal()
     themeChanged = Signal(str)       # "dark" / "light" / "system"
     fontSizeChanged = Signal(int)    # 12 / 14 / 16 / 18
+    reconnectRequested = Signal()    # 重新连接密库
+    autoLockChanged = Signal()       # 自动锁定时长变更（供控制器同步定时器）
 
     # 默认缓存配置
     DEFAULT_CACHE_LIMIT_MB = 512
@@ -213,7 +215,7 @@ class SettingsPage(QWidget):
 
         btn_row = QHBoxLayout()
         self._reconnect_btn = QPushButton("重新连接", self)
-        self._reconnect_btn.clicked.connect(lambda: self._reconnect_requested.emit())
+        self._reconnect_btn.clicked.connect(self.reconnectRequested.emit)
         btn_row.addWidget(self._reconnect_btn)
         btn_row.addStretch()
         conn_form.addRow(btn_row)
@@ -265,7 +267,9 @@ class SettingsPage(QWidget):
         self._concurrent_spin = QSpinBox(self)
         self._concurrent_spin.setRange(1, 4)
         self._concurrent_spin.setValue(1)
-        self._concurrent_spin.setToolTip("同时进行的传输任务数")
+        # 并发传输为预留功能：当前传输队列为串行（单任务内多核加密已可充分利用 CPU）
+        self._concurrent_spin.setEnabled(False)
+        self._concurrent_spin.setToolTip("预留功能：当前版本传输任务串行执行")
         transfer_form.addRow("并发传输数：", self._concurrent_spin)
 
         lay.addWidget(transfer_group)
@@ -305,9 +309,6 @@ class SettingsPage(QWidget):
         # 刷新缓存占用显示
         self._refresh_cache_usage()
 
-    # 内部信号
-    _reconnect_requested = Signal()
-
     # ------------------------------------------------------------------
     # 公开方法
     # ------------------------------------------------------------------
@@ -337,6 +338,78 @@ class SettingsPage(QWidget):
     def max_cores(self) -> int:
         """加密最大内核数。"""
         return self._max_cores_spin.value()
+
+    @property
+    def chunk_size(self) -> int:
+        """当前分块大小（字节）。"""
+        sizes = [256 * 1024, 512 * 1024, 1 << 20, 4 << 20]
+        idx = self._chunk_size_combo.currentIndex()
+        return sizes[idx] if 0 <= idx < len(sizes) else sizes[1]
+
+    @property
+    def auto_lock_minutes(self) -> int:
+        """自动锁定超时（分钟），0 表示从不。"""
+        minutes = [0, 5, 15, 30]
+        idx = self._auto_lock_combo.currentIndex()
+        return minutes[idx] if 0 <= idx < len(minutes) else 0
+
+    # ------------------------------------------------------------------
+    # 持久化
+    # ------------------------------------------------------------------
+
+    def attach_store(self, store) -> None:
+        """接入持久化存储：载入已保存值，并为各控件接线自动保存。"""
+        self._store = store
+
+        # 载入时屏蔽信号，避免触发副作用（如缓存信号重算）
+        widgets = (
+            self._theme_combo,
+            self._font_size_combo,
+            self._cache_limit_spin,
+            self._cache_path_edit,
+            self._chunk_size_combo,
+            self._max_cores_spin,
+            self._auto_lock_combo,
+        )
+        for w in widgets:
+            w.blockSignals(True)
+        self._theme_combo.setCurrentIndex(store.theme_index())
+        # 字体大小 -> 下拉索引（12/14/16/18）
+        sizes = [12, 14, 16, 18]
+        fs = store.font_size()
+        self._font_size_combo.setCurrentIndex(
+            sizes.index(fs) if fs in sizes else 1
+        )
+        self._cache_limit_spin.setValue(store.cache_limit_mb())
+        if store.cache_path():
+            self._cache_path_edit.setText(store.cache_path())
+        self._chunk_size_combo.setCurrentIndex(store.chunk_index())
+        saved_cores = store.max_cores()
+        if saved_cores > 0:
+            self._max_cores_spin.setValue(
+                max(self._max_cores_spin.minimum(),
+                    min(saved_cores, self._max_cores_spin.maximum()))
+            )
+        self._auto_lock_combo.setCurrentIndex(store.auto_lock_index())
+        for w in widgets:
+            w.blockSignals(False)
+        # 缓存路径可能变更，刷新占用显示与信号同步
+        self._refresh_cache_usage()
+        self._emit_cache_settings()
+
+        # 变更即保存（下次启动可恢复）
+        self._theme_combo.currentIndexChanged.connect(store.set_theme_index)
+        self._font_size_combo.currentIndexChanged.connect(
+            lambda i: store.set_font_size(sizes[i]) if 0 <= i < len(sizes) else None
+        )
+        self._cache_limit_spin.valueChanged.connect(store.set_cache_limit_mb)
+        self._cache_path_edit.textChanged.connect(store.set_cache_path)
+        self._chunk_size_combo.currentIndexChanged.connect(store.set_chunk_index)
+        self._max_cores_spin.valueChanged.connect(store.set_max_cores)
+        self._auto_lock_combo.currentIndexChanged.connect(store.set_auto_lock_index)
+        self._auto_lock_combo.currentIndexChanged.connect(
+            lambda _i: self.autoLockChanged.emit()
+        )
 
     # ------------------------------------------------------------------
     # 内部方法
