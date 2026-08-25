@@ -90,7 +90,7 @@ class BackendTypePage(QWizardPage):
         self.radio_more = QRadioButton("更多云盘 API（阿里云盘、百度网盘等）", self)
         self.radio_more.setEnabled(False)
         more_hint = QLabel("即将推出，敬请期待…", self)
-        more_hint.setStyleSheet("color: #888; margin-left: 20px;")
+        more_hint.setStyleSheet("color: #5c5c5c; margin-left: 20px;")
 
         group = QButtonGroup(self)
         group.addButton(self.radio_local)
@@ -155,7 +155,7 @@ class BackendConfigPage(QWizardPage):
         self.test_btn = QPushButton("测试连接", self)
         self.test_btn.clicked.connect(self._test_connection)
         self.test_status = QLabel("请填写信息后点击「测试连接」", self)
-        self.test_status.setStyleSheet("color: #888;")
+        self.test_status.setStyleSheet("color: #5c5c5c;")
         test_row.addWidget(self.test_btn)
         test_row.addWidget(self.test_status, stretch=1)
         lay.addLayout(test_row)
@@ -224,7 +224,7 @@ class BackendConfigPage(QWizardPage):
         """配置变更时重置测试状态。"""
         self._test_passed = False
         self.test_status.setText("配置已变更，请重新测试")
-        self.test_status.setStyleSheet("color: #888;")
+        self.test_status.setStyleSheet("color: #5c5c5c;")
         self.completeChanged.emit()
 
     def _test_connection(self) -> None:
@@ -262,7 +262,7 @@ class BackendConfigPage(QWizardPage):
         # 重置测试状态
         self._test_passed = False
         self.test_status.setText("请填写信息后点击「测试连接」")
-        self.test_status.setStyleSheet("color: #888;")
+        self.test_status.setStyleSheet("color: #5c5c5c;")
 
     def isComplete(self) -> bool:  # noqa: N802
         """配置已填写且测试连接通过。"""

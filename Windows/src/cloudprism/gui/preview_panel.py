@@ -79,7 +79,7 @@ class PreviewPanel(QStackedWidget):
         wl = QVBoxLayout(self._welcome)
         welcome_label = QLabel("选择文件以预览", self._welcome)
         welcome_label.setAlignment(Qt.AlignCenter)
-        welcome_label.setStyleSheet("font-size: 18px; color: #606060;")
+        welcome_label.setStyleSheet("font-size: 18px; color: #5c5c5c;")
         wl.addWidget(welcome_label)
         self.addWidget(self._welcome)
 

@@ -52,6 +52,7 @@ class TransferWorker(QObject):
         remote_path: str,
         chunk: int = 1 << 20,
         parent: QObject | None = None,
+        max_workers: int = 1,
     ) -> None:
         super().__init__(parent)
         self.kind = kind
@@ -60,7 +61,12 @@ class TransferWorker(QObject):
         self.local_path = local_path
         self.remote_path = remote_path
         self.chunk = chunk
+        self.max_workers = max_workers
         self._cancel_requested = False
+
+        # 文件名（供进度显示）
+        import os
+        self.file_name = os.path.basename(local_path)
 
     def cancel(self) -> None:
         """请求取消（在下一分块边界生效）。"""
@@ -73,7 +79,10 @@ class TransferWorker(QObject):
             if self.kind == self.KIND_UPLOAD:
                 pipeline = Encryptor(
                     self.session, self.backend, chunk=self.chunk
-                ).encrypt_and_upload(self.local_path, self.remote_path)
+                ).encrypt_and_upload(
+                    self.local_path, self.remote_path,
+                    max_workers=self.max_workers,
+                )
             else:
                 pipeline = Decryptor(
                     self.session, self.backend, chunk=self.chunk
@@ -152,14 +161,62 @@ def start_transfer(
     remote_path: str,
     chunk: int = 1 << 20,
     parent=None,
+    max_workers: int = 1,
 ) -> TransferDialog:
     """一步启动：创建 worker + 线程 + 进度对话框。
 
     返回对话框（模态由调用方决定）；线程随传输结束自动清理。
+    注意：新代码应优先使用 start_transfer_bg()。
     """
+    worker, thread = _create_worker_and_thread(
+        kind, session, backend, local_path, remote_path, chunk, parent, max_workers
+    )
+
+    title = "加密上传" if kind == TransferWorker.KIND_UPLOAD else "下载解密"
+    dialog = TransferDialog(worker, title, parent)
+    # 对话框持有线程引用防止被回收
+    dialog._thread = thread  # noqa: SLF001
+    thread.start()
+    return dialog
+
+
+def start_transfer_bg(
+    kind: str,
+    session: Session,
+    backend: StorageBackend,
+    local_path: str,
+    remote_path: str,
+    chunk: int = 1 << 20,
+    parent=None,
+    max_workers: int = 1,
+) -> tuple[TransferWorker, QThread]:
+    """后台启动传输（不弹窗），返回 (worker, thread)。
+
+    调用方负责连接 worker 的 progress/finished/cancelled/error 信号。
+    线程在传输结束后自动清理。
+    """
+    worker, thread = _create_worker_and_thread(
+        kind, session, backend, local_path, remote_path, chunk, parent, max_workers
+    )
+    thread.start()
+    return worker, thread
+
+
+def _create_worker_and_thread(
+    kind: str,
+    session: Session,
+    backend: StorageBackend,
+    local_path: str,
+    remote_path: str,
+    chunk: int,
+    parent,
+    max_workers: int,
+) -> tuple[TransferWorker, QThread]:
+    """创建 worker + 线程并接线，不启动线程。"""
     thread = QThread(parent)
     worker = TransferWorker(
-        kind, session, backend, local_path, remote_path, chunk=chunk
+        kind, session, backend, local_path, remote_path,
+        chunk=chunk, max_workers=max_workers,
     )
     worker.moveToThread(thread)
 
@@ -170,9 +227,4 @@ def start_transfer(
     thread.finished.connect(worker.deleteLater)
     thread.finished.connect(thread.deleteLater)
 
-    title = "加密上传" if kind == TransferWorker.KIND_UPLOAD else "下载解密"
-    dialog = TransferDialog(worker, title, parent)
-    # 对话框持有线程引用防止被回收
-    dialog._thread = thread  # noqa: SLF001
-    thread.start()
-    return dialog
+    return worker, thread

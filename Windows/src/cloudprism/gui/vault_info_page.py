@@ -35,6 +35,8 @@ class VaultInfoPage(QWidget):
     connectRequested = Signal()
     # 请求刷新信号
     refreshRequested = Signal()
+    # 请求锁定密库信号
+    lockRequested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -60,7 +62,7 @@ class VaultInfoPage(QWidget):
             "连接已有密库或创建新密库以开始使用。",
             self._guide_widget,
         )
-        guide_desc.setStyleSheet("font-size: 14px; color: #606060;")
+        guide_desc.setStyleSheet("font-size: 14px; color: #5c5c5c;")
         guide_desc.setAlignment(Qt.AlignCenter)
         guide_desc.setWordWrap(True)
         guide_lay.addWidget(guide_desc)
@@ -70,9 +72,9 @@ class VaultInfoPage(QWidget):
         connect_btn = QPushButton("初始化 / 连接密库", self._guide_widget)
         connect_btn.setStyleSheet(
             "QPushButton {"
-            "  background-color: #0078d4; color: white;"
-            "  border: none; border-radius: 4px;"
-            "  padding: 12px 32px; font-size: 16px;"
+            "  background-color: #0067b8; color: white;"
+            "  border: none; border-radius: 6px;"
+            "  padding: 12px 32px; font-size: 16px; font-weight: 600;"
             "}"
             "QPushButton:hover { background-color: #106ebe; }"
             "QPushButton:pressed { background-color: #005a9e; }"
@@ -136,6 +138,11 @@ class VaultInfoPage(QWidget):
         refresh_btn = QPushButton("刷新信息", self._info_widget)
         refresh_btn.clicked.connect(self.refreshRequested.emit)
         btn_row.addWidget(refresh_btn)
+
+        lock_btn = QPushButton("锁定密库", self._info_widget)
+        lock_btn.clicked.connect(self.lockRequested.emit)
+        btn_row.addWidget(lock_btn)
+
         btn_row.addStretch()
         info_lay.addLayout(btn_row)
 

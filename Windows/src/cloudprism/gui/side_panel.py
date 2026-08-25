@@ -123,7 +123,7 @@ class TransfersPage(QWidget):
         lay.addWidget(header)
 
         desc = QLabel("上传和下载任务将显示在此处", self)
-        desc.setStyleSheet("color: #606060; font-size: 13px;")
+        desc.setStyleSheet("color: #5c5c5c; font-size: 13px;")
         lay.addWidget(desc)
 
         self.task_list = QListWidget(self)
@@ -281,6 +281,19 @@ class SettingsPage(QWidget):
 
         lay.addWidget(security_group)
 
+        # ---- 性能设置 ----
+        perf_group = QGroupBox("性能", content)
+        perf_form = QFormLayout(perf_group)
+
+        total_cores = os.cpu_count() or 4
+        self._max_cores_spin = QSpinBox(self)
+        self._max_cores_spin.setRange(1, total_cores)
+        self._max_cores_spin.setValue(max(1, total_cores - 2))  # 默认留 2 核给系统
+        self._max_cores_spin.setToolTip(f"系统共 {total_cores} 个逻辑核心")
+        perf_form.addRow("加密最大内核数：", self._max_cores_spin)
+
+        lay.addWidget(perf_group)
+
         lay.addStretch()
 
         scroll.setWidget(content)
@@ -319,6 +332,11 @@ class SettingsPage(QWidget):
     def cache_path(self) -> str:
         """当前缓存路径。"""
         return self._cache_path_edit.text().strip()
+
+    @property
+    def max_cores(self) -> int:
+        """加密最大内核数。"""
+        return self._max_cores_spin.value()
 
     # ------------------------------------------------------------------
     # 内部方法

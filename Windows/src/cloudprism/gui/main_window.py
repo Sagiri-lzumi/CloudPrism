@@ -40,6 +40,7 @@ from cloudprism.gui.activity_bar import ActivityBar
 from cloudprism.gui.perf_monitor import format_cache, format_cpu, format_speed
 from cloudprism.gui.preview_panel import PreviewPanel
 from cloudprism.gui.side_panel import SidePanel
+from cloudprism.gui.transfer_progress_bar import TransferProgressBar
 
 
 class MainWindow(QMainWindow):
@@ -106,9 +107,15 @@ class MainWindow(QMainWindow):
 
         文件页 -> 显示 side_panel（文件树）+ 预览面板
         其他页 -> 显示 side_panel 全宽（传输/密库/设置，无预览）
+        底部嵌入传输进度条。
         """
         central = QWidget(self)
-        main_layout = QHBoxLayout(central)
+        outer_layout = QVBoxLayout(central)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        # 主内容行
+        main_layout = QHBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
@@ -132,6 +139,13 @@ class MainWindow(QMainWindow):
         self._content_layout.addWidget(self.side_panel, stretch=1)
 
         main_layout.addWidget(self._content_widget, stretch=1)
+
+        outer_layout.addLayout(main_layout, stretch=1)
+
+        # 传输进度条（嵌入中央区域底部，默认隐藏）
+        self.transfer_progress_inline = TransferProgressBar(central)
+        outer_layout.addWidget(self.transfer_progress_inline)
+
         self.setCentralWidget(central)
 
         # 活动栏切换 -> 动态布局
@@ -221,6 +235,11 @@ class MainWindow(QMainWindow):
     def file_tree(self):
         """文件树视图。"""
         return self.side_panel.files_page.tree
+
+    @property
+    def transfer_progress(self):
+        """内嵌传输进度条。"""
+        return self.transfer_progress_inline
 
     @property
     def transfers_page(self):

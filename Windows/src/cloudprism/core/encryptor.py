@@ -10,6 +10,9 @@ Encryptor 负责把本地明文文件加密为 .cpenc 容器并上传到存储�
 
 流式加密无填充，明文长度 = 密文长度。文件名加密（可选）由调用方在
 上传前用 FilenameCipher 处理，Encryptor 不关心文件名。
+
+多核加密：当 max_workers > 1 时，利用 AES-CTR 的随机访问特性，
+将文件分为多个段，每段用独立 counter 偏移并行加密，最后按序拼接。
 """
 
 from __future__ import annotations
@@ -48,6 +51,7 @@ class Encryptor:
         remote_path: str,
         flags: int = 0x00,
         version: int = constants.VERSION,
+        max_workers: int = 1,
     ) -> Iterator[float]:
         """加密本地文件并上传，yield 进度 0.0~1.0。
 
@@ -56,6 +60,7 @@ class Encryptor:
             remote_path: 后端上的目标路径（含 .cpenc 扩展名）
             flags: 文件头保留标志
             version: 文件格式版本
+            max_workers: 并行加密内核数（1=单核流式，>1=多核并行）
 
         yield:
             进度 0.0~1.0
@@ -76,42 +81,49 @@ class Encryptor:
         # 3. 构建文件头
         header = FileHeader.build(salt, iv, flags=flags, version=version)
 
-        # 4. 准备 CTR 加密器：用 iv 作计数器初值
-        initial_value = int.from_bytes(iv, "big")
-        ctr = Counter.new(
-            128, initial_value=initial_value, allow_wraparound=True
-        )
-        cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
-
-        # 5. 流式加密：读一块明文 -> 加密 -> 直接写入临时文件
-        #    不在内存中累积密文，避免大文件 OOM
         total = os.path.getsize(local_path)
         tmp_path = None
         try:
             fd, tmp_path = tempfile.mkstemp(suffix=".cpenc")
-            with os.fdopen(fd, "wb") as tmp:
-                # 先写文件头
-                tmp.write(header)
-                # 流式加密明文主体
-                with open(local_path, "rb") as f:
-                    written = 0
-                    while True:
-                        plain = f.read(self.chunk)
-                        if not plain:
-                            break
-                        tmp.write(cipher.encrypt(plain))
-                        written += len(plain)
-                        # 加密阶段占前半（0~0.5）
-                        yield 0.5 * (written / total) if total else 0.5
 
-            # 加密完成，cipher 对象不再需要，解除引用
-            del cipher
+            if max_workers <= 1 or total < 4 * 1024 * 1024:
+                # 单核流式加密（小文件或用户限制）
+                with os.fdopen(fd, "wb") as tmp:
+                    tmp.write(header)
+                    initial_value = int.from_bytes(iv, "big")
+                    ctr = Counter.new(
+                        128, initial_value=initial_value, allow_wraparound=True
+                    )
+                    cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
+                    with open(local_path, "rb") as f:
+                        written = 0
+                        while True:
+                            plain = f.read(self.chunk)
+                            if not plain:
+                                break
+                            tmp.write(cipher.encrypt(plain))
+                            written += len(plain)
+                            yield 0.5 * (written / total) if total else 0.5
+                    del cipher
 
-            # 6. 上传临时文件（头+密文）到后端
-            for p in self.backend.upload_chunked(tmp_path, remote_path, chunk=self.chunk):
-                yield 0.5 + 0.5 * p
+                for p in self.backend.upload_chunked(tmp_path, remote_path, chunk=self.chunk):
+                    yield 0.5 + 0.5 * p
+            else:
+                # 多核并行加密
+                os.close(fd)
+                fd = -1
+                self._parallel_encrypt(
+                    local_path, tmp_path, key, iv, total, max_workers, header
+                )
+                for p in self.backend.upload_chunked(tmp_path, remote_path, chunk=self.chunk):
+                    yield 0.5 + 0.5 * p
+
         finally:
-            # 安全删除临时文件：无论成功或异常都确保清理
+            if fd is not None and fd != -1:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
             if tmp_path is not None:
                 try:
                     os.unlink(tmp_path)
@@ -120,6 +132,55 @@ class Encryptor:
 
         if total == 0:
             yield 1.0
+
+    def _parallel_encrypt(
+        self,
+        local_path: str,
+        tmp_path: str,
+        key: bytes,
+        iv: bytes,
+        total: int,
+        max_workers: int,
+        header: bytes,
+    ) -> None:
+        """多核并行加密：将文件分段，每段独立加密后按序拼接。
+
+        AES-CTR 支持随机访问：segment i 的 counter 初值 =
+        int.from_bytes(iv, 'big') + i * (segment_size // 16)
+        """
+        from concurrent.futures import ProcessPoolExecutor
+        from Crypto.Util import Counter
+
+        # 分段：每段至少 4MB，段数不超过 max_workers
+        min_segment = 4 * 1024 * 1024
+        num_segments = min(max_workers, max(1, total // min_segment))
+        segment_size = (total + num_segments - 1) // num_segments
+
+        iv_int = int.from_bytes(iv, "big")
+
+        # 构建段参数列表
+        segments = []
+        for i in range(num_segments):
+            offset = i * segment_size
+            length = min(segment_size, total - offset)
+            if length <= 0:
+                break
+            ctr_initial = iv_int + (offset // 16)
+            segments.append((local_path, offset, length, key, ctr_initial))
+
+        # 并行加密各段
+        with ProcessPoolExecutor(max_workers=len(segments)) as executor:
+            futures = [
+                executor.submit(_encrypt_segment, seg_args)
+                for seg_args in segments
+            ]
+            results = [f.result() for f in futures]
+
+        # 按序写入临时文件：先写文件头，再写各段密文
+        with open(tmp_path, "wb") as tmp:
+            tmp.write(header)
+            for encrypted_data in results:
+                tmp.write(encrypted_data)
 
     def encrypt_to_bytes(
         self,
@@ -152,3 +213,20 @@ class Encryptor:
                     break
                 out.extend(cipher.encrypt(plain))
         return bytes(out)
+
+
+def _encrypt_segment(args: tuple) -> bytes:
+    """加密单个段（供 ProcessPoolExecutor 调用）。
+
+    参数: (local_path, offset, length, key, ctr_initial)
+    """
+    from Crypto.Util import Counter
+
+    local_path, offset, length, key, ctr_initial = args
+    ctr = Counter.new(128, initial_value=ctr_initial, allow_wraparound=True)
+    cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
+
+    with open(local_path, "rb") as f:
+        f.seek(offset)
+        data = f.read(length)
+    return cipher.encrypt(data)

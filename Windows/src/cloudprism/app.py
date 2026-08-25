@@ -21,8 +21,8 @@ from cloudprism.gui.dir_tree_model import DirTreeModel
 from cloudprism.gui.init_wizard import InitWizard
 from cloudprism.gui.main_window import MainWindow
 from cloudprism.gui.perf_monitor import PerfMonitor
-from cloudprism.gui.theme import apply_windows11_style
-from cloudprism.gui.transfer_worker import TransferWorker, start_transfer
+from cloudprism.gui.theme import apply_fluent_style
+from cloudprism.gui.transfer_worker import TransferWorker, start_transfer_bg
 from cloudprism.storage.backend import StorageBackend
 
 
@@ -70,6 +70,7 @@ class AppController:
         # 密库信息页信号
         window.vault_info_page.connectRequested.connect(self.show_init_wizard)
         window.vault_info_page.refreshRequested.connect(self._refresh_vault_info)
+        window.vault_info_page.lockRequested.connect(self._lock_vault)
 
         # 文件树拖放信号
         window.file_tree.filesDropped.connect(self._on_files_dropped)
@@ -164,7 +165,7 @@ class AppController:
     # ------------------------------------------------------------------
 
     def upload_file(self, remote_dir: str = "") -> None:
-        """选择本地文件（支持多选）-> 加密上传到选中目录。"""
+        """选择本地文件（支持多选）-> 加密上传到选中目录（后台）。"""
         if not self._require_vault():
             return
         paths, _ = QFileDialog.getOpenFileNames(
@@ -172,38 +173,19 @@ class AppController:
         )
         if not paths:
             return
-        for path in paths:
-            name = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-            # 文件名加密开启时，加密文件名主体
-            enc_name = self._encrypt_filename(name) if self._is_filename_enc() else name
-            remote = f"{remote_dir}/{enc_name}.cpenc" if remote_dir else f"{enc_name}.cpenc"
-            dlg = start_transfer(
-                TransferWorker.KIND_UPLOAD, self.session, self.backend,
-                path, remote,
-            )
-            dlg.exec()
-        self._refresh_tree()
+        self._upload_paths(paths, remote_dir)
 
     def upload_files(self, local_paths: list[str], remote_dir: str = "") -> None:
         """批量上传文件（供拖放调用）。"""
         if not self._require_vault() or not local_paths:
             return
-        for path in local_paths:
-            import os
-            if not os.path.isfile(path):
-                continue
-            name = os.path.basename(path)
-            enc_name = self._encrypt_filename(name) if self._is_filename_enc() else name
-            remote = f"{remote_dir}/{enc_name}.cpenc" if remote_dir else f"{enc_name}.cpenc"
-            dlg = start_transfer(
-                TransferWorker.KIND_UPLOAD, self.session, self.backend,
-                path, remote,
-            )
-            dlg.exec()
-        self._refresh_tree()
+        import os
+        valid_paths = [p for p in local_paths if os.path.isfile(p)]
+        if valid_paths:
+            self._upload_paths(valid_paths, remote_dir)
 
     def download_file(self, remote_path: str = "") -> None:
-        """选择保存位置 -> 下载解密选中文件。"""
+        """选择保存位置 -> 下载解密选中文件（后台）。"""
         if self._require_vault() and remote_path:
             # 去掉 .cpenc 作为默认保存名
             default = remote_path.rsplit("/", 1)[-1]
@@ -213,11 +195,10 @@ class AppController:
                 self.window, "保存解密文件", default
             )
             if path:
-                dlg = start_transfer(
-                    TransferWorker.KIND_DOWNLOAD, self.session, self.backend,
-                    path, remote_path,
+                self._start_bg_transfer(
+                    TransferWorker.KIND_DOWNLOAD, path, remote_path,
+                    file_name=default, direction="download",
                 )
-                dlg.exec()
 
     # ------------------------------------------------------------------
     # 播放
@@ -251,9 +232,7 @@ class AppController:
         """文件拖出：解密下载到用户选择的目标目录。"""
         if not self._require_vault() or not remote_paths:
             return
-        from PySide6.QtWidgets import QFileDialog
         import os
-        import tempfile
         # 让用户选择保存目录
         save_dir = QFileDialog.getExistingDirectory(
             self.window, "选择保存目录"
@@ -274,11 +253,10 @@ class AppController:
             elif fname.endswith(".cpenc"):
                 fname = fname[: -len(".cpenc")]
             local_path = os.path.join(save_dir, fname)
-            dlg = start_transfer(
-                TransferWorker.KIND_DOWNLOAD, self.session, self.backend,
-                local_path, rp,
+            self._start_bg_transfer(
+                TransferWorker.KIND_DOWNLOAD, local_path, rp,
+                file_name=fname, direction="download",
             )
-            dlg.exec()
 
     def _selected_remote_dir(self) -> str:
         """获取文件树当前选中目录的远端路径。"""
@@ -328,9 +306,109 @@ class AppController:
         if self._tree_model is not None:
             self._tree_model.reload()
 
+    # ------------------------------------------------------------------
+    # 后台传输管理
+    # ------------------------------------------------------------------
+
+    def _upload_paths(self, paths: list[str], remote_dir: str) -> None:
+        """批量后台上传文件列表。"""
+        import os
+        total = len(paths)
+        self._transfer_queue: list[tuple[str, str, str, str]] = []
+        for i, path in enumerate(paths):
+            name = os.path.basename(path)
+            enc_name = self._encrypt_filename(name) if self._is_filename_enc() else name
+            remote = f"{remote_dir}/{enc_name}.cpenc" if remote_dir else f"{enc_name}.cpenc"
+            self._transfer_queue.append((path, remote, name, "upload"))
+        # 启动第一个任务
+        self._run_next_transfer()
+
+    def _start_bg_transfer(
+        self,
+        kind: str,
+        local_path: str,
+        remote_path: str,
+        file_name: str = "",
+        direction: str = "upload",
+    ) -> None:
+        """启动单个后台传输任务。"""
+        self._transfer_queue = [(local_path, remote_path, file_name, direction)]
+        self._run_next_transfer()
+
+    def _run_next_transfer(self) -> None:
+        """执行队列中的下一个传输任务。"""
+        if not hasattr(self, '_transfer_queue') or not self._transfer_queue:
+            return
+        local_path, remote_path, file_name, direction = self._transfer_queue.pop(0)
+        idx = len(self._transfer_queue)
+        total = idx + 1
+        # 计算当前是第几个
+        if hasattr(self, '_transfer_total'):
+            current = self._transfer_total - idx
+        else:
+            self._transfer_total = total
+            current = 1
+
+        max_workers = self.window.settings_page.max_cores
+        kind = TransferWorker.KIND_UPLOAD if direction == "upload" else TransferWorker.KIND_DOWNLOAD
+        worker, thread = start_transfer_bg(
+            kind,
+            self.session, self.backend,
+            local_path, remote_path,
+            max_workers=max_workers,
+            parent=self.window,
+        )
+        # 保持线程引用
+        if not hasattr(self, '_active_threads'):
+            self._active_threads = []
+        self._active_threads.append(thread)
+        thread.finished.connect(lambda t=thread: self._active_threads.remove(t) if t in self._active_threads else None)
+
+        # 更新进度条
+        self.window.transfer_progress.show_task(
+            file_name, direction=direction,
+            current=current, total=self._transfer_total,
+            cancel_fn=worker.cancel,
+        )
+        worker.progress.connect(self.window.transfer_progress.update_progress)
+
+        def _on_finished():
+            self.window.transfer_progress.task_finished(success=True)
+            if not self._transfer_queue:
+                self._refresh_tree()
+                self._transfer_total = 0
+            else:
+                self._run_next_transfer()
+
+        def _on_error(msg):
+            self.window.transfer_progress.task_finished(success=False)
+            if not self._transfer_queue:
+                self._refresh_tree()
+                self._transfer_total = 0
+            else:
+                self._run_next_transfer()
+
+        worker.finished.connect(_on_finished)
+        worker.cancelled.connect(_on_finished)
+        worker.error.connect(_on_error)
+
     def _refresh_vault_info(self) -> None:
         """刷新密库信息页。"""
         self._update_vault_info_page()
+
+    def _lock_vault(self) -> None:
+        """锁定密库：清除会话与后端引用，重置界面。"""
+        if self.session:
+            self.session.close()  # 清零主密码与派生密钥
+        self.session = None
+        self.backend = None
+        self.metadata = None
+        self._tree_model = None
+        self.window.set_connected(False)
+        self.window.vault_info_page.show_disconnected()
+        self.window.preview_panel.show_welcome()
+        # 清空文件树模型
+        self.window.side_panel.files_page.tree.setModel(None)
 
     def _update_vault_info_page(self) -> None:
         """更新密库信息页显示。"""
@@ -392,8 +470,8 @@ class AppController:
 def main() -> int:
     """程序入口。"""
     app = QApplication(sys.argv)
-    # 应用 Windows 11 原生风格主题
-    apply_windows11_style(app)
+    # 应用 Fluent 风格主题
+    apply_fluent_style(app)
     window = MainWindow()
     controller = AppController(window)  # noqa: F841  控制器需保持引用
     window.show()
