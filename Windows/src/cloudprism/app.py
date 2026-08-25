@@ -18,11 +18,13 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageB
 
 from cloudprism.core.session import Session
 from cloudprism.core.settings_store import SettingsStore
+from cloudprism.core.backend_factory import describe_backend
 from cloudprism.crypto.filename import FilenameCipher
 from cloudprism.gui.dir_tree_model import DirTreeModel
 from cloudprism.gui.init_wizard import InitWizard
 from cloudprism.gui.main_window import MainWindow
 from cloudprism.gui.perf_monitor import PerfMonitor
+from cloudprism.gui.quick_connect import QuickConnectDialog
 from cloudprism.gui.theme import apply_fluent_style
 from cloudprism.gui.transfer_worker import TransferWorker, start_transfer_bg
 from cloudprism.storage.backend import StorageBackend
@@ -99,8 +101,10 @@ class AppController(QObject):
         window.settings_page.fontSizeChanged.connect(self._on_font_size_changed)
         window.settings_page.autoLockChanged.connect(self._sync_lock_timer)
 
-        # 密库信息页信号
+        # 密库信息页信号（含最近密库快速连接/移除）
         window.vault_info_page.connectRequested.connect(self.show_init_wizard)
+        window.vault_info_page.quickConnectRequested.connect(self._on_quick_connect)
+        window.vault_info_page.removeVaultRequested.connect(self._on_remove_vault)
         window.vault_info_page.refreshRequested.connect(self._refresh_vault_info)
         window.vault_info_page.lockRequested.connect(self._lock_vault)
 
@@ -118,6 +122,9 @@ class AppController(QObject):
 
         # 启动性能监控
         self._perf.start()
+
+        # 未连接引导页回填最近密库记录（重启后仍可见）
+        window.vault_info_page.set_recent_vaults(self._store.recent_vaults())
 
     # ------------------------------------------------------------------
     # 自动锁定
@@ -163,6 +170,8 @@ class AppController(QObject):
             QMessageBox.information(
                 self.window, "提示", "当前版本仅提供浅色主题，深色主题敬请期待"
             )
+            # 回退下拉框到「浅色」，避免停留在未生效的「深色」（假状态）
+            self.window.settings_page.revert_theme()
 
     def _on_font_size_changed(self, size: int) -> None:
         """字体大小切换：应用到整个应用。"""
@@ -184,10 +193,18 @@ class AppController(QObject):
             self._apply_setup(wizard)
 
     def _apply_setup(self, wizard: InitWizard) -> None:
-        """应用向导产出：设置后端、目录树与状态栏。"""
-        self.session = wizard.session
-        self.backend = wizard.backend
-        self.metadata = wizard.metadata
+        """应用向导产出并记录最近密库。"""
+        self._apply_connection(wizard.backend, wizard.metadata, wizard.session)
+        self._remember_current_vault()
+
+    def _apply_connection(self, backend, metadata, session) -> None:
+        """装载一次成功连接：后端、目录树、状态栏与各信息页。
+
+        向导与快速连接共用本方法。
+        """
+        self.session = session
+        self.backend = backend
+        self.metadata = metadata
 
         # 文件名加密开启时注入解密器（目录树显示原始名）
         name_decryptor = None
@@ -210,11 +227,10 @@ class AppController(QObject):
         # 更新状态栏
         self.window.set_connected(True)
 
-        # 更新设置页连接信息
-        backend_type = type(self.backend).__name__
-        backend_path = getattr(self.backend, "_root", "") or getattr(self.backend, "_url", "")
+        # 更新设置页连接信息（友好显示名而非类名）
+        backend_label, backend_path, _ = describe_backend(self.backend)
         self.window.settings_page.update_connection_info(
-            backend_type=backend_type,
+            backend_type=backend_label,
             backend_path=backend_path,
             filename_enc=self.metadata.filename_enc,
         )
@@ -222,6 +238,45 @@ class AppController(QObject):
 
         # 更新密库信息页
         self._update_vault_info_page()
+
+    def _remember_current_vault(self) -> None:
+        """将当前成功连接写入最近密库记录并刷新引导页列表。"""
+        if self.backend is None:
+            return
+        label, path, btype = describe_backend(self.backend)
+        vault_id_hex = self.metadata.vault_id.hex() if self.metadata else ""
+        record = {
+            "backend_type": btype,
+            "label": label,
+            "path": path,
+            "vault_name": vault_id_hex[:8] if vault_id_hex else "-",
+        }
+        if btype == "webdav":
+            # 仅存账号，密码绝不落盘
+            auth = getattr(self.backend, "auth", ("", ""))
+            record["webdav_user"] = auth[0] if auth else ""
+        self._store.remember_vault(record)
+        self.window.vault_info_page.set_recent_vaults(self._store.recent_vaults())
+
+    def _on_quick_connect(self, record: dict) -> None:
+        """最近密库一键重连：仅输主密码（WebDAV 另输服务器密码）。"""
+        dlg = QuickConnectDialog(record, parent=self.window)
+        if dlg.exec() == QuickConnectDialog.Accepted and dlg.metadata is not None:
+            self._apply_connection(dlg.backend, dlg.metadata, dlg.session)
+            self._remember_current_vault()
+
+    def _on_remove_vault(self, record: dict) -> None:
+        """移除最近密库记录（仅删记录，不影响云端数据）。"""
+        ret = QMessageBox.question(
+            self.window,
+            "移除记录",
+            f"确定移除该密库记录？（不影响云端数据）\n{record.get('path', '')}",
+        )
+        if ret == QMessageBox.StandardButton.Yes:
+            self._store.forget_vault(record.get("key", ""))
+            self.window.vault_info_page.set_recent_vaults(
+                self._store.recent_vaults()
+            )
 
     # ------------------------------------------------------------------
     # 文件树选中 -> 预览
@@ -686,6 +741,8 @@ class AppController(QObject):
         self.window.transfer_progress.hide_bar()
         # 清空文件树模型
         self.window.side_panel.files_page.tree.setModel(None)
+        # 引导页回填最近密库记录，便于快速重连
+        self.window.vault_info_page.set_recent_vaults(self._store.recent_vaults())
 
     def _update_vault_info_page(self) -> None:
         """更新密库信息页显示（云端占用/文件数在后台线程递归统计）。"""
@@ -699,9 +756,8 @@ class AppController(QObject):
         vault_id_hex = self.metadata.vault_id.hex() if self.metadata else "-"
         vault_name = vault_id_hex[:8] + "..." if len(vault_id_hex) > 8 else vault_id_hex
 
-        # 后端信息
-        backend_type = type(self.backend).__name__
-        backend_path = getattr(self.backend, "_root", "") or getattr(self.backend, "_url", "")
+        # 后端信息（友好显示名而非类名）
+        backend_type, backend_path, _ = describe_backend(self.backend)
 
         # 本地缓存大小（本地磁盘遍历，很快）
         cache_path = self.window.settings_page.cache_path

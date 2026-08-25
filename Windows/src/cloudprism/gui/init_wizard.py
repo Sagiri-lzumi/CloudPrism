@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QWizardPage,
 )
 
+from cloudprism.core.backend_factory import build_backend_from_params
 from cloudprism.core.session import Session
 from cloudprism.core.vault_manager import VaultManager
 from cloudprism.gui.baidu_auth import BaiduAuthDialog
@@ -38,7 +39,6 @@ from cloudprism.storage.baidu_backend import (
     BaiduCredentialStore,
     BaiduNetdiskBackend,
 )
-from cloudprism.storage.local_backend import LocalFolderBackend
 from cloudprism.storage.webdav_backend import WebDavBackend
 
 
@@ -366,11 +366,9 @@ class BackendConfigPage(QWizardPage):
         return PAGE_PASSWORD
 
     def build_backend(self) -> StorageBackend:
-        """按选择构造后端实例。"""
+        """按选择构造后端实例（委托 backend_factory，与快速连接共用）。"""
         wizard = self.wizard()
         backend_type = wizard.backend_type if wizard else "local"
-        if backend_type == "local":
-            return LocalFolderBackend(self.local_dir_edit.text().strip())
         if backend_type == "baidu":
             creds = self._baidu_creds or BaiduCredentialStore().load()
             if not creds or not creds.get("access_token"):
@@ -378,21 +376,12 @@ class BackendConfigPage(QWizardPage):
                     "尚未配置百度网盘凭证，请先按《百度网盘开放平台申请指南》"
                     "申请凭证并完成授权"
                 )
-            return BaiduNetdiskBackend(
-                app_key=creds.get("app_key", ""),
-                secret_key=creds.get("secret_key", ""),
-                access_token=creds["access_token"],
-                app_id=creds.get("app_id", ""),
-                refresh_token=creds.get("refresh_token", ""),
-                expires_at=float(creds.get("expires_at", 0.0)),
-                credential_store=BaiduCredentialStore(),
-            )
-        return WebDavBackend(
-            self.webdav_url_edit.text().strip(),
-            auth=(
-                self.webdav_user_edit.text().strip(),
-                self.webdav_pass_edit.text(),
-            ),
+        return build_backend_from_params(
+            backend_type,
+            local_dir=self.local_dir_edit.text().strip(),
+            webdav_url=self.webdav_url_edit.text().strip(),
+            webdav_user=self.webdav_user_edit.text().strip(),
+            webdav_pass=self.webdav_pass_edit.text(),
         )
 
 

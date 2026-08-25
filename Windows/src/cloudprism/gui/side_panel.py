@@ -214,7 +214,10 @@ class SettingsPage(QWidget):
         conn_form.addRow("文件名加密：", self._filename_enc_label)
 
         btn_row = QHBoxLayout()
-        self._reconnect_btn = QPushButton("重新连接", self)
+        self._reconnect_btn = QPushButton("切换密库（打开向导）…", self)
+        self._reconnect_btn.setToolTip(
+            "打开初始化向导新建或连接密库；快速重连请用密库页的最近记录"
+        )
         self._reconnect_btn.clicked.connect(self.reconnectRequested.emit)
         btn_row.addWidget(self._reconnect_btn)
         btn_row.addStretch()
@@ -251,7 +254,10 @@ class SettingsPage(QWidget):
 
         clear_btn = QPushButton("清除缓存", self)
         clear_btn.clicked.connect(self._on_clear_cache)
-        cache_form.addRow(clear_btn)
+        clear_row = QHBoxLayout()
+        clear_row.addStretch()
+        clear_row.addWidget(clear_btn)
+        cache_form.addRow(clear_row)
 
         lay.addWidget(cache_group)
 
@@ -270,7 +276,7 @@ class SettingsPage(QWidget):
         # 并发传输为预留功能：当前传输队列为串行（单任务内多核加密已可充分利用 CPU）
         self._concurrent_spin.setEnabled(False)
         self._concurrent_spin.setToolTip("预留功能：当前版本传输任务串行执行")
-        transfer_form.addRow("并发传输数：", self._concurrent_spin)
+        transfer_form.addRow("并发传输数（预留）：", self._concurrent_spin)
 
         lay.addWidget(transfer_group)
 
@@ -323,6 +329,24 @@ class SettingsPage(QWidget):
         self._backend_type_label.setText(backend_type)
         self._backend_path_label.setText(backend_path)
         self._filename_enc_label.setText("开" if filename_enc else "关")
+        self._backend_path_label.setWordWrap(True)
+
+    def revert_theme(self) -> None:
+        """回退主题下拉框到「浅色」（当前版本唯一可用主题）。
+
+        延迟到下一事件循环执行：本次信号发射中持久化插槽会在本方法
+        返回后再次写入「深色」索引，延迟回退可保证最终状态正确。
+        """
+        from PySide6.QtCore import QTimer
+
+        def _do() -> None:
+            self._theme_combo.blockSignals(True)
+            self._theme_combo.setCurrentIndex(2)
+            self._theme_combo.blockSignals(False)
+            if getattr(self, "_store", None) is not None:
+                self._store.set_theme_index(2)
+
+        QTimer.singleShot(0, self, _do)
 
     @property
     def cache_limit_mb(self) -> int:

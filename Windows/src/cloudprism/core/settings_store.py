@@ -11,6 +11,9 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
+
 from PySide6.QtCore import QSettings
 
 
@@ -133,3 +136,44 @@ class SettingsStore:
 
     def set_webdav_user(self, u: str) -> None:
         self._set("conn/webdav_user", u)
+
+    # ------------------------------------------------------------------
+    # 最近连接的密库记录（仅连接参数，任何密码均不落盘）
+    # ------------------------------------------------------------------
+
+    # 记录上限（新记录置顶，超出时淘汰最旧）
+    MAX_RECENT_VAULTS = 8
+
+    def recent_vaults(self) -> list[dict]:
+        """最近密库记录列表（新在前）；损坏时容错返回空列表。"""
+        raw = self._get("vaults/recent", "", str)
+        if not raw:
+            return []
+        try:
+            items = json.loads(raw)
+        except (ValueError, TypeError):
+            return []
+        return items if isinstance(items, list) else []
+
+    def set_recent_vaults(self, items: list[dict]) -> None:
+        """整体写回记录列表。"""
+        self._set("vaults/recent", json.dumps(items, ensure_ascii=False))
+
+    def remember_vault(self, record: dict) -> None:
+        """记录一次成功连接：按 key 去重置顶，刷新时间，截断到上限。
+
+        record 至少含 backend_type 与 path；key 缺失时自动生成。
+        """
+        rec = dict(record)
+        if not rec.get("key"):
+            rec["key"] = f"{rec.get('backend_type', '')}|{rec.get('path', '')}"
+        rec.setdefault("last_used", datetime.now().strftime("%Y-%m-%d %H:%M"))
+        rec["last_used"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        items = [r for r in self.recent_vaults() if r.get("key") != rec["key"]]
+        items.insert(0, rec)
+        self.set_recent_vaults(items[: self.MAX_RECENT_VAULTS])
+
+    def forget_vault(self, key: str) -> None:
+        """删除指定 key 的记录。"""
+        items = [r for r in self.recent_vaults() if r.get("key") != key]
+        self.set_recent_vaults(items)
