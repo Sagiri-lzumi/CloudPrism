@@ -24,12 +24,12 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QStackedWidget,
-    QTreeView,
     QVBoxLayout,
     QWidget,
 )
 
 from cloudprism.gui.dir_tree_model import DirTreeModel
+from cloudprism.gui.file_tree_view import FileTreeView
 from cloudprism.gui.vault_info_page import VaultInfoPage
 
 
@@ -86,15 +86,15 @@ class SidePanel(QStackedWidget):
 
 
 class FilesPage(QWidget):
-    """文件浏览器页：目录树视图。"""
+    """文件浏览器页：支持拖放的目录树视图。"""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
 
-        self.tree = QTreeView(self)
-        self.tree.setSelectionBehavior(QAbstractItemView.SelectRows)
+        # 使用自定义的 FileTreeView（支持拖入上传、拖出下载）
+        self.tree = FileTreeView(self)
         self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tree.setUniformRowHeights(True)
         lay.addWidget(self.tree)
@@ -119,11 +119,11 @@ class TransfersPage(QWidget):
         lay.setSpacing(8)
 
         header = QLabel("传输队列", self)
-        header.setStyleSheet("font-weight: bold; font-size: 16px;")
+        header.setStyleSheet("font-weight: bold; font-size: 16px; color: #1a1a1a;")
         lay.addWidget(header)
 
         desc = QLabel("上传和下载任务将显示在此处", self)
-        desc.setStyleSheet("color: #888; font-size: 13px;")
+        desc.setStyleSheet("color: #606060; font-size: 13px;")
         lay.addWidget(desc)
 
         self.task_list = QListWidget(self)

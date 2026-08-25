@@ -50,7 +50,7 @@ class VaultInfoPage(QWidget):
 
         guide_title = QLabel("尚未连接密库", self._guide_widget)
         guide_title.setStyleSheet(
-            "font-size: 22px; font-weight: bold; color: #ccc;"
+            "font-size: 22px; font-weight: bold; color: #1a1a1a;"
         )
         guide_title.setAlignment(Qt.AlignCenter)
         guide_lay.addWidget(guide_title)
@@ -60,7 +60,7 @@ class VaultInfoPage(QWidget):
             "连接已有密库或创建新密库以开始使用。",
             self._guide_widget,
         )
-        guide_desc.setStyleSheet("font-size: 14px; color: #888;")
+        guide_desc.setStyleSheet("font-size: 14px; color: #606060;")
         guide_desc.setAlignment(Qt.AlignCenter)
         guide_desc.setWordWrap(True)
         guide_lay.addWidget(guide_desc)
@@ -91,7 +91,7 @@ class VaultInfoPage(QWidget):
 
         # 标题
         title = QLabel("密库信息", self._info_widget)
-        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #1a1a1a;")
         info_lay.addWidget(title)
 
         # 基本信息组

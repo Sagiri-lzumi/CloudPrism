@@ -21,6 +21,7 @@ from cloudprism.gui.dir_tree_model import DirTreeModel
 from cloudprism.gui.init_wizard import InitWizard
 from cloudprism.gui.main_window import MainWindow
 from cloudprism.gui.perf_monitor import PerfMonitor
+from cloudprism.gui.theme import apply_windows11_style
 from cloudprism.gui.transfer_worker import TransferWorker, start_transfer
 from cloudprism.storage.backend import StorageBackend
 
@@ -69,6 +70,10 @@ class AppController:
         # 密库信息页信号
         window.vault_info_page.connectRequested.connect(self.show_init_wizard)
         window.vault_info_page.refreshRequested.connect(self._refresh_vault_info)
+
+        # 文件树拖放信号
+        window.file_tree.filesDropped.connect(self._on_files_dropped)
+        window.file_tree.filesDraggedOut.connect(self._on_files_dragged_out)
 
         # 启动性能监控
         self._perf.start()
@@ -159,21 +164,43 @@ class AppController:
     # ------------------------------------------------------------------
 
     def upload_file(self, remote_dir: str = "") -> None:
-        """选择本地文件 -> 加密上传到选中目录。"""
-        if self._require_vault():
-            path, _ = QFileDialog.getOpenFileName(
-                self.window, "选择要加密上传的文件"
+        """选择本地文件（支持多选）-> 加密上传到选中目录。"""
+        if not self._require_vault():
+            return
+        paths, _ = QFileDialog.getOpenFileNames(
+            self.window, "选择要加密上传的文件（可多选）"
+        )
+        if not paths:
+            return
+        for path in paths:
+            name = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            # 文件名加密开启时，加密文件名主体
+            enc_name = self._encrypt_filename(name) if self._is_filename_enc() else name
+            remote = f"{remote_dir}/{enc_name}.cpenc" if remote_dir else f"{enc_name}.cpenc"
+            dlg = start_transfer(
+                TransferWorker.KIND_UPLOAD, self.session, self.backend,
+                path, remote,
             )
-            if path:
-                # 目标路径 = 选中目录（或根）+ 原文件名 + .cpenc
-                name = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-                remote = f"{remote_dir}/{name}.cpenc" if remote_dir else f"{name}.cpenc"
-                dlg = start_transfer(
-                    TransferWorker.KIND_UPLOAD, self.session, self.backend,
-                    path, remote,
-                )
-                dlg.exec()
-                self._refresh_tree()
+            dlg.exec()
+        self._refresh_tree()
+
+    def upload_files(self, local_paths: list[str], remote_dir: str = "") -> None:
+        """批量上传文件（供拖放调用）。"""
+        if not self._require_vault() or not local_paths:
+            return
+        for path in local_paths:
+            import os
+            if not os.path.isfile(path):
+                continue
+            name = os.path.basename(path)
+            enc_name = self._encrypt_filename(name) if self._is_filename_enc() else name
+            remote = f"{remote_dir}/{enc_name}.cpenc" if remote_dir else f"{enc_name}.cpenc"
+            dlg = start_transfer(
+                TransferWorker.KIND_UPLOAD, self.session, self.backend,
+                path, remote,
+            )
+            dlg.exec()
+        self._refresh_tree()
 
     def download_file(self, remote_path: str = "") -> None:
         """选择保存位置 -> 下载解密选中文件。"""
@@ -212,6 +239,68 @@ class AppController:
         self._perf.set_cache_path(cache_path)
 
     # ------------------------------------------------------------------
+    # 拖放操作
+    # ------------------------------------------------------------------
+
+    def _on_files_dropped(self, local_paths: list[str]) -> None:
+        """文件拖入：批量加密上传到当前选中目录。"""
+        remote_dir = self._selected_remote_dir()
+        self.upload_files(local_paths, remote_dir)
+
+    def _on_files_dragged_out(self, remote_paths: list[str]) -> None:
+        """文件拖出：解密下载到用户选择的目标目录。"""
+        if not self._require_vault() or not remote_paths:
+            return
+        from PySide6.QtWidgets import QFileDialog
+        import os
+        import tempfile
+        # 让用户选择保存目录
+        save_dir = QFileDialog.getExistingDirectory(
+            self.window, "选择保存目录"
+        )
+        if not save_dir:
+            return
+        for rp in remote_paths:
+            # 解密文件名作为本地保存名
+            fname = rp.rsplit("/", 1)[-1]
+            if self._is_filename_enc() and fname.endswith(".cpenc"):
+                enc_base = fname[: -len(".cpenc")]
+                try:
+                    salt = self.metadata.salt
+                    key = self.session.derive_key(salt)
+                    fname = FilenameCipher.decrypt(enc_base, key)
+                except Exception:
+                    fname = fname[: -len(".cpenc")] if fname.endswith(".cpenc") else fname
+            elif fname.endswith(".cpenc"):
+                fname = fname[: -len(".cpenc")]
+            local_path = os.path.join(save_dir, fname)
+            dlg = start_transfer(
+                TransferWorker.KIND_DOWNLOAD, self.session, self.backend,
+                local_path, rp,
+            )
+            dlg.exec()
+
+    def _selected_remote_dir(self) -> str:
+        """获取文件树当前选中目录的远端路径。"""
+        indexes = self.window.file_tree.selectedIndexes()
+        if not indexes:
+            return ""
+        node = indexes[0].internalPointer()
+        if node is None:
+            return ""
+        if not node.is_dir:
+            node = node.parent
+        if node is None:
+            return ""
+        parts: list[str] = []
+        cur = node
+        while cur is not None and cur.name:
+            parts.append(cur.name)
+            cur = cur.parent
+        parts.reverse()
+        return "/".join(parts)
+
+    # ------------------------------------------------------------------
     # 辅助
     # ------------------------------------------------------------------
 
@@ -223,6 +312,16 @@ class AppController:
             )
             return False
         return True
+
+    def _is_filename_enc(self) -> bool:
+        """当前密库是否开启文件名加密。"""
+        return self.metadata is not None and self.metadata.filename_enc
+
+    def _encrypt_filename(self, name: str) -> str:
+        """用文件名加密密钥加密文件名，返回 Base32 编码串。"""
+        salt = self.metadata.salt
+        key = self.session.derive_key(salt)
+        return FilenameCipher.encrypt(name, key)
 
     def _refresh_tree(self) -> None:
         """刷新文件树。"""
@@ -293,6 +392,8 @@ class AppController:
 def main() -> int:
     """程序入口。"""
     app = QApplication(sys.argv)
+    # 应用 Windows 11 原生风格主题
+    apply_windows11_style(app)
     window = MainWindow()
     controller = AppController(window)  # noqa: F841  控制器需保持引用
     window.show()

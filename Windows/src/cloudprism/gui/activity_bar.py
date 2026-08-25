@@ -40,9 +40,9 @@ class ActivityBar(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setFixedWidth(self.BAR_WIDTH)
-        # 深色背景
+        # 深色背景（与浅色主区域形成对比）
         self.setStyleSheet(
-            "ActivityBar { background-color: #252526; }"
+            "ActivityBar { background-color: #2b2b2b; }"
         )
 
         lay = QVBoxLayout(self)
@@ -106,7 +106,7 @@ class ActivityBar(QWidget):
             # fallback: 使用 Unicode 符号作为文本
             btn.setText(f"{fallback_char}\n{text}")
 
-        # 统一样式
+        # 统一样式（适配 Windows 11 风格）
         btn.setStyleSheet(
             "QToolButton {"
             "  color: #cccccc; background-color: transparent;"
@@ -115,11 +115,11 @@ class ActivityBar(QWidget):
             "  border-left: 3px solid transparent;"
             "}"
             "QToolButton:checked {"
-            "  color: #ffffff; background-color: #37373d;"
+            "  color: #ffffff; background-color: #3a3a3a;"
             "  border-left: 3px solid #0078d4;"
             "}"
             "QToolButton:hover {"
-            "  color: #ffffff; background-color: #2a2d2e;"
+            "  color: #ffffff; background-color: #333333;"
             "}"
         )
 
