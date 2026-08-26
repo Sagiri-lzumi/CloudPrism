@@ -49,10 +49,16 @@ VAULT_MAGIC: bytes = b"CPRISM_VAULT"
 # Vault Marker 文件名；固定存放于云盘根目录，隐藏文件名减少误删
 VAULT_MARKER_NAME: str = ".cloudprism_vault"
 
-# Vault Marker 格式版本号（uint32，大端序）；当前为 2
+# 增量同步索引文件名；存放于密库根（或子目录密库位置），
+# 内容为整体加密的 JSON（{相对路径: {size, mtime, uploaded_at}}）
+SYNC_INDEX_NAME: str = ".cloudprism_index"
+
+# Vault Marker 格式版本号（uint32，大端序）；当前为 3
 # v2：内部明文尾部追加用户自定义密库名称（name_len + name_utf8），
 # 解析端对无名称字段的 v1 文件保持兼容（name 置空）
-VAULT_VERSION: int = 2
+# v3：文件尾部（GCM 载荷之后）追加恢复码块（recovery_len + recovery_blob），
+# 解析端按 PayloadLen 读载荷，无恢复块的 v1/v2 文件不受影响（容错解析）
+VAULT_VERSION: int = 3
 
 # 密库名称上限（字符数）；随 Vault Marker 加密保存，跨设备跟随密库
 VAULT_NAME_MAX_LEN: int = 32
@@ -65,6 +71,13 @@ VAULT_RESERVED_LEN: int = 8
 
 # AES-GCM 认证标签长度（字节）
 GCM_TAG_LEN: int = 16
+
+# 恢复码长度（Base32 字符数）；16 字符对应 10 字节随机密钥，
+# 界面按 XXXX-XXXX-XXXX-XXXX 分组展示；恢复码仅离线保存，服务端零参与
+RECOVERY_CODE_LEN: int = 16
+
+# 恢复码对应的随机密钥字节数（16 个 Base32 字符 = 10 字节）
+RECOVERY_SECRET_LEN: int = 10
 
 # 文件名加密用的 AES-GCM nonce 长度（字节）
 FILENAME_NONCE_LEN: int = 12

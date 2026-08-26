@@ -14,7 +14,13 @@ import sys
 import time
 
 from PySide6.QtCore import QEvent, QModelIndex, QObject, Signal, Qt, QTimer
-from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QInputDialog,
+    QLineEdit,
+    QMessageBox,
+)
 
 # Fluent 提示组件（模态确认用 MessageBox，非阻断提示用 InfoBar）
 from qfluentwidgets import InfoBar, InfoBarPosition
@@ -22,16 +28,22 @@ from qfluentwidgets import MessageBox as FluentMessageBox
 
 from cloudprism.core.session import Session
 from cloudprism.core.settings_store import SettingsStore
+from cloudprism.core.sync_engine import SyncEngine
+from cloudprism.core.thumbnail import ThumbnailCache
 from cloudprism.core.backend_factory import describe_backend
 from cloudprism.core.vault_manager import VaultManager
 from cloudprism.crypto.filename import FilenameCipher
 from cloudprism.gui.dir_tree_model import DirTreeModel
-from cloudprism.gui.init_wizard import InitWizard
+from cloudprism.gui.init_wizard import InitWizard, RecoveryCodeDialog
 from cloudprism.gui.main_window import MainWindow
 from cloudprism.gui.perf_monitor import PerfMonitor
 from cloudprism.gui.quick_connect import QuickConnectDialog
 from cloudprism.gui.theme import apply_theme, current_mode
-from cloudprism.gui.transfer_worker import TransferWorker, start_transfer_bg
+from cloudprism.core.transfer_queue import (
+    STATE_CANCELLED,
+    TransferQueue,
+    TransferTask,
+)
 from cloudprism.storage.backend import StorageBackend
 
 
@@ -74,22 +86,32 @@ class AppController(QObject):
         # 目录树模型
         self._tree_model: DirTreeModel | None = None
 
-        # 传输队列状态（串行调度：同时只有一个任务在跑）
-        self._transfer_queue: list[tuple[str, str, str, str]] = []
-        self._transfer_total = 0
-        self._transfer_current = 0
-        self._transfer_busy = False
-        self._active_threads: list = []
-        self._current_queue_item = None  # 传输队列页当前条目（TransfersPage 联动）
-
         # 接入设置持久化存储（须在自动锁定定时器同步前完成载入）
         self._store = SettingsStore()
         window.settings_page.attach_store(self._store)
 
-        # 自动锁定：每 60 秒检查一次空闲时长；事件过滤器刷新最后活跃时间
+        # 传输队列（任务级并发调度；并发数持久化，传输参数入队时从设置页同步）
+        self._queue = TransferQueue(self.window)
+        self._queue.max_concurrent = max(1, self._store.concurrent_count())
+        self._queue.taskProgress.connect(self._on_task_progress)
+        self._queue.taskFinished.connect(self._on_task_finished)
+        self._queue.aggregateProgress.connect(self._on_aggregate_progress)
+        self._task_cards: dict = {}  # task -> 传输队列页条目
+        self._batch_total = 0        # 当前批次任务总数（底部条 (n/m) 计数）
+        # 文件夹同步批次跟踪（任务完成后写回加密索引）
+        self._sync_engine: SyncEngine | None = None
+        self._sync_pending: dict = {}   # task -> 同步条目（含 rel_path/size/mtime/kind）
+        self._sync_done: list = []
+        window.transfer_progress.cancelRequested.connect(self._queue.cancel_all)
+        window.settings_page.concurrencyChanged.connect(
+            self._queue.set_max_concurrent
+        )
+        window.transfers_page.retryRequested.connect(self._on_retry_task)
+
+        # 自动锁定：每 10 秒检查一次空闲时长；事件过滤器刷新最后活跃时间
         self._last_active = time.monotonic()
         self._lock_timer = QTimer(self.window)
-        self._lock_timer.setInterval(60_000)
+        self._lock_timer.setInterval(10_000)
         self._lock_timer.timeout.connect(self._check_auto_lock)
         self._setup_auto_lock()
 
@@ -120,12 +142,19 @@ class AppController(QObject):
         window.settings_page.themeChanged.connect(self._on_theme_changed)
         window.settings_page.fontSizeChanged.connect(self._on_font_size_changed)
         window.settings_page.autoLockChanged.connect(self._sync_lock_timer)
+        window.settings_page.recoveryCodeRequested.connect(
+            self._on_generate_recovery_code
+        )
+        window.settings_page.syncRequested.connect(self._on_sync_folder)
 
         # 密库信息页信号（含最近密库快速连接/移除/重命名）
         window.vault_info_page.connectRequested.connect(self.show_init_wizard)
         window.vault_info_page.quickConnectRequested.connect(self._on_quick_connect)
         window.vault_info_page.removeVaultRequested.connect(self._on_remove_vault)
         window.vault_info_page.renameRequested.connect(self._on_rename_vault)
+        window.vault_info_page.connectOtherVaultRequested.connect(
+            self._on_connect_other_vault
+        )
         window.vault_info_page.refreshRequested.connect(self._refresh_vault_info)
         window.vault_info_page.lockRequested.connect(self._lock_vault)
 
@@ -135,6 +164,11 @@ class AppController(QObject):
         # 文件树拖放信号
         window.file_tree.filesDropped.connect(self._on_files_dropped)
         window.file_tree.filesDraggedOut.connect(self._on_files_dragged_out)
+
+        # 文件页视图切换（网格视图需刷新当前目录缩略图）
+        window.side_panel.files_page.viewModeChanged.connect(
+            lambda _mode: self._refresh_grid()
+        )
 
         # 文件树右键菜单信号
         window.file_tree.downloadRequested.connect(self._ctx_download)
@@ -177,9 +211,14 @@ class AppController(QObject):
         return False  # 不拦截事件，仅记录
 
     def _check_auto_lock(self) -> None:
-        """定时检查：空闲超时且已连接密库时自动锁定。"""
+        """定时检查：空闲超时且已连接密库时自动锁定。
+
+        传输进行中豁免：锁库会使会话失效导致在传任务全部失败。
+        """
         minutes = self.window.settings_page.auto_lock_minutes
         if minutes <= 0 or self.session is None:
+            return
+        if self._queue.has_active:
             return
         if time.monotonic() - self._last_active >= minutes * 60:
             self._lock_vault()
@@ -217,17 +256,132 @@ class AppController(QObject):
 
     def _apply_setup(self, wizard: InitWizard) -> None:
         """应用向导产出并记录最近密库。"""
-        self._apply_connection(wizard.backend, wizard.metadata, wizard.session)
+        self._apply_connection(
+            wizard.backend, wizard.metadata, wizard.session,
+            vault_path=getattr(wizard, "vault_path", ""),
+        )
         self._remember_current_vault()
+        # 新建密库时生成的恢复码：入库完成后展示，提示用户离线保存
+        code = getattr(wizard, "recovery_code", "")
+        if code:
+            RecoveryCodeDialog(code, parent=self.window).exec()
 
-    def _apply_connection(self, backend, metadata, session) -> None:
+    def _on_generate_recovery_code(self) -> None:
+        """生成/更换恢复码：先输入主密码确认，重加密 Marker 后展示新码。"""
+        if not self._require_vault() or self.backend is None:
+            return
+        password, ok = QInputDialog.getText(
+            self.window,
+            "生成恢复码",
+            "请输入主密码确认身份：",
+            QLineEdit.EchoMode.Password,
+        )
+        if not ok or not password:
+            return
+        try:
+            code, meta = VaultManager(self.backend).generate_recovery_code(
+                password, self._vault_root
+            )
+        except Exception as exc:  # noqa: BLE001
+            box = FluentMessageBox("生成恢复码失败", str(exc), self.window)
+            box.exec()
+            return
+        self.metadata = meta
+        self.window.settings_page.update_recovery_state(True)
+        RecoveryCodeDialog(code, parent=self.window).exec()
+
+    def _on_sync_folder(self, local_dir: str) -> None:
+        """文件夹同步：对比索引生成计划，新增/变更文件走统一队列。"""
+        import os
+
+        if not self._require_vault() or self.session is None or self.backend is None:
+            return
+        if not os.path.isdir(local_dir):
+            self.window.settings_page.update_sync_status("本地目录不存在，请重新选择")
+            return
+        if self._sync_pending:
+            self.window.settings_page.update_sync_status("上一轮同步尚未结束，请稍候")
+            return
+        self._store.set_sync_dir(local_dir)
+
+        engine = SyncEngine(
+            self.session, self.backend,
+            vault_path=self._vault_root,
+            filename_enc=bool(self.metadata and self.metadata.filename_enc),
+            name_salt=self.metadata.salt if self.metadata else None,
+        )
+        try:
+            plan = engine.plan(local_dir)
+        except Exception as exc:  # noqa: BLE001
+            box = FluentMessageBox("同步失败", str(exc), self.window)
+            box.exec()
+            return
+        if plan.pending_count == 0:
+            self.window.settings_page.update_sync_status(
+                "已是最新：无新增或变更文件"
+            )
+            return
+
+        tasks = engine.build_tasks(plan)
+        entries = list(plan.new) + list(plan.changed)
+        for e, kind in [(e, "new") for e in plan.new] + [
+            (e, "changed") for e in plan.changed
+        ]:
+            e["kind"] = kind
+        self._sync_engine = engine
+        self._sync_pending = dict(zip(tasks, entries))
+        self._sync_done = []
+        self.window.settings_page.update_sync_status(
+            f"同步中：{len(plan.new)} 新增 / {len(plan.changed)} 变更"
+        )
+        self._enqueue_tasks(tasks)
+
+    def _finish_sync_batch(self) -> None:
+        """同步批次全部终态：写回加密索引并展示结果摘要。"""
+        engine = self._sync_engine
+        done = self._sync_done
+        self._sync_engine = None
+        self._sync_done = []
+        if engine is None:
+            return
+        entries = {
+            e["rel_path"]: {"size": e["size"], "mtime": e["mtime"]}
+            for e in done
+        }
+        try:
+            engine.update_index(entries)
+        except Exception as exc:  # noqa: BLE001
+            InfoBar.warning(
+                title="同步提醒",
+                content=f"文件已上传但索引写入失败（下次将重传）：{exc}",
+                parent=self.window, position=InfoBarPosition.TOP_RIGHT, duration=5000,
+            )
+            return
+        n_new = sum(1 for e in done if e.get("kind") == "new")
+        n_changed = len(done) - n_new
+        self.window.settings_page.update_sync_status(
+            f"同步完成：{n_new} 新增 / {n_changed} 更新"
+        )
+        self._refresh_tree()
+
+    def _apply_connection(
+        self, backend, metadata, session, vault_path: str = "",
+    ) -> None:
         """装载一次成功连接：后端、目录树、状态栏与各信息页。
 
-        向导与快速连接共用本方法。
+        向导与快速连接共用本方法；子目录密库经 vault_path 指定根前缀。
         """
         self.session = session
         self.backend = backend
         self.metadata = metadata
+        # 子目录密库的根前缀（文件树与路径拼接统一经目录树模型处理）
+        self._vault_root = (vault_path or "").strip("/")
+
+        # 绑定传输队列（任务入队后即可调度）
+        self._queue.bind(session, backend)
+
+        # 缩略图缓存与会话绑定（锁库时丢弃）
+        self._thumb_cache = ThumbnailCache(session)
 
         # 文件名加密开启时注入解密器（目录树显示原始名）
         name_decryptor = None
@@ -238,8 +392,11 @@ class AppController(QObject):
                 key = self.session.derive_key(salt)
                 return FilenameCipher.decrypt(enc_name, key)
 
-        # 装载目录树模型
-        self._tree_model = DirTreeModel(self.backend, name_decryptor=name_decryptor)
+        # 装载目录树模型（子目录密库以密库位置为可见根）
+        self._tree_model = DirTreeModel(
+            self.backend, name_decryptor=name_decryptor,
+            root=self._vault_root,
+        )
         self.window.side_panel.files_page.set_model(self._tree_model)
 
         # 连接文件树选中信号
@@ -258,10 +415,60 @@ class AppController(QObject):
             filename_enc=self.metadata.filename_enc,
             vault_name=_vault_display_name(self.metadata),
         )
+        # 恢复码状态（Marker 是否携带 v3 恢复块）
+        self.window.settings_page.update_recovery_state(
+            getattr(self.metadata, "has_recovery", False)
+        )
         self.window.settings_page._refresh_cache_usage()
 
         # 更新密库信息页
         self._update_vault_info_page()
+
+        # 检测上次未完成的传输，提供续传入口（横幅）
+        self._maybe_offer_resume()
+
+    def _maybe_offer_resume(self) -> None:
+        """存在未完成传输记录时，在传输页顶部显示恢复横幅。"""
+        pending = self._store.pending_transfers()
+        if not pending:
+            self.window.transfers_page.hide_resume_banner()
+            return
+        self.window.transfers_page.show_resume_banner(
+            len(pending), self._resume_pending_transfers
+        )
+
+    def _resume_pending_transfers(self) -> None:
+        """将上次未完成的传输记录重建为任务并重新入队。
+
+        上传任务携带记录时的 size/mtime 快照，启动前经队列做脏续传校验；
+        本地源文件已不存在的记录静默跳过。
+        """
+        import os
+        pending = self._store.pending_transfers()
+        if not pending or not self._require_vault():
+            return
+        tasks: list[TransferTask] = []
+        for rec in pending:
+            local = rec.get("local", "")
+            remote = rec.get("remote", "")
+            if not local or not remote:
+                continue
+            direction = rec.get("direction", "upload")
+            if direction == "upload" and not os.path.isfile(local):
+                continue  # 源文件已不存在，无法续传
+            task = TransferTask(
+                local_path=local, remote_path=remote,
+                display_name=rec.get("name") or os.path.basename(local),
+                direction=direction,
+            )
+            if direction == "upload" and rec.get("size") is not None:
+                task.expected_size = rec.get("size")
+                task.expected_mtime = rec.get("mtime")
+            tasks.append(task)
+        # 无论是否全部有效都隐藏横幅：无效记录随本次重写清理
+        self._store.set_pending_transfers([])
+        if tasks:
+            self._enqueue_tasks(tasks)
 
     def _remember_current_vault(self) -> None:
         """将当前成功连接写入最近密库记录并刷新引导页列表。"""
@@ -287,6 +494,36 @@ class AppController(QObject):
         if dlg.exec() == QuickConnectDialog.Accepted and dlg.metadata is not None:
             self._apply_connection(dlg.backend, dlg.metadata, dlg.session)
             self._remember_current_vault()
+
+    def _on_connect_other_vault(self, vault_path: str) -> None:
+        """连接本后端的其他密库：复用当前后端，仅需目标密库主密码。"""
+        if self.backend is None:
+            return
+        show_name = vault_path or "根目录"
+        password, ok = QInputDialog.getText(
+            self.window,
+            "连接其他密库",
+            f"请输入密库“{show_name}”的主密码：",
+            QLineEdit.EchoMode.Password,
+        )
+        if not ok or not password:
+            return
+        try:
+            meta = VaultManager(self.backend).open_vault(password, vault_path)
+        except Exception as exc:  # noqa: BLE001
+            box = FluentMessageBox("连接失败", str(exc), self.window)
+            box.exec()
+            return
+        if meta is None:
+            box = FluentMessageBox(
+                "连接失败", "主密码不正确。", self.window
+            )
+            box.exec()
+            return
+        self._apply_connection(
+            self.backend, meta, Session(password), vault_path=vault_path
+        )
+        self._remember_current_vault()
 
     def _on_remove_vault(self, record: dict) -> None:
         """移除最近密库记录（仅删记录，不影响云端数据）。"""
@@ -349,6 +586,8 @@ class AppController(QObject):
 
         remote_path = self._build_remote_path(node)
         self.window.preview_panel.show_file(self.session, self.backend, remote_path)
+        # 网格视图下选中变更同步刷新当前目录（选中文件则显示其所在目录）
+        self._refresh_grid()
 
     def _build_remote_path(self, node) -> str:
         """从树节点构建远端路径。"""
@@ -395,10 +634,10 @@ class AppController(QObject):
                 self.window, "保存解密文件", default
             )
             if path:
-                self._start_bg_transfer(
-                    path, remote_path,
-                    file_name=default, direction="download",
-                )
+                self._enqueue_tasks([TransferTask(
+                    local_path=path, remote_path=remote_path,
+                    display_name=default, direction="download",
+                )])
 
     # ------------------------------------------------------------------
     # 播放
@@ -429,7 +668,7 @@ class AppController(QObject):
         self.upload_files(local_paths, remote_dir)
 
     def _on_files_dragged_out(self, remote_paths: list[str]) -> None:
-        """文件拖出：解密下载到用户选择的目标目录。"""
+        """文件拖出：解密下载到用户选择的目标目录（目录递归展开）。"""
         if not self._require_vault() or not remote_paths:
             return
         import os
@@ -439,43 +678,42 @@ class AppController(QObject):
         )
         if not save_dir:
             return
+        tasks: list[TransferTask] = []
         for rp in remote_paths:
-            # 解密文件名作为本地保存名
-            fname = rp.rsplit("/", 1)[-1]
-            if self._is_filename_enc() and fname.endswith(".cpenc"):
-                enc_base = fname[: -len(".cpenc")]
-                try:
-                    salt = self.metadata.salt
-                    key = self.session.derive_key(salt)
-                    fname = FilenameCipher.decrypt(enc_base, key)
-                except Exception:
-                    fname = fname[: -len(".cpenc")] if fname.endswith(".cpenc") else fname
-            elif fname.endswith(".cpenc"):
-                fname = fname[: -len(".cpenc")]
+            if not rp.endswith(".cpenc"):
+                # 目录：递归展开为下载任务（本地目录树由展开器创建）
+                tasks.extend(self._expand_remote_dir_tasks(rp, save_dir))
+                continue
+            # 解密文件名作为本地保存名（去掉 .cpenc 后还原）
+            fname = self._decrypt_name(rp.rsplit("/", 1)[-1][: -len(".cpenc")])
             local_path = os.path.join(save_dir, fname)
-            self._start_bg_transfer(
-                local_path, rp,
-                file_name=fname, direction="download",
-            )
+            tasks.append(TransferTask(
+                local_path=local_path, remote_path=rp,
+                display_name=fname, direction="download",
+            ))
+        self._enqueue_tasks(tasks)
 
     def _selected_remote_dir(self) -> str:
-        """获取文件树当前选中目录的远端路径。"""
+        """获取文件树当前选中目录的远端路径（无选中时为密库根）。"""
         indexes = self.window.file_tree.selectedIndexes()
         if not indexes:
-            return ""
+            return getattr(self, "_vault_root", "")
         node = indexes[0].internalPointer()
         if node is None:
-            return ""
+            return getattr(self, "_vault_root", "")
         if not node.is_dir:
             node = node.parent
         if node is None:
-            return ""
+            return getattr(self, "_vault_root", "")
         parts: list[str] = []
         cur = node
         while cur is not None and cur.name:
             parts.append(cur.name)
             cur = cur.parent
         parts.reverse()
+        if not parts:
+            # 树根节点：子目录密库时为其位置路径，否则为后端根
+            return getattr(self, "_vault_root", "")
         return "/".join(parts)
 
     # ------------------------------------------------------------------
@@ -506,6 +744,39 @@ class AppController(QObject):
         """刷新文件树。"""
         if self._tree_model is not None:
             self._tree_model.reload()
+        self._refresh_grid()
+
+    def _refresh_grid(self) -> None:
+        """网格视图下刷新当前目录条目与缩略图（列表视图下空操作）。"""
+        files_page = self.window.side_panel.files_page
+        if not files_page.is_grid_mode() or self._tree_model is None:
+            return
+        if self.session is None or self.backend is None:
+            return
+
+        # 当前目录：选中目录本身；选中文件则取其父目录；无选中为根
+        indexes = files_page.tree.selectedIndexes()
+        index = indexes[0] if indexes else QModelIndex()
+        node = index.internalPointer() if index.isValid() else None
+        if node is not None and not node.is_dir:
+            index = index.parent()
+            node = index.internalPointer() if index.isValid() else None
+
+        model = self._tree_model
+        if model.canFetchMore(index):
+            model.fetchMore(index)
+
+        from cloudprism.gui.preview_panel import classify_file
+
+        entries = []
+        for child in model.dir_entries(node):
+            display = model.display_name(child.name)
+            rpath = model.remote_path(child)
+            is_image = (not child.is_dir) and classify_file(display) == "image"
+            entries.append((display, rpath, child.is_dir, is_image))
+        files_page.populate_grid(
+            self.session, self.backend, self._thumb_cache, entries
+        )
 
     # ------------------------------------------------------------------
     # 右键菜单操作（新建/重命名/删除/下载）
@@ -646,8 +917,71 @@ class AppController(QObject):
         self._refresh_tree()
 
     def _ctx_download(self, display_path: str) -> None:
-        """右键下载单个文件。"""
-        self.download_file(self._resolve_remote_path(display_path))
+        """右键下载：单文件保存解密；文件夹递归展开批量下载。"""
+        remote = self._resolve_remote_path(display_path)
+        if remote.endswith(".cpenc"):
+            self.download_file(remote)
+        else:
+            self._download_dir(remote)
+
+    def _download_dir(self, remote_dir: str) -> None:
+        """下载整个文件夹：选择目标目录后递归展开入统一队列。"""
+        if not self._require_vault() or not remote_dir:
+            return
+        save_dir = QFileDialog.getExistingDirectory(
+            self.window, "选择保存目录"
+        )
+        if not save_dir:
+            return
+        self._enqueue_tasks(self._expand_remote_dir_tasks(remote_dir, save_dir))
+
+    def _expand_remote_dir_tasks(
+        self, remote_dir: str, save_root: str
+    ) -> list[TransferTask]:
+        """递归展开远端目录为下载任务。
+
+        文件名/目录名按文件名加密设置还原本地名；本地目录树按解密结构
+        预先创建，每文件走统一传输队列（天然获得聚合进度/取消/重试）。
+        """
+        import os
+        tasks: list[TransferTask] = []
+        dir_name = self._decrypt_name(remote_dir.rsplit("/", 1)[-1])
+        stack = [(remote_dir, os.path.join(save_root, dir_name))]
+        while stack:
+            rdir, ldir = stack.pop()
+            try:
+                os.makedirs(ldir, exist_ok=True)
+                entries = self.backend.list_dir(rdir)
+            except Exception:
+                continue  # 单个目录失败不影响其他目录
+            for e in entries:
+                rpath = f"{rdir}/{e.name}"
+                if e.is_dir:
+                    stack.append(
+                        (rpath, os.path.join(ldir, self._decrypt_name(e.name)))
+                    )
+                else:
+                    base = e.name
+                    if base.endswith(".cpenc"):
+                        base = base[: -len(".cpenc")]
+                    fname = self._decrypt_name(base)
+                    tasks.append(TransferTask(
+                        local_path=os.path.join(ldir, fname),
+                        remote_path=rpath,
+                        display_name=fname, direction="download",
+                    ))
+        return tasks
+
+    def _decrypt_name(self, name: str) -> str:
+        """后端名还原本地名；文件名加密关闭时原样返回，失败时返回原名。"""
+        if not self._is_filename_enc():
+            return name
+        try:
+            salt = self.metadata.salt
+            key = self.session.derive_key(salt)
+            return FilenameCipher.decrypt(name, key)
+        except Exception:
+            return name
 
     # ------------------------------------------------------------------
     # 后台传输管理
@@ -656,34 +990,38 @@ class AppController(QObject):
     def _upload_paths(self, paths: list[str], remote_dir: str) -> None:
         """批量入队本地路径（文件或文件夹）后台加密上传。"""
         import os
-        tasks: list[tuple[str, str, str, str]] = []
+        tasks: list[TransferTask] = []
         for path in paths:
             if os.path.isfile(path):
                 tasks.append(self._make_upload_task(path, remote_dir))
             elif os.path.isdir(path):
                 tasks.extend(self._expand_dir_tasks(path, remote_dir))
-        if not tasks:
-            return
-        self._transfer_total += len(tasks)
-        self._transfer_queue.extend(tasks)
-        if not self._transfer_busy:
-            self._run_next_transfer()
+        self._enqueue_tasks(tasks)
 
-    def _make_upload_task(self, local_path: str, remote_dir: str) -> tuple:
-        """构造单文件上传任务：(本地路径, 远端路径, 显示名, 方向)。"""
+    def _make_upload_task(self, local_path: str, remote_dir: str) -> TransferTask:
+        """构造单文件上传任务（携带本地源文件快照供脏续传校验）。"""
         import os
         name = os.path.basename(local_path)
         enc_name = self._encrypt_filename(name) if self._is_filename_enc() else name
         remote = f"{remote_dir}/{enc_name}.cpenc" if remote_dir else f"{enc_name}.cpenc"
-        return (local_path, remote, name, "upload")
+        try:
+            st = os.stat(local_path)
+            size, mtime = st.st_size, st.st_mtime
+        except OSError:
+            size, mtime = None, None
+        return TransferTask(
+            local_path=local_path, remote_path=remote,
+            display_name=name, direction="upload",
+            expected_size=size, expected_mtime=mtime,
+        )
 
-    def _expand_dir_tasks(self, dir_path: str, remote_dir: str) -> list[tuple]:
+    def _expand_dir_tasks(self, dir_path: str, remote_dir: str) -> list[TransferTask]:
         """展开目录为上传任务：逐级创建远端目录后逐文件入队。
 
         目录名按文件名加密设置处理；已存在的目录容错跳过。
         """
         import os
-        tasks: list[tuple] = []
+        tasks: list[TransferTask] = []
         base_name = os.path.basename(dir_path.rstrip(os.sep))
         root_enc = self._encrypt_filename(base_name) if self._is_filename_enc() else base_name
         root_remote = f"{remote_dir}/{root_enc}" if remote_dir else root_enc
@@ -714,78 +1052,89 @@ class AppController(QObject):
                 )
         return tasks
 
-    def _start_bg_transfer(
-        self,
-        local_path: str,
-        remote_path: str,
-        file_name: str = "",
-        direction: str = "upload",
-    ) -> None:
-        """入队并启动单个后台传输任务（追加式，不打断现有队列）。"""
-        self._transfer_total += 1
-        self._transfer_queue.append((local_path, remote_path, file_name, direction))
-        if not self._transfer_busy:
-            self._run_next_transfer()
-
-    def _run_next_transfer(self) -> None:
-        """执行队列中的下一个传输任务（串行）。"""
-        if not self._transfer_queue:
-            self._transfer_busy = False
+    def _enqueue_tasks(self, tasks: list[TransferTask]) -> None:
+        """一批传输任务入队并发队列（追加式，不打断现有任务）。"""
+        if not tasks:
             return
-        self._transfer_busy = True
-        local_path, remote_path, file_name, direction = self._transfer_queue.pop(0)
-        self._transfer_current += 1
-
-        chunk = self.window.settings_page.chunk_size
-        max_workers = self.window.settings_page.max_cores
-        kind = (
-            TransferWorker.KIND_UPLOAD
-            if direction == "upload"
-            else TransferWorker.KIND_DOWNLOAD
+        # 传输参数从设置页同步（分块大小 / 并行加密核数）
+        self._queue.set_transfer_options(
+            chunk=self.window.settings_page.chunk_size,
+            max_workers=self.window.settings_page.max_cores,
         )
-        worker, thread = start_transfer_bg(
-            kind,
-            self.session, self.backend,
-            local_path, remote_path,
-            chunk=chunk, max_workers=max_workers,
-            parent=self.window,
-        )
-        # 保持线程引用防止被回收
-        self._active_threads.append(thread)
-        thread.finished.connect(
-            lambda t=thread: self._active_threads.remove(t)
-            if t in self._active_threads else None
-        )
-
-        # 传输队列页 + 底部进度条联动（item 闭包捕获，避免被后续任务覆盖）
         transfers_page = self.window.transfers_page
-        item = transfers_page.add_task(file_name, direction)
-        self.window.transfer_progress.show_task(
-            file_name, direction=direction,
-            current=self._transfer_current, total=self._transfer_total,
-            cancel_fn=worker.cancel,
-        )
+        for t in tasks:
+            item = transfers_page.add_task(t.display_name, t.direction)
+            item.setData(Qt.ItemDataRole.UserRole, t)  # 重试时映射回任务
+            self._task_cards[t] = item
+        self._batch_total += len(tasks)
+        self._queue.enqueue(tasks)
+        self._sync_pending_records()
 
-        def _on_progress(p: float) -> None:
-            self.window.transfer_progress.update_progress(p)
-            transfers_page.update_task(item, p)
+    def _on_task_progress(self, task: TransferTask) -> None:
+        """单任务进度：同步传输页条目与底部进度条。"""
+        item = self._task_cards.get(task)
+        if item is not None:
+            self.window.transfers_page.update_task(item, task.progress)
+        bar = self.window.transfer_progress
+        if not bar.isVisible():
+            # 首次显示：带上批次 (n/m) 计数
+            unfinished = len(self._queue.unfinished_tasks())
+            bar.show_task(
+                task.display_name, direction=task.direction,
+                current=max(1, self._batch_total - unfinished + 1),
+                total=max(1, self._batch_total),
+            )
+        bar.update_progress(task.progress)
 
-        def _finish(success: bool) -> None:
-            transfers_page.finish_task(item, success)
+    def _on_task_finished(self, task: TransferTask, success: bool) -> None:
+        """单任务终态：更新条目；全部结束时收尾并刷新文件树。"""
+        item = self._task_cards.get(task)
+        if item is not None:
+            self.window.transfers_page.finish_task(
+                item, success, cancelled=(task.state == STATE_CANCELLED)
+            )
+        # 同步批次跟踪：收集成功条目，批次清空时写回索引并展示摘要
+        if self._sync_pending:
+            entry = self._sync_pending.pop(task, None)
+            if entry is not None:
+                if success:
+                    self._sync_done.append(entry)
+                if not self._sync_pending:
+                    self._finish_sync_batch()
+        self._sync_pending_records()
+        if self._queue.is_idle:
+            # 本批全部结束：展示结果并刷新文件树（上传后新文件可见）
+            self._batch_total = 0
             self.window.transfer_progress.task_finished(success)
-            if not self._transfer_queue:
-                # 本批全部结束：重置计数并刷新文件树（上传后新文件可见）
-                self._transfer_total = 0
-                self._transfer_current = 0
-                self._transfer_busy = False
-                self._refresh_tree()
-            else:
-                self._run_next_transfer()
+            self._refresh_tree()
 
-        worker.progress.connect(_on_progress)
-        worker.finished.connect(lambda: _finish(True))
-        worker.cancelled.connect(lambda: _finish(False))
-        worker.error.connect(lambda msg: _finish(False))
+    def _on_retry_task(self, task: TransferTask) -> None:
+        """手动重试失败/取消的任务（重置传输页条目后重新入队）。"""
+        item = self._task_cards.get(task)
+        if item is not None:
+            self.window.transfers_page.reset_task(item)
+        self._queue.retry(task)
+
+    def _on_aggregate_progress(self, done: int, total: int) -> None:
+        """聚合进度（字节级）：驱动底部进度条与未完成记录持久化。"""
+        self.window.transfer_progress.update_aggregate(done, total)
+
+    def _sync_pending_records(self) -> None:
+        """持久化未完成传输记录（重启后续传用）；全部结束后自动清空。
+
+        仅记录路径与快照信息，密码与会话信息不落盘。
+        """
+        records = []
+        for t in self._queue.unfinished_tasks():
+            rec = {
+                "local": t.local_path, "remote": t.remote_path,
+                "name": t.display_name, "direction": t.direction,
+            }
+            if t.expected_size is not None:
+                rec["size"] = t.expected_size
+                rec["mtime"] = t.expected_mtime
+            records.append(rec)
+        self._store.set_pending_transfers(records)
 
     def _refresh_vault_info(self) -> None:
         """刷新密库信息页。"""
@@ -799,19 +1148,24 @@ class AppController(QObject):
         self.backend = None
         self.metadata = None
         self._tree_model = None
-        # 重置传输队列状态（进行中的任务会因会话失效而报错结束）
-        self._transfer_queue.clear()
-        self._transfer_total = 0
-        self._transfer_current = 0
-        self._transfer_busy = False
+        # 重置传输队列（进行中的任务因会话失效而停止；续传记录保留供重连后恢复）
+        self._queue.clear()
+        self._task_cards.clear()
+        self._thumb_cache = None  # 缩略图缓存与会话绑定，一并丢弃
         self.window.set_connected(False)
         self.window.vault_info_page.show_disconnected()
         self.window.preview_panel.show_welcome()
         self.window.transfer_progress.hide_bar()
-        # 清空文件树模型
+        # 清空文件树模型与网格视图残留条目
         self.window.side_panel.files_page.tree.setModel(None)
+        self.window.side_panel.files_page.grid_list.clear()
         # 引导页回填最近密库记录，便于快速重连
         self.window.vault_info_page.set_recent_vaults(self._store.recent_vaults())
+        # 设置页恢复码提示回到未连接态；同步批次状态一并重置
+        self.window.settings_page.update_recovery_state(None)
+        self._sync_engine = None
+        self._sync_pending = {}
+        self._sync_done = []
 
     def _update_vault_info_page(self) -> None:
         """更新密库信息页显示（云端占用/文件数在后台线程递归统计）。"""
@@ -850,6 +1204,16 @@ class AppController(QObject):
             cache_size=cache_size,
             file_count="计算中…",
         )
+
+        # 本后端的其他密库（子目录 Marker 扫描；排除当前连接的密库）
+        try:
+            vaults = VaultManager(self.backend).list_vaults()
+        except Exception:  # noqa: BLE001
+            vaults = []
+        others = [
+            v for v in vaults if (v.get("path") or "") != self._vault_root
+        ]
+        self.window.vault_info_page.set_other_vaults(others)
 
         # 云端占用递归统计放到后台线程，避免远程后端阻塞 UI
         self._start_stats_worker()

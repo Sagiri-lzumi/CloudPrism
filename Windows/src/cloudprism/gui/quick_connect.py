@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 # Fluent 组件（均继承自对应 Qt 原生控件，标准 API 全兼容）
-from qfluentwidgets import LineEdit, PrimaryPushButton, PushButton
+from qfluentwidgets import CheckBox, LineEdit, PrimaryPushButton, PushButton
 
 from cloudprism.core.backend_factory import build_backend_from_params
 from cloudprism.core.session import Session
@@ -83,6 +83,19 @@ class QuickConnectDialog(QDialog):
 
         lay.addLayout(form)
 
+        # ---- 恢复码开库（折叠输入框：勾选后展开，代替主密码） ----
+        self._recovery_check = CheckBox("使用恢复码开库（忘记主密码时）", self)
+        self._recovery_check.toggled.connect(self._on_recovery_toggled)
+        lay.addWidget(self._recovery_check)
+
+        self._recovery_edit = LineEdit(self)
+        self._recovery_edit.setPlaceholderText(
+            "XXXX-XXXX-XXXX-XXXX（建库时生成，离线保存）"
+        )
+        self._recovery_edit.returnPressed.connect(self._connect)
+        self._recovery_edit.setVisible(False)
+        lay.addWidget(self._recovery_edit)
+
         # ---- 按钮行 ----
         btn_row = QHBoxLayout()
         self._connect_btn = PrimaryPushButton("连接", self)
@@ -106,10 +119,22 @@ class QuickConnectDialog(QDialog):
     # 连接动作
     # ------------------------------------------------------------------
 
+    def _on_recovery_toggled(self, checked: bool) -> None:
+        """展开/收起恢复码输入框；勾选后主密码非必填。"""
+        self._recovery_edit.setVisible(checked)
+        if checked:
+            self._status.setText("")
+
     def _connect(self) -> None:
-        """构造后端并打开密库；失败在对话框内提示不关闭。"""
+        """构造后端并打开密库（主密码或恢复码）；失败在对话框内提示。"""
+        use_recovery = self._recovery_check.isChecked()
+        recovery = self._recovery_edit.text().strip()
         pw = self._pw_edit.text()
-        if not pw:
+        if use_recovery:
+            if not recovery:
+                self._status.setText("请输入恢复码")
+                return
+        elif not pw:
             self._status.setText("请输入主密码")
             return
         webdav_pass = ""
@@ -131,10 +156,18 @@ class QuickConnectDialog(QDialog):
                 webdav_user=self._record.get("webdav_user", ""),
                 webdav_pass=webdav_pass,
             )
-            meta = VaultManager(backend).open_vault(pw)
-            if meta is None:
-                self._status.setText("主密码错误，或该位置不存在密库")
-                return
+            vm = VaultManager(backend)
+            if use_recovery:
+                meta = vm.open_vault_with_recovery(recovery)
+                if meta is None:
+                    self._status.setText("恢复码无效，或该密库未启用恢复码")
+                    return
+                pw = vm.recovered_password or ""
+            else:
+                meta = vm.open_vault(pw)
+                if meta is None:
+                    self._status.setText("主密码错误，或该位置不存在密库")
+                    return
             self.backend = backend
             self.metadata = meta
             self.session = Session(pw)

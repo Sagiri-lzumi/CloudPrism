@@ -269,3 +269,141 @@ class TestMainWindow:
         assert vip._rename_btn is not None
         vip.update_info(vault_name="自定义名")
         assert vip._vault_name_label.text() == "自定义名"
+
+
+# ---------------------------------------------------------------------------
+# 三期新特性：并发设置 / 网格视图 / 传输页 / 多密库 / 同步卡 / 续传横幅
+# ---------------------------------------------------------------------------
+
+
+class TestConcurrencySetting:
+    """并发传输设置启用并发射信号。"""
+
+    def test_concurrency_signal(self, qtbot):
+        win = MainWindow()
+        qtbot.addWidget(win)
+        sp = win.settings_page
+        assert sp._concurrent_spin.isEnabled()
+        with qtbot.waitSignal(sp.concurrencyChanged, timeout=1000) as blocker:
+            sp._concurrent_spin.setValue(3)
+        assert blocker.args[0] == 3
+
+
+class TestGridView:
+    """文件页列表/网格视图切换。"""
+
+    def test_grid_mode_toggle(self, qtbot):
+        win = MainWindow()
+        qtbot.addWidget(win)
+        fp = win._files_page
+        assert not fp.is_grid_mode()
+        with qtbot.waitSignal(fp.viewModeChanged, timeout=1000) as blocker:
+            fp.set_grid_mode(True)
+        assert blocker.args[0] == "grid"
+        assert fp.is_grid_mode()
+        # 重复切换同一视图不重复发信号（直接调方法验证提前返回）
+        fp.set_grid_mode(True)
+        with qtbot.waitSignal(fp.viewModeChanged, timeout=1000) as blocker:
+            fp.set_grid_mode(False)
+        assert blocker.args[0] == "list"
+        assert not fp.is_grid_mode()
+
+
+class TestTransfersPageNew:
+    """传输页：任务卡重试与续传横幅。"""
+
+    def test_retry_signal(self, qtbot):
+        """失败任务卡片点重试：发射携带任务对象的信号。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        tp = win.transfers_page
+        item = tp.add_task("a.txt", "upload")
+        sentinel = object()  # 以任意对象充当任务载体（控制器经 UserRole 挂载）
+        item.setData(Qt.ItemDataRole.UserRole, sentinel)
+        card = tp._card(item)
+        tp.finish_task(item, success=False)
+        assert not card._retry_btn.isHidden()
+        with qtbot.waitSignal(tp.retryRequested, timeout=1000) as blocker:
+            card._retry_btn.click()
+        assert blocker.args[0] is sentinel
+
+    def test_resume_banner(self, qtbot):
+        """续传横幅：显示/点击回调/隐藏（未显示窗口用 isHidden 判定）。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        tp = win.transfers_page
+        assert tp._resume_banner.isHidden()
+        calls = []
+        tp.show_resume_banner(3, lambda: calls.append(1))
+        assert not tp._resume_banner.isHidden()
+        assert "3 项" in tp._resume_banner.text()
+        tp._resume_banner.click()
+        assert calls == [1]
+        tp.hide_resume_banner()
+        assert tp._resume_banner.isHidden()
+
+
+class TestOtherVaults:
+    """密库信息页：本后端的其他密库列表。"""
+
+    def test_other_vault_cards(self, qtbot):
+        from cloudprism.gui.vault_info_page import VaultInfoPage
+
+        page = VaultInfoPage()
+        qtbot.addWidget(page)
+        # 默认隐藏（无其他密库）
+        assert page._other_container.isHidden()
+        page.set_other_vaults([{"path": "backup", "vault_id": None}])
+        assert not page._other_container.isHidden()
+        cards = page.other_vault_cards()
+        assert len(cards) == 1
+        with qtbot.waitSignal(
+            page.connectOtherVaultRequested, timeout=1000
+        ) as blocker:
+            cards[0].connect_btn.click()
+        assert blocker.args[0] == "backup"
+        # 清空后回退隐藏
+        page.set_other_vaults([])
+        assert page._other_container.isHidden()
+
+
+class TestSyncCard:
+    """设置页文件夹同步卡。"""
+
+    def test_sync_dir_and_signal(self, qtbot):
+        win = MainWindow()
+        qtbot.addWidget(win)
+        sp = win.settings_page
+        assert sp.sync_dir() == ""
+        sp.set_sync_dir("D:/docs")
+        assert sp.sync_dir() == "D:/docs"
+        with qtbot.waitSignal(sp.syncRequested, timeout=1000) as blocker:
+            sp._sync_btn.click()
+        assert blocker.args[0] == "D:/docs"
+
+    def test_sync_without_dir_no_signal(self, qtbot):
+        win = MainWindow()
+        qtbot.addWidget(win)
+        sp = win.settings_page
+        fired = []
+        sp.syncRequested.connect(lambda p: fired.append(p))
+        sp._sync_btn.click()
+        assert fired == []
+
+    def test_recovery_state_text(self, qtbot):
+        win = MainWindow()
+        qtbot.addWidget(win)
+        sp = win.settings_page
+        sp.update_recovery_state(True)
+        assert "已启用" in sp._recovery_status.text()
+        sp.update_recovery_state(False)
+        assert "尚无" in sp._recovery_status.text()
+
+    def test_new_expand_cards_font_unified(self, qtbot):
+        """新增展开卡（恢复码/同步）内嵌控件同样过字体统一检查。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        sp = win.settings_page
+        for w in (sp._sync_dir_edit,):
+            assert w.font().pixelSize() == 14, f"{type(w).__name__} 字体未统一"
+

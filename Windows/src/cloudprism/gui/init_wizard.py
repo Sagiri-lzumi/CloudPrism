@@ -16,13 +16,16 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal, Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QRadioButton,
     QStackedWidget,
+    QTextEdit,
     QVBoxLayout,
     QWizard,
     QWizardPage,
@@ -181,6 +184,15 @@ class BackendConfigPage(QWizardPage):
         test_row.addWidget(self.test_btn)
         test_row.addWidget(self.test_status, stretch=1)
         lay.addLayout(test_row)
+
+        # 密库位置（仅新建模式显示）：根目录或子目录名，可选填
+        self.location_label = QLabel("密库位置（可选，留空=后端根目录）：", self)
+        self.location_edit = LineEdit(self)
+        self.location_edit.setPlaceholderText(
+            "例如：vault-work（在子目录新建独立密库）"
+        )
+        lay.addWidget(self.location_label)
+        lay.addWidget(self.location_edit)
         lay.addStretch()
 
     # ------------------------------------------------------------------
@@ -320,6 +332,10 @@ class BackendConfigPage(QWizardPage):
         btype = wizard.backend_type if wizard else "local"
         idx = {"local": 0, "webdav": 1, "baidu": 2}.get(btype, 0)
         self._stack.setCurrentIndex(idx)
+        # 密库位置仅新建模式可选（连接模式位置由密库记录决定）
+        is_new = wizard.is_new_mode() if wizard else True
+        self.location_label.setVisible(is_new)
+        self.location_edit.setVisible(is_new)
         # 更新副标题提示并回填上次配置
         if btype == "local":
             self.setSubTitle("选择本地文件夹作为云盘根目录")
@@ -419,25 +435,32 @@ class PasswordPage(QWizardPage):
         self.confirm_edit.textChanged.connect(lambda: self.completeChanged.emit())
         lay.addWidget(self.confirm_label)
         lay.addWidget(self.confirm_edit)
+
+        # 恢复码开库（仅连接模式显示）：填写后可代替主密码，留空则用主密码
+        self.recovery_label = QLabel("恢复码（可选，丢失主密码时凭码开库）：", self)
+        self.recovery_edit = LineEdit(self)
+        self.recovery_edit.setPlaceholderText("XXXX-XXXX-XXXX-XXXX（留空则使用主密码）")
+        lay.addWidget(self.recovery_label)
+        lay.addWidget(self.recovery_edit)
         lay.addStretch()
 
     def initializePage(self) -> None:
-        """根据模式显示/隐藏名称框与确认框。"""
+        """根据模式显示/隐藏名称框、确认框与恢复码框。"""
         wizard = self.wizard()
         is_new = wizard.is_new_mode()
         self.name_label.setVisible(is_new)
         self.name_edit.setVisible(is_new)
         self.confirm_label.setVisible(is_new)
         self.confirm_edit.setVisible(is_new)
+        self.recovery_label.setVisible(not is_new)
+        self.recovery_edit.setVisible(not is_new)
 
     def isComplete(self) -> bool:  # noqa: N802
-        """新建：两次一致且非空；连接：非空。"""
+        """新建：两次一致且非空；连接：主密码或恢复码非空。"""
         pw = self.pw_edit.text()
-        if not pw:
-            return False
-        if self.wizard().is_new_mode() and pw != self.confirm_edit.text():
-            return False
-        return True
+        if self.wizard().is_new_mode():
+            return bool(pw) and pw == self.confirm_edit.text()
+        return bool(pw) or bool(self.recovery_edit.text().strip())
 
     def nextId(self) -> int:
         """连接模式跳过文件名加密页，本页即末页。"""
@@ -475,6 +498,64 @@ class FilenameEncPage(QWizardPage):
         lay.addStretch()
 
 
+class RecoveryCodeDialog(QDialog):
+    """恢复码展示对话框：大字等宽只读展示 + 复制按钮，提示离线保存。
+
+    新建密库成功后与设置页更换恢复码时复用。
+    """
+
+    def __init__(self, code: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("保存恢复码")
+        self.setMinimumWidth(420)
+        self._code = code
+
+        lay = QVBoxLayout(self)
+        lay.setSpacing(10)
+
+        tip = QLabel(
+            "请复制以下恢复码并离线保存（如密码管理器或纸质备份）。\n"
+            "丢失主密码时可凭此码开库；恢复码丢失将无法找回。",
+            self,
+        )
+        tip.setWordWrap(True)
+        lay.addWidget(tip)
+
+        self.code_edit = QTextEdit(self)
+        self.code_edit.setReadOnly(True)
+        self.code_edit.setFont(QFont("Consolas", 18))
+        self.code_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.code_edit.setFixedHeight(72)
+        self.code_edit.setPlainText(VaultManager.format_recovery_code(code))
+        lay.addWidget(self.code_edit)
+
+        note = QLabel(
+            "生成新恢复码后，旧恢复码立即失效；恢复码不会上传云端。",
+            self,
+        )
+        note.setStyleSheet(f"color: {semantic_color('muted')};")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+
+        btn_row = QHBoxLayout()
+        copy_btn = PushButton("复制恢复码", self)
+        copy_btn.clicked.connect(self._copy_code)
+        ok_btn = PrimaryPushButton("我已保存，完成", self)
+        ok_btn.clicked.connect(self.accept)
+        btn_row.addWidget(copy_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(ok_btn)
+        lay.addLayout(btn_row)
+
+    def _copy_code(self) -> None:
+        """将分组格式的恢复码写入剪贴板。"""
+        from PySide6.QtWidgets import QApplication
+
+        QApplication.clipboard().setText(
+            VaultManager.format_recovery_code(self._code)
+        )
+
+
 class InitWizard(QWizard):
     """初始化向导。"""
 
@@ -497,6 +578,12 @@ class InitWizard(QWizard):
 
         # 后端类型选择（由 BackendTypePage 写入）
         self.backend_type: str = "local"
+
+        # 密库位置（新建模式可选：空=后端根目录，否则为子目录名）
+        self.vault_path: str = ""
+
+        # 新建成功时生成的恢复码（控制器展示后由用户离线保存）
+        self.recovery_code: str = ""
 
         # 各页实例
         self.page_mode = ModePage()
@@ -538,23 +625,41 @@ class InitWizard(QWizard):
         vm = VaultManager(backend)
 
         if self.is_new_mode():
-            # 新建Mi库（可选携带自定义名称）
+            # 新建Mi库（可选携带自定义名称与密库位置）
             filename_enc = self.page_enc.radio_on.isChecked()
+            self.vault_path = (
+                self.page_backend_cfg.location_edit.text().strip().strip("/")
+            )
             try:
                 meta = vm.create_vault(
                     pw,
                     filename_enc,
                     name=self.page_password.name_edit.text().strip(),
+                    vault_path=self.vault_path,
                 )
             except Exception as e:
                 self._error(f"新建Mi库失败：{e}")
                 return
+            # 新建即生成恢复码（失败不阻断建库，后续可在设置页补生成）
+            try:
+                code, meta = vm.generate_recovery_code(pw, self.vault_path)
+                self.recovery_code = code
+            except Exception:  # noqa: BLE001
+                self.recovery_code = ""
         else:
-            # 连接已有Mi库
-            meta = vm.open_vault(pw)
-            if meta is None:
-                self._error("密码错误或后端无Mi库，请检查后重试")
-                return
+            # 连接已有Mi库（主密码或恢复码二选一）
+            recovery = self.page_password.recovery_edit.text().strip()
+            if recovery:
+                meta = vm.open_vault_with_recovery(recovery)
+                if meta is None:
+                    self._error("恢复码无效，或该位置不存在带恢复码的Mi库")
+                    return
+                pw = vm.recovered_password or pw
+            else:
+                meta = vm.open_vault(pw)
+                if meta is None:
+                    self._error("密码错误或后端无Mi库，请检查后重试")
+                    return
 
         self.backend = backend
         self.metadata = meta

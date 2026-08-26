@@ -11,8 +11,8 @@ import os
 import shutil
 import tempfile
 
-from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, Signal
+from PySide6.QtGui import QFont, QImage, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFormLayout,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidgetItem,
     QMessageBox,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -36,6 +37,7 @@ from qfluentwidgets import (
     OptionsConfigItem,
     OptionsValidator,
     PrimaryPushButton,
+    ProgressBar,
     PushButton,
     PushSettingCard,
     ScrollArea,
@@ -44,6 +46,7 @@ from qfluentwidgets import (
     SpinBox,
     SubtitleLabel,
     TitleLabel,
+    ToolButton,
 )
 
 from cloudprism.gui.baidu_auth import BaiduAuthDialog
@@ -79,27 +82,194 @@ def _unify_expand_font(card) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 文件树页
+# 文件树页（列表 / 网格双视图）
 # ---------------------------------------------------------------------------
 
 
+class _ThumbSignals(QObject):
+    """缩略图后台任务的信号载体（remote_path, QIcon|None）。"""
+
+    done = Signal(str, object)
+
+
+class _ThumbJob(QRunnable):
+    """后台解密生成缩略图（头部随机访问解密，不下载整文件）。"""
+
+    # 缩略图目标边长（图标尺寸）
+    THUMB_SIZE = 96
+
+    def __init__(self, session, backend, cache, remote_path: str) -> None:
+        super().__init__()
+        self._session = session
+        self._backend = backend
+        self._cache = cache
+        self._remote_path = remote_path
+        self.signals = _ThumbSignals()
+
+    def run(self) -> None:
+        from cloudprism.core.thumbnail import fetch_thumbnail
+
+        icon = None
+        try:
+            data = fetch_thumbnail(
+                self._session, self._backend, self._remote_path,
+                cache=self._cache,
+            )
+            if data:
+                img = QImage()
+                # 头部截取可能不完整，loadFromData 失败则回退占位图标
+                if img.loadFromData(data):
+                    img = img.scaled(
+                        self.THUMB_SIZE, self.THUMB_SIZE,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                    icon = QPixmap.fromImage(img)
+        except Exception:  # noqa: BLE001
+            icon = None
+        self.signals.done.emit(self._remote_path, icon)
+
+
 class FilesPage(QWidget):
-    """文件浏览器页：支持拖放的目录树视图。"""
+    """文件浏览器页：目录树（列表）与缩略图网格双视图。"""
+
+    # 视图切换（"list" / "grid"，供控制器刷新网格内容）
+    viewModeChanged = Signal(str)
+
+    PAGE_TREE = 0
+    PAGE_GRID = 1
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+
+        # 顶部工具行：列表/网格切换（沿用 26x26 小按钮规范）
+        toolbar = QHBoxLayout()
+        toolbar.setContentsMargins(8, 4, 8, 0)
+        toolbar.addStretch()
+        self._list_btn = ToolButton(FluentIcon.VIEW, self)
+        self._list_btn.setFixedSize(26, 26)
+        self._list_btn.setToolTip("列表视图")
+        self._list_btn.clicked.connect(lambda: self.set_grid_mode(False))
+        toolbar.addWidget(self._list_btn)
+        self._grid_btn = ToolButton(FluentIcon.TILES, self)
+        self._grid_btn.setFixedSize(26, 26)
+        self._grid_btn.setToolTip("网格视图（图片缩略图）")
+        self._grid_btn.clicked.connect(lambda: self.set_grid_mode(True))
+        toolbar.addWidget(self._grid_btn)
+        lay.addLayout(toolbar)
+
+        # 视图堆栈：页 0 目录树 / 页 1 缩略图网格
+        self._stack = QStackedWidget(self)
 
         # 使用自定义的 FileTreeView（支持拖入上传、拖出下载）
         self.tree = FileTreeView(self)
         self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tree.setUniformRowHeights(True)
-        lay.addWidget(self.tree)
+        self._stack.addWidget(self.tree)
+
+        # 网格视图：当前目录条目，图片异步生成缩略图回填
+        self.grid_list = ListWidget(self)
+        self.grid_list.setViewMode(ListWidget.ViewMode.IconMode)
+        self.grid_list.setIconSize(QSize(96, 96))
+        self.grid_list.setResizeMode(ListWidget.ResizeMode.Adjust)
+        self.grid_list.setSpacing(10)
+        self.grid_list.setMovement(ListWidget.Movement.Static)
+        self.grid_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._stack.addWidget(self.grid_list)
+
+        lay.addWidget(self._stack, 1)
+
+        # 缩略图回填状态：序号防护（目录切换后旧结果丢弃）
+        self._grid_seq = 0
 
     def set_model(self, model: DirTreeModel) -> None:
         """装载目录树模型。"""
         self.tree.setModel(model)
+
+    def is_grid_mode(self) -> bool:
+        return self._stack.currentIndex() == self.PAGE_GRID
+
+    def set_grid_mode(self, grid: bool) -> None:
+        """切换列表/网格视图（重复切换同一视图不重复发信号）。"""
+        target = self.PAGE_GRID if grid else self.PAGE_TREE
+        if self._stack.currentIndex() == target:
+            return
+        self._stack.setCurrentIndex(target)
+        self.viewModeChanged.emit("grid" if grid else "list")
+
+    def populate_grid(
+        self, session, backend, cache, entries: list[tuple],
+    ) -> None:
+        """填充当前目录的网格条目。
+
+        entries: (显示名, 远端路径, 是否目录, 是否图片)；图片条目先挂占位
+        图标，缩略图经后台解密生成后回填。
+        """
+        self._grid_seq += 1
+        seq = self._grid_seq
+        self.grid_list.clear()
+        for display, rpath, is_dir, is_image in entries:
+            item = QListWidgetItem(display)
+            item.setData(Qt.ItemDataRole.UserRole, rpath)
+            item.setToolTip(display)
+            if is_dir:
+                icon = FluentIcon.FOLDER.icon()
+            elif is_image:
+                icon = FluentIcon.PHOTO.icon()
+            else:
+                icon = FluentIcon.DOCUMENT.icon()
+            item.setIcon(icon)
+            self.grid_list.addItem(item)
+            if is_image and session is not None:
+                self._request_thumbnail(session, backend, cache, rpath, seq)
+
+    def _request_thumbnail(
+        self, session, backend, cache, remote_path: str, seq: int,
+    ) -> None:
+        """请求缩略图：缓存命中直接回填，否则后台解密。"""
+        hit = cache.get(remote_path) if cache is not None else None
+        if hit is not None:
+            icon = self._icon_from_data(hit)
+            if icon is not None:
+                self._apply_icon(remote_path, icon)
+                return
+        job = _ThumbJob(session, backend, cache, remote_path)
+        job.signals.done.connect(
+            lambda rp, ic, s=seq: self._on_thumb_ready(rp, ic, s)
+        )
+        QThreadPool.globalInstance().start(job)
+
+    def _on_thumb_ready(self, remote_path: str, pixmap, seq: int | None = None) -> None:
+        """缩略图就绪（QPixmap）：序号校验后回填对应条目图标。"""
+        if seq is not None and seq != self._grid_seq:
+            return  # 目录已切换，丢弃旧结果
+        if pixmap is None:
+            return  # 解密失败/非有效图片：保留占位图标
+        self._apply_icon(remote_path, pixmap)
+
+    def _apply_icon(self, remote_path: str, icon) -> None:
+        """按远端路径定位网格条目并设置图标。"""
+        for i in range(self.grid_list.count()):
+            item = self.grid_list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == remote_path:
+                item.setIcon(icon)
+                return
+
+    @staticmethod
+    def _icon_from_data(data: bytes):
+        """图片字节 -> 缩放后的 QIcon；解析失败返回 None。"""
+        img = QImage()
+        if not img.loadFromData(data):
+            return None
+        img = img.scaled(
+            96, 96,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        return QPixmap.fromImage(img)
 
 
 # ---------------------------------------------------------------------------
@@ -107,8 +277,83 @@ class FilesPage(QWidget):
 # ---------------------------------------------------------------------------
 
 
+class _TransferTaskCard(QWidget):
+    """传输任务复合卡片：方向图标 + 名称 + 状态 + 进度条 + 重试按钮。"""
+
+    # 点击重试（参数为卡片自身，由页面映射回任务）
+    retryClicked = Signal(object)
+
+    def __init__(self, name: str, direction: str, parent=None) -> None:
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 6, 8, 6)
+        lay.setSpacing(4)
+
+        top = QHBoxLayout()
+        icon = QLabel("↑" if direction == "upload" else "↓", self)
+        icon.setStyleSheet("font-weight: bold;")
+        top.addWidget(icon)
+        self._name_label = QLabel(name, self)
+        self._name_label.setToolTip(name)
+        top.addWidget(self._name_label, 1)
+        self._status_label = QLabel("等待中", self)
+        self._status_label.setStyleSheet(f"color: {semantic_color('muted')};")
+        top.addWidget(self._status_label)
+        self._retry_btn = PushButton("重试", self)
+        self._retry_btn.setFixedHeight(24)
+        self._retry_btn.setVisible(False)
+        self._retry_btn.clicked.connect(lambda: self.retryClicked.emit(self))
+        top.addWidget(self._retry_btn)
+        lay.addLayout(top)
+
+        self._bar = ProgressBar(self)
+        self._bar.setRange(0, 100)
+        self._bar.setValue(0)
+        self._bar.setTextVisible(False)
+        self._bar.setFixedHeight(4)
+        lay.addWidget(self._bar)
+
+    def update_progress(self, progress: float) -> None:
+        """传输中：状态文字与进度条同步。"""
+        pct = int(progress * 100)
+        self._status_label.setText(f"传输中 {pct}%")
+        self._status_label.setStyleSheet("")
+        self._bar.setValue(pct)
+
+    def finish(self, success: bool, cancelled: bool = False) -> None:
+        """终态：成功/失败/取消；非成功时提供重试入口。"""
+        if success:
+            self._status_label.setText("完成")
+            self._status_label.setStyleSheet(
+                f"color: {semantic_color('ok')};"
+            )
+            self._bar.setValue(100)
+        elif cancelled:
+            self._status_label.setText("已取消")
+            self._status_label.setStyleSheet(
+                f"color: {semantic_color('muted')};"
+            )
+        else:
+            self._status_label.setText("失败")
+            self._status_label.setStyleSheet(
+                f"color: {semantic_color('err')};"
+            )
+        if not success:
+            self._retry_btn.setVisible(True)
+
+    def reset(self) -> None:
+        """重试前重置显示。"""
+        self._status_label.setText("等待中")
+        self._status_label.setStyleSheet(f"color: {semantic_color('muted')};")
+        self._bar.setValue(0)
+        self._retry_btn.setVisible(False)
+
+
 class TransfersPage(QWidget):
-    """传输队列页：显示进行中和已完成的传输任务。"""
+    """传输队列页：显示进行中和已完成的传输任务（复合任务卡）。"""
+
+    # 重试失败/取消的任务（参数为对应 TransferTask，由条目 UserRole 携带）
+    retryRequested = Signal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -124,27 +369,87 @@ class TransfersPage(QWidget):
         desc.setStyleSheet(f"color: {semantic_color('muted')}; font-size: 13px;")
         lay.addWidget(desc)
 
+        # 续传恢复横幅（检测到上次未完成传输时由控制器显示）
+        self._resume_banner = PushButton("", self)
+        self._resume_banner.setVisible(False)
+        self._resume_banner.setStyleSheet(
+            "QPushButton { text-align: left; background: rgba(0, 103, 184, 0.08);"
+            " border: 1px solid rgba(0, 103, 184, 0.35); border-radius: 6px;"
+            f" color: {semantic_color('link')}; padding: 8px 12px; }}"
+            "QPushButton:hover { background: rgba(0, 103, 184, 0.14); }"
+        )
+        self._resume_handler = None
+        self._resume_banner.clicked.connect(self._on_resume_clicked)
+        lay.addWidget(self._resume_banner)
+
         self.task_list = ListWidget(self)
         self.task_list.setAlternatingRowColors(True)
         lay.addWidget(self.task_list)
 
+    def show_resume_banner(self, count: int, handler) -> None:
+        """显示“继续上次未完成的传输”横幅（点击回调 handler）。"""
+        self._resume_handler = handler
+        self._resume_banner.setText(
+            f"⭯ 继续上次未完成的传输（{count} 项）"
+        )
+        self._resume_banner.setVisible(True)
+
+    def hide_resume_banner(self) -> None:
+        """隐藏续传横幅（已恢复或不再适用时）。"""
+        self._resume_banner.setVisible(False)
+        self._resume_handler = None
+
+    def _on_resume_clicked(self) -> None:
+        """横幅点击：触发控制器恢复动作后隐藏自身。"""
+        handler = self._resume_handler
+        self.hide_resume_banner()
+        if handler is not None:
+            handler()
+
     def add_task(self, name: str, direction: str) -> QListWidgetItem:
-        """添加传输任务条目。"""
-        icon_text = "↑" if direction == "upload" else "↓"
-        item = QListWidgetItem(f"{icon_text} {name} — 等待中")
+        """添加传输任务条目（复合卡片；任务对象由调用方经 UserRole 挂载）。"""
+        item = QListWidgetItem()
+        card = _TransferTaskCard(name, direction, self.task_list)
+        card.retryClicked.connect(self._on_retry_clicked)
+        item.setSizeHint(card.sizeHint())
         self.task_list.addItem(item)
+        self.task_list.setItemWidget(item, card)
         return item
+
+    def _card(self, item: QListWidgetItem):
+        """条目对应的任务卡片。"""
+        return self.task_list.itemWidget(item)
 
     def update_task(self, item: QListWidgetItem, progress: float) -> None:
         """更新任务进度。"""
-        name = item.text().split(" — ")[0]
-        item.setText(f"{name} — {int(progress * 100)}%")
+        card = self._card(item)
+        if card is not None:
+            card.update_progress(progress)
 
-    def finish_task(self, item: QListWidgetItem, success: bool = True) -> None:
-        """标记任务完成或失败。"""
-        name = item.text().split(" — ")[0]
-        status = "完成" if success else "失败"
-        item.setText(f"{name} — {status}")
+    def finish_task(
+        self, item: QListWidgetItem, success: bool = True,
+        cancelled: bool = False,
+    ) -> None:
+        """标记任务完成 / 失败 / 取消。"""
+        card = self._card(item)
+        if card is not None:
+            card.finish(success, cancelled)
+
+    def reset_task(self, item: QListWidgetItem) -> None:
+        """重置条目显示（手动重试前）。"""
+        card = self._card(item)
+        if card is not None:
+            card.reset()
+
+    def _on_retry_clicked(self, card) -> None:
+        """卡片重试按钮：定位所属条目，发射其携带的任务。"""
+        for i in range(self.task_list.count()):
+            item = self.task_list.item(i)
+            if self.task_list.itemWidget(item) is card:
+                task = item.data(Qt.ItemDataRole.UserRole)
+                if task is not None:
+                    self.retryRequested.emit(task)
+                return
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +468,9 @@ class SettingsPage(QWidget):
     reconnectRequested = Signal()    # 重新连接密库
     autoLockChanged = Signal()       # 自动锁定时长变更（供控制器同步定时器）
     vaultRenameRequested = Signal(str)  # 修改当前密库名称（参数为新名称）
+    concurrencyChanged = Signal(int)  # 并发传输数变更（供控制器调整队列并发）
+    recoveryCodeRequested = Signal()  # 生成/更换恢复码（需先输入主密码确认）
+    syncRequested = Signal(str)       # 文件夹同步（参数为本地目录）
 
     # 默认缓存配置
     DEFAULT_CACHE_LIMIT_MB = 512
@@ -348,10 +656,10 @@ class SettingsPage(QWidget):
         self._chunk_size_card.comboBox.setCurrentIndex(1)  # 默认 512KB
         transfer_group.addSettingCard(self._chunk_size_card)
 
-        # 并发传输数（预留功能：当前传输队列为串行）
+        # 并发传输数（任务级并行：队列同时运行的任务上限）
         concurrent_card = ExpandGroupSettingCard(
-            FluentIcon.SPEED_HIGH, "并发传输数（预留）",
-            "当前版本传输任务串行执行", parent=transfer_group,
+            FluentIcon.SPEED_HIGH, "并发传输数",
+            "同时进行的传输任务上限（1~4）", parent=transfer_group,
         )
         concurrent_row = QWidget(concurrent_card)
         c_lay = QHBoxLayout(concurrent_row)
@@ -359,15 +667,49 @@ class SettingsPage(QWidget):
         c_lay.setSpacing(8)
         self._concurrent_spin = SpinBox(concurrent_row)
         self._concurrent_spin.setRange(1, 4)
-        self._concurrent_spin.setValue(1)
-        # 并发传输为预留功能：单任务内多核加密已可充分利用 CPU，此处禁用交互
-        self._concurrent_spin.setEnabled(False)
-        self._concurrent_spin.setToolTip("预留功能：当前版本传输任务串行执行")
+        self._concurrent_spin.setValue(2)
+        self._concurrent_spin.setToolTip("同时进行的传输任务上限")
+        self._concurrent_spin.valueChanged.connect(self.concurrencyChanged.emit)
         c_lay.addWidget(self._concurrent_spin)
         c_lay.addStretch()
         concurrent_card.addGroupWidget(concurrent_row)
         _unify_expand_font(concurrent_card)
         transfer_group.addSettingCard(concurrent_card)
+
+        # 文件夹同步（首期：本地 → 云端单向增量，索引加密存于密库）
+        sync_card = ExpandGroupSettingCard(
+            FluentIcon.SYNC, "文件夹同步",
+            "将本地目录增量上传到当前密库（单向：本地→云端）",
+            parent=transfer_group,
+        )
+        sync_row1 = QWidget(sync_card)
+        s1_lay = QHBoxLayout(sync_row1)
+        s1_lay.setContentsMargins(48, 6, 24, 6)
+        s1_lay.setSpacing(8)
+        self._sync_dir_edit = LineEdit(sync_row1)
+        self._sync_dir_edit.setPlaceholderText("选择要同步的本地目录…")
+        sync_browse_btn = PushButton("浏览…", sync_row1)
+        sync_browse_btn.clicked.connect(self._browse_sync_dir)
+        s1_lay.addWidget(self._sync_dir_edit, stretch=1)
+        s1_lay.addWidget(sync_browse_btn)
+        sync_card.addGroupWidget(sync_row1)
+
+        sync_row2 = QWidget(sync_card)
+        s2_lay = QHBoxLayout(sync_row2)
+        s2_lay.setContentsMargins(48, 2, 24, 6)
+        s2_lay.setSpacing(8)
+        self._sync_btn = PrimaryPushButton("立即同步", sync_row2)
+        self._sync_btn.clicked.connect(self._on_sync_clicked)
+        self._sync_status = QLabel(
+            "首次同步将上传全部文件，此后仅上传新增/变更文件", sync_row2
+        )
+        self._sync_status.setStyleSheet(f"color: {semantic_color('muted')};")
+        self._sync_status.setWordWrap(True)
+        s2_lay.addWidget(self._sync_btn)
+        s2_lay.addWidget(self._sync_status, stretch=1)
+        sync_card.addGroupWidget(sync_row2)
+        _unify_expand_font(sync_card)
+        transfer_group.addSettingCard(sync_card)
 
         lay.addWidget(transfer_group)
 
@@ -384,6 +726,28 @@ class SettingsPage(QWidget):
             texts=["从不", "5 分钟", "15 分钟", "30 分钟"], parent=security_group,
         )
         security_group.addSettingCard(self._auto_lock_card)
+
+        # 恢复码（Marker 协议 v3：丢失主密码时凭码恢复访问）
+        recovery_card = ExpandGroupSettingCard(
+            FluentIcon.FINGERPRINT, "恢复码",
+            "生成恢复码，丢失主密码时仍可找回访问",
+            parent=security_group,
+        )
+        recovery_row = QWidget(recovery_card)
+        r_lay = QHBoxLayout(recovery_row)
+        r_lay.setContentsMargins(48, 6, 24, 6)
+        r_lay.setSpacing(8)
+        self._recovery_status = QLabel(
+            "随时可生成或更换；生成新码后旧恢复码立即失效", recovery_row
+        )
+        self._recovery_status.setStyleSheet(f"color: {semantic_color('muted')};")
+        self._recovery_btn = PushButton("生成/更换恢复码…", recovery_row)
+        self._recovery_btn.clicked.connect(self.recoveryCodeRequested.emit)
+        r_lay.addWidget(self._recovery_status, stretch=1)
+        r_lay.addWidget(self._recovery_btn)
+        recovery_card.addGroupWidget(recovery_row)
+        _unify_expand_font(recovery_card)
+        security_group.addSettingCard(recovery_card)
 
         lay.addWidget(security_group)
 
@@ -676,6 +1040,45 @@ class SettingsPage(QWidget):
         self._filename_enc_label.setText("开" if filename_enc else "关")
         self._backend_path_label.setWordWrap(True)
 
+    def update_recovery_state(self, has_recovery: bool | None) -> None:
+        """按当前密库状态更新恢复码提示（None = 未连接）。"""
+        if has_recovery is None:
+            text = "随时可生成或更换；生成新码后旧恢复码立即失效"
+        elif has_recovery:
+            text = "当前密库已启用恢复码；生成新码后旧码失效"
+        else:
+            text = "当前密库尚无恢复码，建议生成备份"
+        self._recovery_status.setText(text)
+
+    def sync_dir(self) -> str:
+        """当前填写的同步本地目录。"""
+        return self._sync_dir_edit.text().strip()
+
+    def set_sync_dir(self, path: str) -> None:
+        """回填同步本地目录（持久化载入用）。"""
+        if path:
+            self._sync_dir_edit.setText(path)
+
+    def update_sync_status(self, text: str) -> None:
+        """更新同步结果摘要文案。"""
+        self._sync_status.setText(text)
+
+    def _browse_sync_dir(self) -> None:
+        """浏览选择同步本地目录。"""
+        from PySide6.QtWidgets import QFileDialog
+
+        path = QFileDialog.getExistingDirectory(self, "选择要同步的本地目录")
+        if path:
+            self._sync_dir_edit.setText(path)
+
+    def _on_sync_clicked(self) -> None:
+        """立即同步按钮：目录非空时发射同步请求。"""
+        d = self._sync_dir_edit.text().strip()
+        if not d:
+            self._sync_status.setText("请先选择要同步的本地目录")
+            return
+        self.syncRequested.emit(d)
+
     def _on_vault_rename_clicked(self) -> None:
         """密库名称修改按钮：弹输入框收集新名称，非空且变化时发射信号。"""
         current = self._vault_name_label.text()
@@ -735,6 +1138,7 @@ class SettingsPage(QWidget):
             self._cache_limit_spin,
             self._cache_path_edit,
             self._chunk_size_combo,
+            self._concurrent_spin,
             self._max_cores_spin,
             self._auto_lock_combo,
         )
@@ -751,6 +1155,10 @@ class SettingsPage(QWidget):
         if store.cache_path():
             self._cache_path_edit.setText(store.cache_path())
         self._chunk_size_combo.setCurrentIndex(store.chunk_index())
+        self._concurrent_spin.setValue(
+            max(self._concurrent_spin.minimum(),
+                min(store.concurrent_count(), self._concurrent_spin.maximum()))
+        )
         saved_cores = store.max_cores()
         if saved_cores > 0:
             self._max_cores_spin.setValue(
@@ -758,6 +1166,7 @@ class SettingsPage(QWidget):
                     min(saved_cores, self._max_cores_spin.maximum()))
             )
         self._auto_lock_combo.setCurrentIndex(store.auto_lock_index())
+        self.set_sync_dir(store.sync_dir())
         for w in widgets:
             w.blockSignals(False)
         # 缓存路径可能变更，刷新占用显示与信号同步
@@ -772,6 +1181,7 @@ class SettingsPage(QWidget):
         self._cache_limit_spin.valueChanged.connect(store.set_cache_limit_mb)
         self._cache_path_edit.textChanged.connect(store.set_cache_path)
         self._chunk_size_combo.currentIndexChanged.connect(store.set_chunk_index)
+        self._concurrent_spin.valueChanged.connect(store.set_concurrent_count)
         self._max_cores_spin.valueChanged.connect(store.set_max_cores)
         self._auto_lock_combo.currentIndexChanged.connect(store.set_auto_lock_index)
         self._auto_lock_combo.currentIndexChanged.connect(

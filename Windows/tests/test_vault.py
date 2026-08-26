@@ -243,3 +243,69 @@ class TestVaultMarkerName:
         result = VaultMarker.verify(data, master_password)
         assert result is not None
         assert result.name == "名" * constants.VAULT_NAME_MAX_LEN
+
+
+class TestRecoveryBlock:
+    """恢复码块（v3 文件尾部）：构造 / 解密 / 布局兼容。"""
+
+    SECRET = b"\xAB" * constants.RECOVERY_SECRET_LEN
+
+    def test_build_decrypt_roundtrip(self, master_password):
+        """恢复块构造后凭同一密钥可还原主密码。"""
+        blob = VaultMarker.build_recovery_blob(self.SECRET, master_password)
+        assert VaultMarker.decrypt_recovery_blob(blob, self.SECRET) == master_password
+
+    def test_decrypt_wrong_secret_returns_none(self, master_password):
+        """错误恢复密钥：GCM 标签失败返回 None。"""
+        blob = VaultMarker.build_recovery_blob(self.SECRET, master_password)
+        assert VaultMarker.decrypt_recovery_blob(blob, b"\xCD" * 10) is None
+
+    def test_decrypt_truncated_blob_returns_none(self, master_password):
+        """布局异常（过短）返回 None，不抛异常。"""
+        blob = VaultMarker.build_recovery_blob(self.SECRET, master_password)
+        assert VaultMarker.decrypt_recovery_blob(blob[:10], self.SECRET) is None
+
+    def test_create_with_blob_verify_has_recovery(self, master_password):
+        """带恢复块的 Marker：verify 正常且 has_recovery=True。"""
+        meta = VaultMarker.generate_metadata(filename_enc=False, name="v3库")
+        blob = VaultMarker.build_recovery_blob(self.SECRET, master_password)
+        data = VaultMarker.create(meta, master_password, recovery_blob=blob)
+        result = VaultMarker.verify(data, master_password)
+        assert result is not None
+        assert result.has_recovery is True
+        assert result.name == "v3库"
+        # 主密码校验不受尾部影响：错密码仍返回 None
+        assert VaultMarker.verify(data, "wrong") is None
+
+    def test_create_without_blob_has_recovery_false(self, master_password):
+        """v2 布局（无尾部）：has_recovery=False，v1/v2 兼容不受影响。"""
+        meta = VaultMarker.generate_metadata(filename_enc=True)
+        data = VaultMarker.create(meta, master_password)
+        result = VaultMarker.verify(data, master_password)
+        assert result is not None
+        assert result.has_recovery is False
+        assert len(data) == 103  # 无尾部时总长不变（与 v2 基线一致）
+
+    def test_split_recovery_tail_with_blob(self, master_password):
+        """拆分：主体 + 尾部（2 字节长度头 + blob），重组等于原文件。"""
+        meta = VaultMarker.generate_metadata(filename_enc=False)
+        blob = VaultMarker.build_recovery_blob(self.SECRET, master_password)
+        data = VaultMarker.create(meta, master_password, recovery_blob=blob)
+        head, tail = VaultMarker.split_recovery_tail(data)
+        assert head + tail == data
+        assert struct.unpack(">H", tail[:2])[0] == len(blob)
+        assert tail[2:] == blob
+
+    def test_split_recovery_tail_without_blob(self, master_password):
+        """无尾部文件：尾部为空，主体为整个文件。"""
+        meta = VaultMarker.generate_metadata(filename_enc=False)
+        data = VaultMarker.create(meta, master_password)
+        head, tail = VaultMarker.split_recovery_tail(data)
+        assert head == data
+        assert tail == b""
+
+    def test_split_recovery_tail_short_file(self):
+        """短于前缀的文件：原样返回不抛异常。"""
+        head, tail = VaultMarker.split_recovery_tail(b"tiny")
+        assert head == b"tiny"
+        assert tail == b""

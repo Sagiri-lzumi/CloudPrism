@@ -43,13 +43,19 @@ class Kdf:
             32 字节派生密钥；调用方负责在使用后清零该内存
         """
         # 主密码统一 UTF-8 编码，保证 Windows 与 Android 字节级一致
-        pw = master_password.encode("utf-8")
+        return Kdf.derive_key_raw(master_password.encode("utf-8"), salt)
 
+    @staticmethod
+    def derive_key_raw(password: bytes, salt: bytes) -> bytes:
+        """从字节口令 + 盐派生 32 字节对称密钥（参数与 derive_key 一致）。
+
+        供非字符串密钥材料（如恢复码随机密钥）复用同一 PBKDF2 参数。
+        """
         # 显式指定 prf 为 HMAC-SHA256，避免不同平台 PBKDF2 默认 PRF 差异
         prf = lambda p, s: HMAC.new(p, s, SHA256).digest()
 
         return PBKDF2(
-            password=pw,
+            password=password,
             salt=salt,
             dkLen=Kdf.KEY_LEN,
             count=Kdf.ITERATIONS,

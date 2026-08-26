@@ -106,6 +106,103 @@ class TestVaultManager:
         with pytest.raises(VaultError):
             vm.rename_vault("pw", "任意名")
 
+    def test_list_vaults_root_and_subdirs(self, tmp_path):
+        """多密库扫描：根目录 + 一级子目录的 Marker。"""
+        root = tmp_path / "b"; root.mkdir()
+        vm = VaultManager(LocalFolderBackend(root))
+        assert vm.list_vaults() == []
+        vm.create_vault("pw", filename_enc=False)
+        vm.create_vault("pw2", filename_enc=False, vault_path="backup")
+        (root / "plain_dir").mkdir()  # 无 Marker 的普通目录不算密库
+        paths = sorted(v["path"] for v in vm.list_vaults())
+        assert paths == ["", "backup"]
+
+
+class TestRecoveryCode:
+    """恢复码（v3）：生成 / 凭码开库 / 编解码。"""
+
+    def _make(self, tmp_path):
+        root = tmp_path / "b"; root.mkdir()
+        vm = VaultManager(LocalFolderBackend(root))
+        vm.create_vault("master-pw", filename_enc=False, name="恢复库")
+        return vm
+
+    def test_generate_returns_code_and_meta(self, tmp_path):
+        """生成：16 位恢复码 + has_recovery 元信息，重开后仍生效。"""
+        vm = self._make(tmp_path)
+        code, meta = vm.generate_recovery_code("master-pw")
+        assert len(code) == constants.RECOVERY_CODE_LEN
+        assert meta.has_recovery is True
+        reopened = vm.open_vault("master-pw")
+        assert reopened.has_recovery is True
+
+    def test_generate_wrong_password_raises(self, tmp_path):
+        vm = self._make(tmp_path)
+        with pytest.raises(VaultError):
+            vm.generate_recovery_code("wrong")
+
+    def test_open_with_recovery_roundtrip(self, tmp_path):
+        """凭恢复码开库：还原主密码与元信息。"""
+        vm = self._make(tmp_path)
+        code, _meta = vm.generate_recovery_code("master-pw")
+        meta = vm.open_vault_with_recovery(code)
+        assert meta is not None
+        assert meta.name == "恢复库"
+        assert vm.recovered_password == "master-pw"
+
+    def test_open_with_grouped_code(self, tmp_path):
+        """带分组分隔符的恢复码（用户复制格式）同样可用。"""
+        vm = self._make(tmp_path)
+        code, _ = vm.generate_recovery_code("master-pw")
+        grouped = "-".join(code[i:i + 4] for i in range(0, len(code), 4))
+        assert vm.open_vault_with_recovery(grouped.lower()) is not None
+
+    def test_open_with_wrong_recovery_code(self, tmp_path):
+        """格式合法但错误的恢复码：返回 None 且不泄露主密码。"""
+        vm = self._make(tmp_path)
+        vm.generate_recovery_code("master-pw")
+        wrong = "A" * constants.RECOVERY_CODE_LEN
+        assert vm.open_vault_with_recovery(wrong) is None
+        assert vm.recovered_password is None
+
+    def test_open_with_recovery_no_block(self, tmp_path):
+        """未启用恢复码的密库：凭任意码返回 None。"""
+        vm = self._make(tmp_path)
+        assert vm.open_vault_with_recovery("A" * constants.RECOVERY_CODE_LEN) is None
+
+    def test_old_code_invalid_after_rotation(self, tmp_path):
+        """更换恢复码：旧码立即失效，新码生效。"""
+        vm = self._make(tmp_path)
+        old_code, _ = vm.generate_recovery_code("master-pw")
+        new_code, _ = vm.generate_recovery_code("master-pw")
+        assert old_code != new_code
+        assert vm.open_vault_with_recovery(old_code) is None
+        assert vm.open_vault_with_recovery(new_code) is not None
+
+    def test_rename_keeps_recovery_block(self, tmp_path):
+        """重命名不使既有恢复码失效。"""
+        vm = self._make(tmp_path)
+        code, _ = vm.generate_recovery_code("master-pw")
+        vm.rename_vault("master-pw", "改名后")
+        meta = vm.open_vault_with_recovery(code)
+        assert meta is not None
+        assert meta.name == "改名后"
+        assert vm.recovered_password == "master-pw"
+
+    def test_encode_decode_roundtrip(self):
+        """编解码往返 + 格式清洗（分隔符/小写）。"""
+        secret = bytes(range(constants.RECOVERY_SECRET_LEN))
+        code = VaultManager.encode_recovery_code(secret)
+        assert VaultManager.decode_recovery_code(code) == secret
+        grouped = VaultManager.format_recovery_code(code)
+        assert grouped.count("-") == len(code) // 4 - 1
+        assert VaultManager.decode_recovery_code(grouped.lower()) == secret
+
+    def test_decode_invalid_code_returns_none(self):
+        assert VaultManager.decode_recovery_code("") is None
+        assert VaultManager.decode_recovery_code("SHORT") is None
+        assert VaultManager.decode_recovery_code("1" * 16) is None  # 非 Base32 字符
+
 
 # ---------------------------------------------------------------------------
 # InitWizard（GUI 流程）

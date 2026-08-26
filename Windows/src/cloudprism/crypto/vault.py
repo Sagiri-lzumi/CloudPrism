@@ -15,7 +15,14 @@ Vault Marker 文件（.cloudprism_vault）用于识别云盘是否被本系统�
 加密载荷（偏移 68，长度 = PayloadLen）：
     AES-256-GCM(内部明文) ‖ GCM_Tag[16]
 
-内部明文（v2；v1 无名称字段，尾部到 VerifyMagic 即结束）：
+文件尾部（v3，可选，紧随加密载荷；恢复码块）：
+    recovery_len    uint16 BE，recovery_blob 字节长（可为 0，无块时直接缺省）
+    recovery_blob   rsalt(16) ‖ AES-GCM(rkey, 主密码 UTF-8) ‖ Tag[16]
+                    rkey = PBKDF2(恢复码随机密钥, rsalt)，GCM nonce 复用 rsalt；
+                    恢复码（随机密钥的 Base32 形式）由用户离线保存，
+                    凭恢复码可解密出主密码，实现无主密码开库
+
+内部明文（v2/v3；v1 无名称字段，尾部到 VerifyMagic 即结束）：
     偏移 长度 字段
     0    1    FilenameEncryptionFlag   0x00/0x01
     1    4    ProtocolVersion          uint32 BE
@@ -54,6 +61,7 @@ class VaultMetadata:
     filename_enc: bool         # 文件名加密开关
     protocol_version: int      # 协议版本，与加密文件 VERSION 一致
     name: str = ""             # 用户自定义密库名称（v1 旧文件缺省为空）
+    has_recovery: bool = False # 是否携带恢复码块（v3 尾部；旧文件缺省为 False）
 
 
 class VaultMarker:
@@ -63,15 +71,21 @@ class VaultMarker:
     MAGIC: bytes = constants.VAULT_MAGIC
 
     @staticmethod
-    def create(meta: VaultMetadata, master_password: str) -> bytes:
+    def create(
+        meta: VaultMetadata,
+        master_password: str,
+        recovery_blob: bytes = b"",
+    ) -> bytes:
         """创建 Vault Marker 文件字节序列。
 
         参数:
             meta: Vault Metadata（version/vault_id/salt/iv/filename_enc/protocol_version）
             master_password: 用户主密码
+            recovery_blob: 恢复码块内容（见 build_recovery_blob）；
+                非空时以 recovery_len + blob 追加到文件尾部（v3）
 
         返回:
-            完整的 Vault Marker 文件字节（明文前缀 + GCM 载荷）
+            完整的 Vault Marker 文件字节（明文前缀 + GCM 载荷 [+ 恢复块]）
         """
         # 1. 从主密码 + 盐派生 GCM 密钥
         key = Kdf.derive_key(master_password, meta.salt)
@@ -94,7 +108,7 @@ class VaultMarker:
         ct, tag = cipher.encrypt_and_digest(inner)
         payload = ct + tag        # 密文 + 16 字节标签
 
-        # 5. 拼接明文前缀 + 加密载荷
+        # 5. 拼接明文前缀 + 加密载荷（+ v3 恢复码块）
         prefix = (
             VaultMarker.MAGIC
             + struct.pack(">I", meta.version)
@@ -103,7 +117,10 @@ class VaultMarker:
             + meta.iv
             + struct.pack(">I", len(payload))
         )
-        return prefix + payload
+        data = prefix + payload
+        if recovery_blob:
+            data += struct.pack(">H", len(recovery_blob)) + recovery_blob
+        return data
 
     @staticmethod
     def verify(file_bytes: bytes, master_password: str) -> VaultMetadata | None:
@@ -151,6 +168,16 @@ class VaultMarker:
         if len(payload) < constants.GCM_TAG_LEN:
             return None
 
+        # 1.5 v3 文件尾部恢复码块容错探测（仅需 PayloadLen 即可定位，
+        # 无需解密载荷；无尾部/布局异常的 v1、v2 文件 has_recovery=False）
+        has_recovery = False
+        tail_bytes = file_bytes[68 + payload_len:]
+        if len(tail_bytes) >= 2:
+            recovery_len = struct.unpack(">H", tail_bytes[:2])[0]
+            has_recovery = (
+                recovery_len > 0 and len(tail_bytes) - 2 >= recovery_len
+            )
+
         # 2. 派生密钥并 GCM 解密
         ct = payload[: -constants.GCM_TAG_LEN]
         tag = payload[-constants.GCM_TAG_LEN :]
@@ -187,7 +214,74 @@ class VaultMarker:
             filename_enc=filename_enc,
             protocol_version=protocol_version,
             name=name,
+            has_recovery=has_recovery,
         )
+
+    # ------------------------------------------------------------------
+    # 恢复码块（v3）：构造 / 解密 / 尾部提取
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def build_recovery_blob(recovery_secret: bytes, master_password: str) -> bytes:
+        """构造恢复码块：rsalt(16) ‖ AES-GCM(rkey, 主密码) ‖ Tag[16]。
+
+        rkey = PBKDF2(recovery_secret, rsalt)，GCM nonce 复用 rsalt
+        （rsalt 每次随机生成，不存在 nonce 重用风险）。
+        """
+        from Crypto.Random import get_random_bytes
+
+        rsalt = get_random_bytes(constants.SALT_LEN)
+        rkey = Kdf.derive_key_raw(recovery_secret, rsalt)
+        cipher = AES.new(rkey, AES.MODE_GCM, nonce=rsalt)
+        ct, tag = cipher.encrypt_and_digest(master_password.encode("utf-8"))
+        return rsalt + ct + tag
+
+    @staticmethod
+    def decrypt_recovery_blob(
+        blob: bytes, recovery_secret: bytes,
+    ) -> str | None:
+        """凭恢复码随机密钥解密恢复块，还原主密码。
+
+        返回:
+            主密码字符串；密钥错误（GCM 标签失败）或布局异常返回 None
+        """
+        min_len = constants.SALT_LEN + constants.GCM_TAG_LEN + 1
+        if len(blob) < min_len:
+            return None
+        rsalt = blob[: constants.SALT_LEN]
+        ct = blob[constants.SALT_LEN: -constants.GCM_TAG_LEN]
+        tag = blob[-constants.GCM_TAG_LEN:]
+        rkey = Kdf.derive_key_raw(recovery_secret, rsalt)
+        cipher = AES.new(rkey, AES.MODE_GCM, nonce=rsalt)
+        try:
+            pw_bytes = cipher.decrypt_and_verify(ct, tag)
+        except ValueError:
+            return None
+        try:
+            return pw_bytes.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            return None
+
+    @staticmethod
+    def split_recovery_tail(file_bytes: bytes) -> tuple[bytes, bytes]:
+        """拆分 Marker 为（主体, 恢复块尾部）。
+
+        尾部 = recovery_len(2) + recovery_blob；无尾部时返回 (原文件, b"")。
+        供重命名等整体重写场景原样保留既有恢复块。
+        """
+        prefix_len = 68  # 12 magic + 4 version + 16 id + 16 salt + 16 iv + 4 len
+        if len(file_bytes) < prefix_len + 4:
+            return file_bytes, b""
+        try:
+            payload_len = struct.unpack(
+                ">I", file_bytes[64:prefix_len]
+            )[0]
+        except struct.error:
+            return file_bytes, b""
+        head_end = prefix_len + payload_len
+        if head_end > len(file_bytes):
+            return file_bytes, b""
+        return file_bytes[:head_end], file_bytes[head_end:]
 
     @staticmethod
     def generate_metadata(

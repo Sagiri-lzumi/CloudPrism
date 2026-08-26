@@ -24,15 +24,25 @@ class FakeBackend:
 
 
 class FakeVaultManager:
-    """open_vault 按类属性返回（None 表示密码错误）。"""
+    """open_vault / open_vault_with_recovery 按类属性返回（None 表示失败）。"""
 
     result = FakeMeta()
+    recovery_result = None  # 恢复码开库返回值（None = 恢复码无效）
+    last_recovery_code: str | None = None
 
     def __init__(self, backend) -> None:
         self.backend = backend
+        self.recovered_password: str | None = None
 
     def open_vault(self, pw: str):
         return type(self).result
+
+    def open_vault_with_recovery(self, code: str):
+        type(self).last_recovery_code = code
+        if type(self).recovery_result is None:
+            return None
+        self.recovered_password = "recovered-pw"
+        return type(self).recovery_result
 
 
 @pytest.fixture
@@ -40,6 +50,8 @@ def fake_vm(monkeypatch):
     """替换 quick_connect 模块内的 VaultManager。"""
     monkeypatch.setattr(qc, "VaultManager", FakeVaultManager)
     FakeVaultManager.result = FakeMeta()
+    FakeVaultManager.recovery_result = None
+    FakeVaultManager.last_recovery_code = None
     return FakeVaultManager
 
 
@@ -152,6 +164,59 @@ def test_local_record_no_webdav_field(qtbot, fake_vm):
     dlg = QuickConnectDialog(LOCAL_RECORD, backend_factory=RecordingFactory())
     qtbot.addWidget(dlg)
     assert dlg._webdav_pass_edit is None
+
+
+# ---------------------------------------------------------------------------
+# 恢复码开库
+# ---------------------------------------------------------------------------
+
+
+def test_recovery_toggle_reveals_edit(qtbot, fake_vm):
+    """勾选“使用恢复码”展开输入框，取消勾选收起（未显示窗口用 isHidden 判定）。"""
+    dlg = QuickConnectDialog(LOCAL_RECORD, backend_factory=RecordingFactory())
+    qtbot.addWidget(dlg)
+    assert dlg._recovery_edit.isHidden()
+    dlg._recovery_check.setChecked(True)
+    assert not dlg._recovery_edit.isHidden()
+    dlg._recovery_check.setChecked(False)
+    assert dlg._recovery_edit.isHidden()
+
+
+def test_recovery_connect_success(qtbot, fake_vm):
+    """恢复码开库成功：无需主密码，会话用还原出的密码构建。"""
+    FakeVaultManager.recovery_result = FakeMeta()
+    dlg = QuickConnectDialog(LOCAL_RECORD, backend_factory=RecordingFactory())
+    qtbot.addWidget(dlg)
+    dlg._recovery_check.setChecked(True)
+    dlg._recovery_edit.setText("AAAA-BBBB-CCCC-DDDD")
+    dlg._connect()
+    assert FakeVaultManager.last_recovery_code == "AAAA-BBBB-CCCC-DDDD"
+    assert isinstance(dlg.backend, FakeBackend)
+    assert dlg.session is not None
+    assert dlg.result() == QDialog.DialogCode.Accepted
+
+
+def test_recovery_invalid_stays_open(qtbot, fake_vm):
+    """恢复码无效：提示且不关闭。"""
+    dlg = QuickConnectDialog(LOCAL_RECORD, backend_factory=RecordingFactory())
+    qtbot.addWidget(dlg)
+    dlg._recovery_check.setChecked(True)
+    dlg._recovery_edit.setText("ZZZZ-ZZZZ-ZZZZ-ZZZZ")
+    dlg._connect()
+    assert dlg.metadata is None
+    assert "恢复码无效" in dlg._status.text()
+    assert dlg.result() != QDialog.DialogCode.Accepted
+
+
+def test_recovery_empty_blocked(qtbot, fake_vm):
+    """勾选恢复码但未输入：提示且不构造后端。"""
+    factory = RecordingFactory()
+    dlg = QuickConnectDialog(LOCAL_RECORD, backend_factory=factory)
+    qtbot.addWidget(dlg)
+    dlg._recovery_check.setChecked(True)
+    dlg._connect()
+    assert "请输入恢复码" in dlg._status.text()
+    assert factory.calls == []
 
 
 # ---------------------------------------------------------------------------
