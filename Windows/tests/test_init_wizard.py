@@ -353,6 +353,44 @@ class TestInitWizardConnect:
         assert w.session is None
         assert "密码错误" in w.error_label_text
 
+    def test_connect_subdir_vault_with_location(self, qtbot, tmp_path):
+        """连接模式：按填写的位置定位子目录密库。"""
+        root = tmp_path / "vault_root"
+        root.mkdir()
+        VaultManager(LocalFolderBackend(root)).create_vault(
+            "sub-pw", filename_enc=False, vault_path="work",
+        )
+        w = _make_wizard(qtbot)
+        w.page_mode.radio_connect.setChecked(True)
+        _setup_local_backend(w, tmp_path)
+        w.page_backend_cfg.location_edit.setText("work")
+        w.page_password.pw_edit.setText("sub-pw")
+        w.accept()
+        assert w.metadata is not None
+        assert w.vault_path == "work"
+
+    def test_connect_no_vault_at_location_message(self, qtbot, tmp_path):
+        """连接模式：位置无密库时报"不存在"而非误导性密码错误。"""
+        root = tmp_path / "vault_root"
+        root.mkdir()  # 空目录，无 Marker
+        w = _make_wizard(qtbot)
+        w.page_mode.radio_connect.setChecked(True)
+        _setup_local_backend(w, tmp_path)
+        w.page_password.pw_edit.setText("any")
+        w.accept()
+        assert w.metadata is None
+        assert "不存在" in w.error_label_text
+        assert "密码错误" not in w.error_label_text
+
+    def test_location_visible_in_connect_mode(self, qtbot):
+        """位置框在连接模式同样可见（子目录密库定位依赖它）。"""
+        w = _make_wizard(qtbot)
+        w.page_mode.radio_connect.setChecked(True)
+        w.backend_type = "local"
+        w.page_backend_cfg.initializePage()
+        assert not w.page_backend_cfg.location_edit.isHidden()
+        assert not w.page_backend_cfg.location_label.isHidden()
+
 
 # ---------------------------------------------------------------------------
 # 新增：后端类型页 & 测试连接

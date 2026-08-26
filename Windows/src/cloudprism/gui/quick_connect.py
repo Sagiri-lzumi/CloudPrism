@@ -42,6 +42,10 @@ class QuickConnectDialog(QDialog):
         self._record = dict(record)
         self._factory = backend_factory
 
+        # 子目录密库位置（空=后端根目录）：决定 Marker 查找路径，
+        # 缺失时重连会开错位置而误报密码错误
+        self.vault_path = (record.get("vault_path") or "").strip("/")
+
         # 连接成功产物
         self.backend = None
         self.metadata = None
@@ -50,15 +54,19 @@ class QuickConnectDialog(QDialog):
         lay = QVBoxLayout(self)
 
         # ---- 密库摘要（只读） ----
+        location = record.get("path", "-")
+        if self.vault_path:
+            location = f"{location} / {self.vault_path}"
         summary = QLabel(
             f"类型：{record.get('label', record.get('backend_type', '?'))}\n"
-            f"位置：{record.get('path', '-')}\n"
+            f"位置：{location}\n"
             f"库：{record.get('vault_name', '-')} · "
             f"上次连接：{record.get('last_used', '-')}",
             self,
         )
         summary.setStyleSheet(f"color: {semantic_color('muted')}; font-size: 13px;")
         summary.setWordWrap(True)
+        self._summary = summary  # 测试辅助入口
         lay.addWidget(summary)
 
         # ---- 凭证输入 ----
@@ -158,15 +166,23 @@ class QuickConnectDialog(QDialog):
             )
             vm = VaultManager(backend)
             if use_recovery:
-                meta = vm.open_vault_with_recovery(recovery)
+                meta = vm.open_vault_with_recovery(recovery, self.vault_path)
                 if meta is None:
-                    self._status.setText("恢复码无效，或该密库未启用恢复码")
+                    self._status.setText(
+                        "恢复码无效，或该位置不存在带恢复码的密库"
+                    )
                     return
                 pw = vm.recovered_password or ""
             else:
-                meta = vm.open_vault(pw)
+                meta = vm.open_vault(pw, self.vault_path)
                 if meta is None:
-                    self._status.setText("主密码错误，或该位置不存在密库")
+                    # 区分"位置无密库"与"密码错误"，避免误导性报错
+                    if not vm.has_vault(self.vault_path):
+                        self._status.setText(
+                            "该位置不存在Mi库，请检查密库位置记录"
+                        )
+                    else:
+                        self._status.setText("主密码错误，请重试")
                     return
             self.backend = backend
             self.metadata = meta

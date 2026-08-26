@@ -480,6 +480,8 @@ class AppController(QObject):
             "label": label,
             "path": path,
             "vault_name": _vault_display_name(self.metadata),
+            # 子目录密库位置；重连时按此定位 Marker，缺失会误报密码错误
+            "vault_path": self._vault_root,
         }
         if btype == "webdav":
             # 仅存账号，密码绝不落盘
@@ -492,7 +494,11 @@ class AppController(QObject):
         """最近密库一键重连：仅输主密码（WebDAV 另输服务器密码）。"""
         dlg = QuickConnectDialog(record, parent=self.window)
         if dlg.exec() == QuickConnectDialog.Accepted and dlg.metadata is not None:
-            self._apply_connection(dlg.backend, dlg.metadata, dlg.session)
+            # 子目录密库经记录中的位置还原根前缀
+            self._apply_connection(
+                dlg.backend, dlg.metadata, dlg.session,
+                vault_path=dlg.vault_path,
+            )
             self._remember_current_vault()
 
     def _on_connect_other_vault(self, vault_path: str) -> None:

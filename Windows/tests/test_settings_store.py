@@ -33,12 +33,38 @@ def test_recent_vaults_empty_by_default(store):
 
 
 def test_remember_adds_with_auto_key_and_time(store):
-    """记录自动生成 key 与 last_used。"""
+    """记录自动生成 key（含位置段）与 last_used。"""
     store.remember_vault(_rec("D:/v1"))
     items = store.recent_vaults()
     assert len(items) == 1
-    assert items[0]["key"] == "local|D:/v1"
+    assert items[0]["key"] == "local|D:/v1|"
     assert items[0]["last_used"]
+
+
+def test_remember_vault_path_in_key(store):
+    """同后端上根库与子目录库共存：位置纳入键，互不覆盖。"""
+    store.remember_vault(_rec("D:/v1"))
+    sub = dict(_rec("D:/v1"))
+    sub["vault_path"] = "work"
+    store.remember_vault(sub)
+    items = store.recent_vaults()
+    assert len(items) == 2
+    keys = {r["key"] for r in items}
+    assert keys == {"local|D:/v1|", "local|D:/v1|work"}
+    # 位置字段已归一（去除首尾斜杠）
+    assert items[0]["vault_path"] == "work"
+
+
+def test_remember_normalizes_legacy_record(store):
+    """旧格式记录（无 vault_path）与新记录按三元组归一去重。"""
+    # 模拟旧版写入：key 无位置段
+    legacy = dict(_rec("D:/v1"))
+    legacy["key"] = "local|D:/v1"
+    store.set_recent_vaults([legacy])
+    store.remember_vault(_rec("D:/v1"))
+    items = store.recent_vaults()
+    assert len(items) == 1
+    assert items[0]["key"] == "local|D:/v1|"
 
 
 def test_remember_dedup_moves_to_top(store):
@@ -64,7 +90,7 @@ def test_forget_vault(store):
     """按 key 删除。"""
     store.remember_vault(_rec("D:/v1"))
     store.remember_vault(_rec("D:/v2"))
-    store.forget_vault("local|D:/v1")
+    store.forget_vault("local|D:/v1|")
     assert [r["path"] for r in store.recent_vaults()] == ["D:/v2"]
     # 删除不存在的 key 不报错
     store.forget_vault("nope")

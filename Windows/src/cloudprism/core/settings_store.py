@@ -194,17 +194,38 @@ class SettingsStore:
         """整体写回记录列表。"""
         self._set("vaults/recent", json.dumps(items, ensure_ascii=False))
 
-    def remember_vault(self, record: dict) -> None:
-        """记录一次成功连接：按 key 去重置顶，刷新时间，截断到上限。
+    @staticmethod
+    def _record_key(rec: dict) -> str:
+        """记录唯一键：后端类型 + 后端路径 + 密库位置（子目录）。
 
-        record 至少含 backend_type 与 path；key 缺失时自动生成。
+        同一后端上根目录与子目录密库共存，必须把位置纳入键，
+        否则两者互相覆盖导致重连开错位置。
+        """
+        return "|".join(
+            (
+                rec.get("backend_type", ""),
+                rec.get("path", ""),
+                (rec.get("vault_path") or "").strip("/"),
+            )
+        )
+
+    def remember_vault(self, record: dict) -> None:
+        """记录一次成功连接：按三元组去重置顶，刷新时间，截断到上限。
+
+        record 至少含 backend_type 与 path；可含 vault_path（子目录密库）。
+        旧版记录无 vault_path，按空位置参与归一，不会产生重复项。
         """
         rec = dict(record)
+        rec["vault_path"] = (rec.get("vault_path") or "").strip("/")
         if not rec.get("key"):
-            rec["key"] = f"{rec.get('backend_type', '')}|{rec.get('path', '')}"
+            rec["key"] = self._record_key(rec)
         rec.setdefault("last_used", datetime.now().strftime("%Y-%m-%d %H:%M"))
         rec["last_used"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-        items = [r for r in self.recent_vaults() if r.get("key") != rec["key"]]
+        # 按三元组归一去重：兼容旧格式 key，避免同一密库残留两条记录
+        items = [
+            r for r in self.recent_vaults()
+            if self._record_key(r) != rec["key"]
+        ]
         items.insert(0, rec)
         self.set_recent_vaults(items[: self.MAX_RECENT_VAULTS])
 

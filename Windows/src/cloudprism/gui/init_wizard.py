@@ -185,11 +185,11 @@ class BackendConfigPage(QWizardPage):
         test_row.addWidget(self.test_status, stretch=1)
         lay.addLayout(test_row)
 
-        # 密库位置（仅新建模式显示）：根目录或子目录名，可选填
+        # 密库位置：新建时选择建库位置；连接时定位已有密库（留空=根目录）
         self.location_label = QLabel("密库位置（可选，留空=后端根目录）：", self)
         self.location_edit = LineEdit(self)
         self.location_edit.setPlaceholderText(
-            "例如：vault-work（在子目录新建独立密库）"
+            "子目录名，如 vault-work；留空 = 后端根目录"
         )
         lay.addWidget(self.location_label)
         lay.addWidget(self.location_edit)
@@ -332,10 +332,8 @@ class BackendConfigPage(QWizardPage):
         btype = wizard.backend_type if wizard else "local"
         idx = {"local": 0, "webdav": 1, "baidu": 2}.get(btype, 0)
         self._stack.setCurrentIndex(idx)
-        # 密库位置仅新建模式可选（连接模式位置由密库记录决定）
-        is_new = wizard.is_new_mode() if wizard else True
-        self.location_label.setVisible(is_new)
-        self.location_edit.setVisible(is_new)
+        # 密库位置两种模式均可见：连接时靠它定位子目录密库，
+        # 否则默认开根目录会把子目录密库误报为密码错误
         # 更新副标题提示并回填上次配置
         if btype == "local":
             self.setSubTitle("选择本地文件夹作为云盘根目录")
@@ -623,13 +621,14 @@ class InitWizard(QWizard):
 
         pw = self.page_password.pw_edit.text()
         vm = VaultManager(backend)
+        # 密库位置（空=后端根目录）：新建决定建处，连接决定查找处
+        self.vault_path = (
+            self.page_backend_cfg.location_edit.text().strip().strip("/")
+        )
 
         if self.is_new_mode():
             # 新建Mi库（可选携带自定义名称与密库位置）
             filename_enc = self.page_enc.radio_on.isChecked()
-            self.vault_path = (
-                self.page_backend_cfg.location_edit.text().strip().strip("/")
-            )
             try:
                 meta = vm.create_vault(
                     pw,
@@ -647,18 +646,22 @@ class InitWizard(QWizard):
             except Exception:  # noqa: BLE001
                 self.recovery_code = ""
         else:
-            # 连接已有Mi库（主密码或恢复码二选一）
+            # 连接已有Mi库（主密码或恢复码二选一，均按填写的位置查找）
             recovery = self.page_password.recovery_edit.text().strip()
             if recovery:
-                meta = vm.open_vault_with_recovery(recovery)
+                meta = vm.open_vault_with_recovery(recovery, self.vault_path)
                 if meta is None:
                     self._error("恢复码无效，或该位置不存在带恢复码的Mi库")
                     return
                 pw = vm.recovered_password or pw
             else:
-                meta = vm.open_vault(pw)
+                meta = vm.open_vault(pw, self.vault_path)
                 if meta is None:
-                    self._error("密码错误或后端无Mi库，请检查后重试")
+                    # 区分"位置无密库"与"密码错误"，避免误导性报错
+                    if not vm.has_vault(self.vault_path):
+                        self._error("该位置不存在Mi库，请检查密库位置")
+                    else:
+                        self._error("主密码错误，请重试")
                     return
 
         self.backend = backend

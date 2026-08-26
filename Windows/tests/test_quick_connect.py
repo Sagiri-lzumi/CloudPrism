@@ -28,17 +28,24 @@ class FakeVaultManager:
 
     result = FakeMeta()
     recovery_result = None  # 恢复码开库返回值（None = 恢复码无效）
+    vault_exists = True     # has_vault 返回值（错误文案区分用）
     last_recovery_code: str | None = None
+    last_vault_path: str | None = None  # 最近一次开库收到的位置参数
 
     def __init__(self, backend) -> None:
         self.backend = backend
         self.recovered_password: str | None = None
 
-    def open_vault(self, pw: str):
+    def has_vault(self, vault_path: str = "") -> bool:
+        return type(self).vault_exists
+
+    def open_vault(self, pw: str, vault_path: str = ""):
+        type(self).last_vault_path = vault_path
         return type(self).result
 
-    def open_vault_with_recovery(self, code: str):
+    def open_vault_with_recovery(self, code: str, vault_path: str = ""):
         type(self).last_recovery_code = code
+        type(self).last_vault_path = vault_path
         if type(self).recovery_result is None:
             return None
         self.recovered_password = "recovered-pw"
@@ -51,7 +58,9 @@ def fake_vm(monkeypatch):
     monkeypatch.setattr(qc, "VaultManager", FakeVaultManager)
     FakeVaultManager.result = FakeMeta()
     FakeVaultManager.recovery_result = None
+    FakeVaultManager.vault_exists = True
     FakeVaultManager.last_recovery_code = None
+    FakeVaultManager.last_vault_path = None
     return FakeVaultManager
 
 
@@ -164,6 +173,52 @@ def test_local_record_no_webdav_field(qtbot, fake_vm):
     dlg = QuickConnectDialog(LOCAL_RECORD, backend_factory=RecordingFactory())
     qtbot.addWidget(dlg)
     assert dlg._webdav_pass_edit is None
+
+
+# ---------------------------------------------------------------------------
+# 子目录密库位置传递与错误文案区分
+# ---------------------------------------------------------------------------
+
+
+def test_connect_passes_vault_path(qtbot, fake_vm):
+    """记录带子目录位置：按位置开库，摘要展示子目录。"""
+    rec = dict(LOCAL_RECORD)
+    rec["vault_path"] = "work"
+    dlg = QuickConnectDialog(rec, backend_factory=RecordingFactory())
+    qtbot.addWidget(dlg)
+    assert dlg.vault_path == "work"
+    assert "D:/v / work" in dlg._summary.text()
+    dlg._pw_edit.setText("pw")
+    dlg._connect()
+    assert FakeVaultManager.last_vault_path == "work"
+    assert dlg.result() == QDialog.DialogCode.Accepted
+
+
+def test_no_vault_at_location_message(qtbot, fake_vm):
+    """该位置无 Marker：报"不存在Mi库"而非误导性的密码错误。"""
+    FakeVaultManager.result = None
+    FakeVaultManager.vault_exists = False
+    dlg = QuickConnectDialog(LOCAL_RECORD, backend_factory=RecordingFactory())
+    qtbot.addWidget(dlg)
+    dlg._pw_edit.setText("pw")
+    dlg._connect()
+    assert "不存在" in dlg._status.text()
+    assert "主密码错误" not in dlg._status.text()
+    assert dlg.result() != QDialog.DialogCode.Accepted
+
+
+def test_recovery_passes_vault_path(qtbot, fake_vm):
+    """恢复码开库同样携带位置参数。"""
+    rec = dict(LOCAL_RECORD)
+    rec["vault_path"] = "sub"
+    FakeVaultManager.recovery_result = FakeMeta()
+    dlg = QuickConnectDialog(rec, backend_factory=RecordingFactory())
+    qtbot.addWidget(dlg)
+    dlg._recovery_check.setChecked(True)
+    dlg._recovery_edit.setText("AAAA-BBBB-CCCC-DDDD")
+    dlg._connect()
+    assert FakeVaultManager.last_vault_path == "sub"
+    assert dlg.result() == QDialog.DialogCode.Accepted
 
 
 # ---------------------------------------------------------------------------
