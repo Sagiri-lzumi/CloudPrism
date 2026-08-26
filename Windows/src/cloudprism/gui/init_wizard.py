@@ -247,8 +247,8 @@ class BackendConfigPage(QWizardPage):
         lay = QVBoxLayout(w)
         hint = QLabel(
             "使用百度网盘需在开放平台创建应用并取得凭证\n"
-            "（Appid / AppKey / SecretKey），申请流程见\n"
-            "《Plan/百度网盘开放平台申请指南》。",
+            "（Appid / AppKey / SecretKey）。凭证可在 设置 → 百度网盘\n"
+            "中填写与检查（附申请教程），也可点击下方按钮授权。",
             w,
         )
         hint.setStyleSheet("color: #5c5c5c;")

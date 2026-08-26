@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from cloudprism.storage.baidu_backend import BaiduCredentialStore
@@ -70,13 +71,21 @@ def exchange_code(
 
 
 class BaiduAuthDialog(QDialog):
-    """凭证填写 + 浏览器授权 + code 换 token 的一站式对话框。"""
+    """凭证填写 + 浏览器授权 + code 换 token 的一站式对话框。
+
+    可选参数（供设置页复用，默认行为与向导用法不变）：
+      - ``prefill``：优先用传入凭证回填（其次才是本地存储）；
+      - ``show_credentials_form=False``：隐藏凭证表单，改显只读摘要，
+        适用于凭证已在设置页输入的场景。
+    """
 
     def __init__(
         self,
         store: BaiduCredentialStore | None = None,
         parent=None,
         http_session: requests.Session | None = None,
+        prefill: dict | None = None,
+        show_credentials_form: bool = True,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("百度网盘授权")
@@ -97,21 +106,37 @@ class BaiduAuthDialog(QDialog):
         lay.addWidget(hint)
 
         # ---- 凭证输入 ----
-        form = QFormLayout()
-        self._appid_edit = QLineEdit(self)
-        self._appkey_edit = QLineEdit(self)
-        self._secret_edit = QLineEdit(self)
+        form_widget = QWidget(self)
+        form = QFormLayout(form_widget)
+        self._appid_edit = QLineEdit(form_widget)
+        self._appkey_edit = QLineEdit(form_widget)
+        self._secret_edit = QLineEdit(form_widget)
         self._secret_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self._signkey_edit = QLineEdit(self)
+        self._signkey_edit = QLineEdit(form_widget)
         self._signkey_edit.setEchoMode(QLineEdit.EchoMode.Password)
         form.addRow("Appid：", self._appid_edit)
         form.addRow("AppKey：", self._appkey_edit)
         form.addRow("SecretKey：", self._secret_edit)
         form.addRow("SignKey（可选）：", self._signkey_edit)
-        lay.addLayout(form)
+        lay.addWidget(form_widget)
+        self._form_widget = form_widget
 
-        # 已保存凭证回填（SecretKey 除外，需用户确认时重新输入亦可留空复用）
-        saved = self._store.load()
+        if not show_credentials_form:
+            # 凭证来自设置页：隐藏表单，改显只读摘要（AppKey 部分遮罩）
+            app_key = (prefill or {}).get("app_key", "")
+            masked = app_key[:4] + "…" if len(app_key) > 4 else app_key
+            summary = QLabel(
+                f"凭证来自设置页：AppKey：{masked}\n"
+                "如需修改，请关闭后在 设置 → 百度网盘 中编辑。",
+                self,
+            )
+            summary.setStyleSheet("color: #5c5c5c; font-size: 12px;")
+            summary.setWordWrap(True)
+            lay.addWidget(summary)
+            form_widget.hide()
+
+        # 已保存凭证回填（传入的 prefill 优先；SecretKey 一并回填以便直接授权）
+        saved = prefill if prefill is not None else self._store.load()
         if saved:
             self._appid_edit.setText(saved.get("app_id", ""))
             self._appkey_edit.setText(saved.get("app_key", ""))

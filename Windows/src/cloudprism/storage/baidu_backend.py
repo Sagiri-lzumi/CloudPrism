@@ -150,6 +150,13 @@ class BaiduCredentialStore:
         except Exception:
             return None
 
+    def clear(self) -> None:
+        """删除凭证文件（不存在时容忍）。"""
+        try:
+            os.remove(self.path)
+        except OSError:
+            pass
+
 
 # ---------------------------------------------------------------------------
 # 存储后端实现

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QStackedWidget,
@@ -28,9 +29,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cloudprism.gui.baidu_auth import BaiduAuthDialog
+from cloudprism.gui.baidu_guide import BaiduGuideDialog
 from cloudprism.gui.dir_tree_model import DirTreeModel
 from cloudprism.gui.file_tree_view import FileTreeView
 from cloudprism.gui.vault_info_page import VaultInfoPage
+from cloudprism.storage.baidu_backend import BaiduCredentialStore
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +159,7 @@ class TransfersPage(QWidget):
 
 
 class SettingsPage(QWidget):
-    """设置面板：外观 + 连接信息 + 缓存 + 传输 + 安全。"""
+    """设置面板：外观 + 连接信息 + 缓存 + 传输 + 安全 + 百度网盘 + 性能。"""
 
     # 信号
     cacheSettingsChanged = Signal(int, str)  # (cache_limit_mb, cache_path)
@@ -169,8 +173,11 @@ class SettingsPage(QWidget):
     DEFAULT_CACHE_LIMIT_MB = 512
     DEFAULT_CACHE_SUBDIR = "cloudprism_cache"
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, baidu_store=None) -> None:
         super().__init__(parent)
+
+        # 百度凭证存储（DPAPI 加密落盘）；测试可注入假存储
+        self._baidu_store = baidu_store or BaiduCredentialStore()
 
         # 可滚动区域
         from PySide6.QtWidgets import QScrollArea
@@ -291,6 +298,55 @@ class SettingsPage(QWidget):
 
         lay.addWidget(security_group)
 
+        # ---- 百度网盘 ----
+        baidu_group = QGroupBox("百度网盘", content)
+        baidu_form = QFormLayout(baidu_group)
+
+        self._baidu_appid_edit = QLineEdit(baidu_group)
+        self._baidu_appkey_edit = QLineEdit(baidu_group)
+        self._baidu_secret_edit = QLineEdit(baidu_group)
+        self._baidu_secret_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._baidu_signkey_edit = QLineEdit(baidu_group)
+        self._baidu_signkey_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        baidu_form.addRow("Appid：", self._baidu_appid_edit)
+        baidu_form.addRow("AppKey：", self._baidu_appkey_edit)
+        baidu_form.addRow("SecretKey：", self._baidu_secret_edit)
+        baidu_form.addRow("SignKey（可选）：", self._baidu_signkey_edit)
+
+        # 申请教程：按需查看，不主动弹出
+        guide_row = QHBoxLayout()
+        self._baidu_guide_btn = QPushButton("如何申请凭证…", baidu_group)
+        self._baidu_guide_btn.setFlat(True)
+        self._baidu_guide_btn.setStyleSheet(
+            "color: #06c; text-align: left; border: none;"
+        )
+        self._baidu_guide_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._baidu_guide_btn.clicked.connect(self._show_baidu_guide)
+        guide_row.addWidget(self._baidu_guide_btn)
+        guide_row.addStretch()
+        baidu_form.addRow(guide_row)
+
+        # 检查 / 登录 / 清除 + 状态显示
+        action_row = QHBoxLayout()
+        self._baidu_check_btn = QPushButton("检查", baidu_group)
+        self._baidu_check_btn.setToolTip(
+            "校验格式与网络连通性；凭证最终有效性由登录授权时百度服务器验证"
+        )
+        self._baidu_check_btn.clicked.connect(self._check_baidu)
+        self._baidu_login_btn = QPushButton("登录百度账号…", baidu_group)
+        self._baidu_login_btn.clicked.connect(self._login_baidu)
+        self._baidu_clear_btn = QPushButton("清除", baidu_group)
+        self._baidu_clear_btn.clicked.connect(self._clear_baidu)
+        self._baidu_status = QLabel("", baidu_group)
+        self._baidu_status.setWordWrap(True)
+        action_row.addWidget(self._baidu_check_btn)
+        action_row.addWidget(self._baidu_login_btn)
+        action_row.addWidget(self._baidu_clear_btn)
+        action_row.addWidget(self._baidu_status, stretch=1)
+        baidu_form.addRow(action_row)
+
+        lay.addWidget(baidu_group)
+
         # ---- 性能设置 ----
         perf_group = QGroupBox("性能", content)
         perf_form = QFormLayout(perf_group)
@@ -314,6 +370,154 @@ class SettingsPage(QWidget):
 
         # 刷新缓存占用显示
         self._refresh_cache_usage()
+
+        # 回填已保存的百度凭证并刷新授权状态
+        self._load_baidu_credentials()
+
+    # ------------------------------------------------------------------
+    # 百度网盘凭证（用户自输模式：不落代码仓库，DPAPI 加密落盘）
+    # ------------------------------------------------------------------
+
+    def _load_baidu_credentials(self) -> None:
+        """回填已保存凭证并刷新授权状态显示。"""
+        saved = self._baidu_store.load() or {}
+        self._baidu_appid_edit.setText(saved.get("app_id", ""))
+        self._baidu_appkey_edit.setText(saved.get("app_key", ""))
+        self._baidu_secret_edit.setText(saved.get("secret_key", ""))
+        self._baidu_signkey_edit.setText(saved.get("sign_key", ""))
+        if saved.get("access_token"):
+            self._set_baidu_status("已授权 ✓", "#0a0")
+        elif saved.get("app_key"):
+            self._set_baidu_status("已配置，未登录", "#c80")
+        else:
+            self._set_baidu_status("未配置", "#5c5c5c")
+
+    def _set_baidu_status(self, text: str, color: str) -> None:
+        """更新百度分组状态标签。"""
+        self._baidu_status.setText(text)
+        self._baidu_status.setStyleSheet(f"color: {color};")
+
+    def _collect_baidu_credentials(self) -> dict | None:
+        """收集并做格式检查；不合法返回 None（状态栏已提示）。"""
+        creds = {
+            "app_id": self._baidu_appid_edit.text().strip(),
+            "app_key": self._baidu_appkey_edit.text().strip(),
+            "secret_key": self._baidu_secret_edit.text().strip(),
+            "sign_key": self._baidu_signkey_edit.text().strip(),
+        }
+        if not creds["app_key"] or not creds["secret_key"]:
+            self._set_baidu_status("请先填写 AppKey 与 SecretKey", "#c00")
+            return None
+        labels = {"app_id": "Appid", "app_key": "AppKey",
+                  "secret_key": "SecretKey", "sign_key": "SignKey"}
+        for key, value in creds.items():
+            if value and any(ch.isspace() for ch in value):
+                self._set_baidu_status(f"{labels[key]} 不能包含空白字符", "#c00")
+                return None
+        return creds
+
+    def _save_baidu_credentials(self, creds: dict) -> None:
+        """持久化凭证（保留存储中已有的 token 字段）。"""
+        merged = dict(self._baidu_store.load() or {})
+        merged.update(creds)
+        self._baidu_store.save(merged)
+
+    def _check_baidu(self) -> bool:
+        """检查：格式 → 连通性 → （已授权时）token 实测。
+
+        返回格式检查是否通过（供登录动作把关）。百度 OAuth 无
+        client_credentials 模式，授权前服务器端无法验证凭证真伪，
+        最终有效性在登录换取 token 时验证。
+        """
+        creds = self._collect_baidu_credentials()
+        if creds is None:
+            return False
+
+        import requests
+
+        self._baidu_check_btn.setEnabled(False)
+        self._set_baidu_status("检查中…", "#5c5c5c")
+        try:
+            # 连通性探测（不致命：允许离线填表，稍后再试）
+            try:
+                requests.head("https://openapi.baidu.com", timeout=4)
+            except Exception as e:  # noqa: BLE001
+                self._save_baidu_credentials(creds)
+                self._set_baidu_status(
+                    f"网络不可达：{e}（格式检查已通过，凭证已保存）", "#c80"
+                )
+                return True
+
+            # 已授权则用 uinfo 接口实测 token 并显示账号信息
+            token = (self._baidu_store.load() or {}).get("access_token", "")
+            if token:
+                try:
+                    r = requests.get(
+                        "https://pan.baidu.com/rest/2.0/xpan/nas",
+                        params={"method": "uinfo", "access_token": token},
+                        timeout=4,
+                    )
+                    data = r.json()
+                except Exception:  # noqa: BLE001
+                    data = {}
+                if "uname" in data:
+                    self._save_baidu_credentials(creds)
+                    self._set_baidu_status(
+                        f"已授权 ✓，账号：{data.get('uname', '-')}", "#0a0"
+                    )
+                    return True
+                self._set_baidu_status("token 已失效，请重新登录", "#c80")
+
+            self._save_baidu_credentials(creds)
+            if token:
+                return True  # token 失效提示已在上方显示，格式仍算通过
+            self._set_baidu_status(
+                "✓ 格式检查通过，可点击「登录百度账号…」（最终有效性由授权时"
+                "百度服务器验证）",
+                "#0a0",
+            )
+            return True
+        finally:
+            self._baidu_check_btn.setEnabled(True)
+
+    def _login_baidu(self) -> None:
+        """格式把关后打开授权对话框，登录用户的百度账号。"""
+        creds = self._collect_baidu_credentials()
+        if creds is None:
+            return
+        self._save_baidu_credentials(creds)
+        dlg = BaiduAuthDialog(
+            store=self._baidu_store,
+            parent=self,
+            prefill=creds,
+            show_credentials_form=False,
+        )
+        if dlg.exec() and dlg.token_data is not None:
+            self._set_baidu_status("已授权 ✓", "#0a0")
+
+    def _clear_baidu(self) -> None:
+        """清除本机凭证与授权（确认框）。"""
+        ret = QMessageBox.question(
+            self,
+            "清除百度网盘凭证",
+            "确定删除本机保存的百度网盘凭证与授权？",
+        )
+        if ret != QMessageBox.StandardButton.Yes:
+            return
+        self._baidu_store.clear()
+        for edit in (
+            self._baidu_appid_edit,
+            self._baidu_appkey_edit,
+            self._baidu_secret_edit,
+            self._baidu_signkey_edit,
+        ):
+            edit.clear()
+        self._set_baidu_status("未配置", "#5c5c5c")
+
+    def _show_baidu_guide(self) -> None:
+        """展示凭证申请教程（按需查看，不主动弹出）。"""
+        dlg = BaiduGuideDialog(parent=self)
+        dlg.exec()
 
     # ------------------------------------------------------------------
     # 公开方法
