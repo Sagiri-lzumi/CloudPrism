@@ -33,6 +33,7 @@ from cloudprism.gui.baidu_auth import BaiduAuthDialog
 from cloudprism.gui.baidu_guide import BaiduGuideDialog
 from cloudprism.gui.dir_tree_model import DirTreeModel
 from cloudprism.gui.file_tree_view import FileTreeView
+from cloudprism.gui.theme import semantic_color
 from cloudprism.gui.vault_info_page import VaultInfoPage
 from cloudprism.storage.baidu_backend import BaiduCredentialStore
 
@@ -123,11 +124,11 @@ class TransfersPage(QWidget):
         lay.setSpacing(8)
 
         header = QLabel("传输队列", self)
-        header.setStyleSheet("font-weight: bold; font-size: 16px; color: #1a1a1a;")
+        header.setStyleSheet("font-weight: bold; font-size: 16px;")
         lay.addWidget(header)
 
         desc = QLabel("上传和下载任务将显示在此处", self)
-        desc.setStyleSheet("color: #5c5c5c; font-size: 13px;")
+        desc.setStyleSheet(f"color: {semantic_color('muted')}; font-size: 13px;")
         lay.addWidget(desc)
 
         self.task_list = QListWidget(self)
@@ -318,7 +319,7 @@ class SettingsPage(QWidget):
         self._baidu_guide_btn = QPushButton("如何申请凭证…", baidu_group)
         self._baidu_guide_btn.setFlat(True)
         self._baidu_guide_btn.setStyleSheet(
-            "color: #06c; text-align: left; border: none;"
+            f"color: {semantic_color('link')}; text-align: left; border: none;"
         )
         self._baidu_guide_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._baidu_guide_btn.clicked.connect(self._show_baidu_guide)
@@ -386,16 +387,16 @@ class SettingsPage(QWidget):
         self._baidu_secret_edit.setText(saved.get("secret_key", ""))
         self._baidu_signkey_edit.setText(saved.get("sign_key", ""))
         if saved.get("access_token"):
-            self._set_baidu_status("已授权 ✓", "#0a0")
+            self._set_baidu_status("已授权 ✓", "ok")
         elif saved.get("app_key"):
-            self._set_baidu_status("已配置，未登录", "#c80")
+            self._set_baidu_status("已配置，未登录", "warn")
         else:
-            self._set_baidu_status("未配置", "#5c5c5c")
+            self._set_baidu_status("未配置", "muted")
 
     def _set_baidu_status(self, text: str, color: str) -> None:
-        """更新百度分组状态标签。"""
+        """更新百度分组状态标签（color 为语义键，见 theme.semantic_color）。"""
         self._baidu_status.setText(text)
-        self._baidu_status.setStyleSheet(f"color: {color};")
+        self._baidu_status.setStyleSheet(f"color: {semantic_color(color)};")
 
     def _collect_baidu_credentials(self) -> dict | None:
         """收集并做格式检查；不合法返回 None（状态栏已提示）。"""
@@ -406,13 +407,13 @@ class SettingsPage(QWidget):
             "sign_key": self._baidu_signkey_edit.text().strip(),
         }
         if not creds["app_key"] or not creds["secret_key"]:
-            self._set_baidu_status("请先填写 AppKey 与 SecretKey", "#c00")
+            self._set_baidu_status("请先填写 AppKey 与 SecretKey", "err")
             return None
         labels = {"app_id": "Appid", "app_key": "AppKey",
                   "secret_key": "SecretKey", "sign_key": "SignKey"}
         for key, value in creds.items():
             if value and any(ch.isspace() for ch in value):
-                self._set_baidu_status(f"{labels[key]} 不能包含空白字符", "#c00")
+                self._set_baidu_status(f"{labels[key]} 不能包含空白字符", "err")
                 return None
         return creds
 
@@ -436,7 +437,7 @@ class SettingsPage(QWidget):
         import requests
 
         self._baidu_check_btn.setEnabled(False)
-        self._set_baidu_status("检查中…", "#5c5c5c")
+        self._set_baidu_status("检查中…", "muted")
         try:
             # 连通性探测（不致命：允许离线填表，稍后再试）
             try:
@@ -444,7 +445,7 @@ class SettingsPage(QWidget):
             except Exception as e:  # noqa: BLE001
                 self._save_baidu_credentials(creds)
                 self._set_baidu_status(
-                    f"网络不可达：{e}（格式检查已通过，凭证已保存）", "#c80"
+                    f"网络不可达：{e}（格式检查已通过，凭证已保存）", "warn"
                 )
                 return True
 
@@ -463,10 +464,10 @@ class SettingsPage(QWidget):
                 if "uname" in data:
                     self._save_baidu_credentials(creds)
                     self._set_baidu_status(
-                        f"已授权 ✓，账号：{data.get('uname', '-')}", "#0a0"
+                        f"已授权 ✓，账号：{data.get('uname', '-')}", "ok"
                     )
                     return True
-                self._set_baidu_status("token 已失效，请重新登录", "#c80")
+                self._set_baidu_status("token 已失效，请重新登录", "warn")
 
             self._save_baidu_credentials(creds)
             if token:
@@ -474,7 +475,7 @@ class SettingsPage(QWidget):
             self._set_baidu_status(
                 "✓ 格式检查通过，可点击「登录百度账号…」（最终有效性由授权时"
                 "百度服务器验证）",
-                "#0a0",
+                "ok",
             )
             return True
         finally:
@@ -493,7 +494,7 @@ class SettingsPage(QWidget):
             show_credentials_form=False,
         )
         if dlg.exec() and dlg.token_data is not None:
-            self._set_baidu_status("已授权 ✓", "#0a0")
+            self._set_baidu_status("已授权 ✓", "ok")
 
     def _clear_baidu(self) -> None:
         """清除本机凭证与授权（确认框）。"""
@@ -512,7 +513,7 @@ class SettingsPage(QWidget):
             self._baidu_signkey_edit,
         ):
             edit.clear()
-        self._set_baidu_status("未配置", "#5c5c5c")
+        self._set_baidu_status("未配置", "muted")
 
     def _show_baidu_guide(self) -> None:
         """展示凭证申请教程（按需查看，不主动弹出）。"""
@@ -534,23 +535,6 @@ class SettingsPage(QWidget):
         self._backend_path_label.setText(backend_path)
         self._filename_enc_label.setText("开" if filename_enc else "关")
         self._backend_path_label.setWordWrap(True)
-
-    def revert_theme(self) -> None:
-        """回退主题下拉框到「浅色」（当前版本唯一可用主题）。
-
-        延迟到下一事件循环执行：本次信号发射中持久化插槽会在本方法
-        返回后再次写入「深色」索引，延迟回退可保证最终状态正确。
-        """
-        from PySide6.QtCore import QTimer
-
-        def _do() -> None:
-            self._theme_combo.blockSignals(True)
-            self._theme_combo.setCurrentIndex(2)
-            self._theme_combo.blockSignals(False)
-            if getattr(self, "_store", None) is not None:
-                self._store.set_theme_index(2)
-
-        QTimer.singleShot(0, self, _do)
 
     @property
     def cache_limit_mb(self) -> int:

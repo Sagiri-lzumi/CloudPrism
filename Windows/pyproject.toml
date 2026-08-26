@@ -17,7 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # GUI 与测试相关依赖（开发期）
-gui = ["PySide6>=6.6"]
+gui = ["PySide6>=6.6", "qt-material>=2.14"]
 dev = [
     "pytest>=8",
     "pytest-qt>=4.4",

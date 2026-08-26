@@ -25,7 +25,7 @@ from cloudprism.gui.init_wizard import InitWizard
 from cloudprism.gui.main_window import MainWindow
 from cloudprism.gui.perf_monitor import PerfMonitor
 from cloudprism.gui.quick_connect import QuickConnectDialog
-from cloudprism.gui.theme import apply_fluent_style
+from cloudprism.gui.theme import apply_theme, current_mode
 from cloudprism.gui.transfer_worker import TransferWorker, start_transfer_bg
 from cloudprism.storage.backend import StorageBackend
 
@@ -165,13 +165,10 @@ class AppController(QObject):
     # ------------------------------------------------------------------
 
     def _on_theme_changed(self, theme: str) -> None:
-        """主题切换：当前版本仅提供浅色 Fluent 主题。"""
-        if theme == "dark":
-            QMessageBox.information(
-                self.window, "提示", "当前版本仅提供浅色主题，深色主题敬请期待"
-            )
-            # 回退下拉框到「浅色」，避免停留在未生效的「深色」（假状态）
-            self.window.settings_page.revert_theme()
+        """主题切换：实时应用 qt-material 明/暗主题（system 自动解析）。"""
+        app = QApplication.instance()
+        if app is not None:
+            apply_theme(app, theme)
 
     def _on_font_size_changed(self, size: int) -> None:
         """字体大小切换：应用到整个应用。"""
@@ -180,6 +177,8 @@ class AppController(QObject):
             font = app.font()
             font.setPointSize(size)
             app.setFont(font)
+            # qt-material 样式表会覆盖基础字号，须携带字号重套样式
+            apply_theme(app, current_mode(), font_size=size)
 
     # ------------------------------------------------------------------
     # 初始化 / 连接
@@ -845,10 +844,13 @@ def main() -> int:
     import os
 
     app = QApplication(sys.argv)
-    # 应用 Fluent 风格主题
-    apply_fluent_style(app)
-    # 恢复持久化的字体大小
     store = SettingsStore()
+    # 应用 Material 主题（浅色 / 深色 / 跟随系统，沿用持久化选择）
+    modes = ["system", "dark", "light"]
+    idx = store.theme_index()
+    mode = modes[idx] if 0 <= idx < len(modes) else "system"
+    apply_theme(app, mode, font_size=store.font_size())
+    # 恢复持久化的字体大小（兼顾样式表未覆盖的控件）
     font = app.font()
     font.setPointSize(store.font_size())
     app.setFont(font)

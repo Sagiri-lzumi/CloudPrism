@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cloudprism.gui.theme import semantic_color
 from cloudprism.storage.baidu_backend import BaiduCredentialStore
 
 # 授权地址（oob 模式：无回调，页面直接展示 code）
@@ -101,7 +102,7 @@ class BaiduAuthDialog(QDialog):
             "AppKey / SecretKey 仅保存在本机（DPAPI 加密），不会上传。",
             self,
         )
-        hint.setStyleSheet("color: #5c5c5c; font-size: 12px;")
+        hint.setStyleSheet(f"color: {semantic_color('muted')}; font-size: 12px;")
         hint.setWordWrap(True)
         lay.addWidget(hint)
 
@@ -130,7 +131,7 @@ class BaiduAuthDialog(QDialog):
                 "如需修改，请关闭后在 设置 → 百度网盘 中编辑。",
                 self,
             )
-            summary.setStyleSheet("color: #5c5c5c; font-size: 12px;")
+            summary.setStyleSheet(f"color: {semantic_color('muted')}; font-size: 12px;")
             summary.setWordWrap(True)
             lay.addWidget(summary)
             form_widget.hide()
@@ -182,7 +183,7 @@ class BaiduAuthDialog(QDialog):
         }
         if not creds["app_key"] or not creds["secret_key"]:
             self._status.setText("请先填写 AppKey 与 SecretKey")
-            self._status.setStyleSheet("color: #c00;")
+            self._status.setStyleSheet(f"color: {semantic_color('err')};")
             return None
         return creds
 
@@ -194,7 +195,7 @@ class BaiduAuthDialog(QDialog):
         url = build_auth_url(creds["app_key"], creds["app_id"])
         webbrowser.open(url)
         self._status.setText("已在浏览器打开授权页；登录并同意后复制 code")
-        self._status.setStyleSheet("color: #5c5c5c;")
+        self._status.setStyleSheet(f"color: {semantic_color('muted')};")
 
     def _finish_auth(self) -> None:
         """用 code 换 token 并加密保存。"""
@@ -204,7 +205,7 @@ class BaiduAuthDialog(QDialog):
         code = self._code_edit.text().strip()
         if not code:
             self._status.setText("请粘贴授权页面显示的 code")
-            self._status.setStyleSheet("color: #c00;")
+            self._status.setStyleSheet(f"color: {semantic_color('err')};")
             return
         self._finish_btn.setEnabled(False)
         self._status.setText("正在换取 token…")
@@ -222,9 +223,9 @@ class BaiduAuthDialog(QDialog):
             self._store.save(creds)
             self.token_data = data
             self._status.setText("✓ 授权成功，凭证已加密保存")
-            self._status.setStyleSheet("color: #0a0; font-weight: bold;")
+            self._status.setStyleSheet(f"color: {semantic_color('ok')}; font-weight: bold;")
             self.accept()
         except Exception as e:  # noqa: BLE001
             self._status.setText(f"授权失败：{e}")
-            self._status.setStyleSheet("color: #c00;")
+            self._status.setStyleSheet(f"color: {semantic_color('err')};")
             self._finish_btn.setEnabled(True)

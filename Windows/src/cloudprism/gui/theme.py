@@ -1,531 +1,125 @@
-"""Fluent 风格全局主题。
+"""Material Design 全局主题（基于开源库 qt-material）。
 
-提供 apply_fluent_style() 函数，为 QApplication 设置统一 QSS 样式表，
-参考 Windows 11 Fluent Design System：
-  - 微暖灰背景、纯白卡片
-  - 沉稳蓝色强调、柔和边框
-  - 清晰的交互反馈与视觉层次
-  - 舒适的间距与排版
+提供 apply_theme() 函数，为 QApplication 应用 Material Design 样式表，
+支持浅色 / 深色 / 跟随系统三种模式，运行时可随时切换：
+  - 浅色：light_blue.xml（蓝强调色延续品牌色 #0067b8）
+  - 深色：dark_blue.xml
+  - 跟随系统：经 styleHints().colorScheme()（Qt 6.5+）解析为明/暗
+
+另提供 semantic_color() 语义色表（明暗双套），供状态标签等控件级
+setStyleSheet 覆盖取色，保证两种主题下文字均可读。
+
+注意：qt_material 必须在 PySide6 之后导入（库要求）。
 """
 
 from __future__ import annotations
 
+import logging
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
+try:
+    from qt_material import apply_stylesheet as _qtm_apply_stylesheet
 
-# Fluent 风格全局样式表
-FLUENT_QSS = """
-/* ================================================================
-   全局基础
-   ================================================================ */
-QWidget {
-    font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
-    font-size: 10pt;
-    color: #1a1a1a;
-}
+    _QTM_AVAILABLE = True
+except ImportError:  # 依赖缺失时降级为系统默认样式，不阻断启动
+    _QTM_AVAILABLE = False
 
-QMainWindow {
-    background-color: #f5f5f5;
-}
+logger = logging.getLogger(__name__)
 
-/* ================================================================
-   按钮
-   ================================================================ */
-QPushButton {
-    background-color: #ffffff;
-    border: 1px solid #d4d4d4;
-    border-radius: 6px;
-    padding: 6px 20px;
-    min-height: 28px;
-    color: #1a1a1a;
-    font-weight: 500;
-}
-QPushButton:hover {
-    background-color: #f0f0f0;
-    border-color: #c4c4c4;
-}
-QPushButton:pressed {
-    background-color: #e6e6e6;
-    border-color: #b8b8b8;
-}
-QPushButton:disabled {
-    color: #a0a0a0;
-    background-color: #fafafa;
-    border-color: #e8e8e8;
-}
-QPushButton:default {
-    border: 1.5px solid #0067b8;
-}
-QPushButton:default:hover {
-    background-color: #f0f6ff;
+# 模式 -> qt-material 主题文件
+THEMES = {
+    "light": "light_blue.xml",
+    "dark": "dark_blue.xml",
 }
 
-/* ================================================================
-   输入框
-   ================================================================ */
-QLineEdit {
-    background-color: #ffffff;
-    border: 1px solid #d4d4d4;
-    border-radius: 6px;
-    padding: 5px 10px;
-    min-height: 28px;
-    selection-background-color: #0067b8;
-    selection-color: white;
-}
-QLineEdit:focus {
-    border: 1px solid #0067b8;
-    border-bottom: 2px solid #0067b8;
-}
-QLineEdit:disabled {
-    background-color: #f9f9f9;
-    color: #a0a0a0;
-    border-color: #e8e8e8;
+# 字体族：保留中文友好栈（qt-material 模板写入 QWidget 基础字体）
+FONT_FAMILY = '"Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif'
+
+# 模块级状态：当前已应用的模式与字号（供字号变更时重套样式）
+_current_mode = "light"
+_current_font_size = 14
+
+# 语义色表（控件级状态文字用，明暗两套保证可读性）
+_SEMANTIC_COLORS = {
+    "light": {
+        "ok": "#2e7d32",
+        "err": "#c62828",
+        "warn": "#ef6c00",
+        "muted": "#5c5c5c",
+        "link": "#0067b8",
+        "heading": "#1a1a1a",
+    },
+    "dark": {
+        "ok": "#66bb6a",
+        "err": "#ef5350",
+        "warn": "#ffb74d",
+        "muted": "#9e9e9e",
+        "link": "#64b5f6",
+        "heading": "",  # 深色下不覆盖，控件继承主题文字色
+    },
 }
 
-/* ================================================================
-   下拉框
-   ================================================================ */
-QComboBox {
-    background-color: #ffffff;
-    border: 1px solid #d4d4d4;
-    border-radius: 6px;
-    padding: 5px 10px;
-    min-height: 28px;
-}
-QComboBox:hover {
-    border-color: #0067b8;
-}
-QComboBox:focus {
-    border: 1px solid #0067b8;
-    border-bottom: 2px solid #0067b8;
-}
-QComboBox::drop-down {
-    border: none;
-    width: 28px;
-}
-QComboBox::down-arrow {
-    image: none;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid #5c5c5c;
-    margin-right: 8px;
-}
-QComboBox QAbstractItemView {
-    background-color: #ffffff;
-    border: 1px solid #d4d4d4;
-    border-radius: 6px;
-    selection-background-color: #f0f6ff;
-    selection-color: #1a1a1a;
-    outline: none;
-    padding: 4px;
-}
 
-/* ================================================================
-   数字输入
-   ================================================================ */
-QSpinBox {
-    background-color: #ffffff;
-    border: 1px solid #d4d4d4;
-    border-radius: 6px;
-    padding: 5px 10px;
-    min-height: 28px;
-}
-QSpinBox:focus {
-    border: 1px solid #0067b8;
-    border-bottom: 2px solid #0067b8;
-}
-
-/* ================================================================
-   分组框
-   ================================================================ */
-QGroupBox {
-    background-color: #fafafa;
-    border: 1px solid #e8e8e8;
-    border-radius: 8px;
-    margin-top: 16px;
-    padding: 16px 12px 12px 12px;
-    font-weight: 600;
-    font-size: 10pt;
-}
-QGroupBox::title {
-    subcontrol-origin: margin;
-    subcontrol-position: top left;
-    padding: 0 8px;
-    color: #1a1a1a;
-    background-color: #fafafa;
-}
-
-/* ================================================================
-   树视图
-   ================================================================ */
-QTreeView {
-    background-color: #ffffff;
-    border: 1px solid #e5e5e5;
-    border-radius: 6px;
-    alternate-background-color: #fafafa;
-    outline: none;
-    selection-background-color: #e8f0fe;
-    selection-color: #1a1a1a;
-}
-QTreeView::item {
-    padding: 4px 6px;
-    border: none;
-    border-radius: 4px;
-    margin: 1px 2px;
-}
-QTreeView::item:hover {
-    background-color: #f0f0f0;
-}
-QTreeView::item:selected {
-    background-color: #e8f0fe;
-    color: #1a1a1a;
-}
-QTreeView::branch {
-    background-color: transparent;
-}
-
-/* ================================================================
-   列表视图
-   ================================================================ */
-QListView {
-    background-color: #ffffff;
-    border: 1px solid #e5e5e5;
-    border-radius: 6px;
-    alternate-background-color: #fafafa;
-    outline: none;
-    selection-background-color: #e8f0fe;
-    selection-color: #1a1a1a;
-}
-QListWidget {
-    background-color: #ffffff;
-    border: 1px solid #e5e5e5;
-    border-radius: 6px;
-    alternate-background-color: #fafafa;
-    outline: none;
-    padding: 4px;
-}
-QListWidget::item {
-    padding: 4px 6px;
-    border-radius: 4px;
-    margin: 1px 0px;
-}
-QListWidget::item:hover {
-    background-color: #f0f0f0;
-}
-QListWidget::item:selected {
-    background-color: #e8f0fe;
-    color: #1a1a1a;
-}
-
-/* ================================================================
-   标签
-   ================================================================ */
-QLabel {
-    background-color: transparent;
-    border: none;
-    padding: 0px;
-}
-
-/* ================================================================
-   滚动条
-   ================================================================ */
-QScrollBar:vertical {
-    background-color: transparent;
-    width: 10px;
-    border: none;
-    margin: 4px 0px;
-}
-QScrollBar::handle:vertical {
-    background-color: #c8c8c8;
-    border-radius: 5px;
-    min-height: 24px;
-    margin: 2px;
-}
-QScrollBar::handle:vertical:hover {
-    background-color: #a8a8a8;
-}
-QScrollBar::handle:vertical:pressed {
-    background-color: #888888;
-}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    height: 0px;
-}
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-    background: transparent;
-}
-QScrollBar:horizontal {
-    background-color: transparent;
-    height: 10px;
-    border: none;
-    margin: 0px 4px;
-}
-QScrollBar::handle:horizontal {
-    background-color: #c8c8c8;
-    border-radius: 5px;
-    min-width: 24px;
-    margin: 2px;
-}
-QScrollBar::handle:horizontal:hover {
-    background-color: #a8a8a8;
-}
-QScrollBar::handle:horizontal:pressed {
-    background-color: #888888;
-}
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-    width: 0px;
-}
-QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-    background: transparent;
-}
-
-/* ================================================================
-   选项卡
-   ================================================================ */
-QTabWidget::pane {
-    border: 1px solid #e5e5e5;
-    border-radius: 6px;
-    background-color: #ffffff;
-    top: -1px;
-}
-QTabBar::tab {
-    background-color: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    padding: 8px 16px;
-    margin-right: 4px;
-    color: #5c5c5c;
-    font-weight: 500;
-}
-QTabBar::tab:selected {
-    color: #0067b8;
-    border-bottom: 2px solid #0067b8;
-}
-QTabBar::tab:hover:!selected {
-    background-color: #f0f0f0;
-    border-radius: 4px 4px 0 0;
-    color: #1a1a1a;
-}
-
-/* ================================================================
-   进度条
-   ================================================================ */
-QProgressBar {
-    background-color: #e5e5e5;
-    border: none;
-    border-radius: 4px;
-    text-align: center;
-    min-height: 6px;
-    max-height: 6px;
-}
-QProgressBar::chunk {
-    background-color: #0067b8;
-    border-radius: 4px;
-}
-
-/* ================================================================
-   菜单
-   ================================================================ */
-QMenuBar {
-    background-color: #f5f5f5;
-    border-bottom: 1px solid #e5e5e5;
-    padding: 2px 0px;
-}
-QMenuBar::item {
-    background-color: transparent;
-    padding: 5px 12px;
-    border-radius: 5px;
-    margin: 2px 1px;
-}
-QMenuBar::item:selected {
-    background-color: #e8e8e8;
-}
-QMenu {
-    background-color: #ffffff;
-    border: 1px solid #d4d4d4;
-    border-radius: 8px;
-    padding: 4px;
-}
-QMenu::item {
-    padding: 7px 28px;
-    border-radius: 5px;
-    margin: 1px 0px;
-}
-QMenu::item:selected {
-    background-color: #f0f6ff;
-}
-QMenu::item:disabled {
-    color: #a0a0a0;
-}
-QMenu::separator {
-    height: 1px;
-    background-color: #e8e8e8;
-    margin: 4px 12px;
-}
-
-/* ================================================================
-   状态栏
-   ================================================================ */
-QStatusBar {
-    background-color: #f0f0f0;
-    border-top: 1px solid #e5e5e5;
-    color: #5c5c5c;
-    font-size: 9pt;
-    padding: 3px 12px;
-}
-QStatusBar::item {
-    border: none;
-}
-QStatusBar QLabel {
-    padding: 0 10px;
-    font-size: 9pt;
-    color: #5c5c5c;
-}
-
-/* ================================================================
-   工具按钮
-   ================================================================ */
-QToolButton {
-    border: none;
-    border-radius: 6px;
-    padding: 6px;
-}
-QToolButton:hover {
-    background-color: #e8e8e8;
-}
-QToolButton:pressed {
-    background-color: #d8d8d8;
-}
-QToolButton:checked {
-    background-color: #e0e0e0;
-}
-
-/* ================================================================
-   分隔线
-   ================================================================ */
-QSplitter::handle {
-    background-color: #e5e5e5;
-}
-QSplitter::handle:horizontal {
-    width: 1px;
-}
-QSplitter::handle:vertical {
-    height: 1px;
-}
-
-/* ================================================================
-   表单布局
-   ================================================================ */
-QFormLayout {
-    spacing: 8px;
-}
-
-/* ================================================================
-   文本编辑
-   ================================================================ */
-QTextEdit {
-    background-color: #ffffff;
-    border: 1px solid #e5e5e5;
-    border-radius: 6px;
-    padding: 10px;
-    font-family: "Cascadia Code", "Consolas", monospace;
-    selection-background-color: #0067b8;
-    selection-color: white;
-}
-QTextEdit:focus {
-    border: 1px solid #0067b8;
-}
-
-/* ================================================================
-   复选框 & 单选框
-   ================================================================ */
-QCheckBox {
-    spacing: 8px;
-    min-height: 24px;
-}
-QCheckBox::indicator {
-    width: 18px;
-    height: 18px;
-    border: 1.5px solid #888888;
-    border-radius: 4px;
-    background-color: #ffffff;
-}
-QCheckBox::indicator:hover {
-    border-color: #0067b8;
-}
-QCheckBox::indicator:checked {
-    background-color: #0067b8;
-    border-color: #0067b8;
-}
-QRadioButton {
-    spacing: 8px;
-    min-height: 24px;
-}
-QRadioButton::indicator {
-    width: 18px;
-    height: 18px;
-    border: 1.5px solid #888888;
-    border-radius: 10px;
-    background-color: #ffffff;
-}
-QRadioButton::indicator:hover {
-    border-color: #0067b8;
-}
-QRadioButton::indicator:checked {
-    background-color: #0067b8;
-    border-color: #0067b8;
-}
-
-/* ================================================================
-   滑块
-   ================================================================ */
-QSlider::groove:horizontal {
-    height: 4px;
-    background-color: #e0e0e0;
-    border-radius: 2px;
-}
-QSlider::handle:horizontal {
-    background-color: #0067b8;
-    width: 16px;
-    height: 16px;
-    margin: -6px 0px;
-    border-radius: 8px;
-}
-QSlider::handle:horizontal:hover {
-    background-color: #106ebe;
-}
-QSlider::sub-page:horizontal {
-    background-color: #0067b8;
-    border-radius: 2px;
-}
-
-/* ================================================================
-   提示框
-   ================================================================ */
-QToolTip {
-    background-color: #ffffff;
-    border: 1px solid #d4d4d4;
-    border-radius: 6px;
-    padding: 6px 10px;
-    color: #1a1a1a;
-    font-size: 9pt;
-}
-
-/* ================================================================
-   滚动区域
-   ================================================================ */
-QScrollArea {
-    background-color: transparent;
-    border: none;
-}
-"""
+def system_prefers_dark() -> bool:
+    """系统当前是否处于深色模式（Qt 6.5+ styleHints.colorScheme）。"""
+    hints = QGuiApplication.styleHints()
+    if hints is None:
+        return False
+    return hints.colorScheme() == Qt.ColorScheme.Dark
 
 
+def resolve_mode(mode: str) -> str:
+    """把 ``system`` 解析为具体的 ``light`` / ``dark``；未知值回退浅色。"""
+    if mode == "system":
+        return "dark" if system_prefers_dark() else "light"
+    if mode in THEMES:
+        return mode
+    return "light"
+
+
+def current_mode() -> str:
+    """当前已应用的具体模式（``light`` / ``dark``）。"""
+    return _current_mode
+
+
+def apply_theme(app: QApplication, mode: str, font_size: int | None = None) -> None:
+    """应用主题样式表。
+
+    :param app: QApplication 实例
+    :param mode: ``system`` / ``dark`` / ``light``
+    :param font_size: 字号（pt）；None 表示沿用上次值。设置页字号为
+        pt 单位，qt-material 模板使用 px，此处按 96 DPI 换算。
+    """
+    global _current_mode, _current_font_size
+    resolved = resolve_mode(mode)
+    _current_mode = resolved
+    if font_size is not None:
+        _current_font_size = font_size
+    if not _QTM_AVAILABLE:
+        logger.warning("qt-material 未安装，回退系统默认样式")
+        app.setStyleSheet("")
+        return
+    _qtm_apply_stylesheet(
+        app,
+        theme=THEMES[resolved],
+        extra={
+            "density_scale": 0,
+            "font_family": FONT_FAMILY,
+            # pt -> px（96 DPI：1pt = 4/3 px）
+            "font_size": round(_current_font_size * 4 / 3),
+        },
+    )
+
+
+def semantic_color(kind: str) -> str:
+    """按当前主题返回语义色（十六进制字符串）；深色无对应色时返回空串。"""
+    return _SEMANTIC_COLORS[_current_mode].get(kind, "")
+
+
+# 向后兼容：旧名称（等同应用浅色主题）
 def apply_fluent_style(app: QApplication) -> None:
-    """为应用设置 Fluent 风格全局主题。"""
-    app.setStyleSheet(FLUENT_QSS)
-
-
-# 向后兼容：旧名称
-def apply_windows11_style(app: QApplication) -> None:
-    """向后兼容：等同于 apply_fluent_style()。"""
-    apply_fluent_style(app)
+    """向后兼容：等同于 ``apply_theme(app, "light")``。"""
+    apply_theme(app, "light")

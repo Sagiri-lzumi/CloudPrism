@@ -34,6 +34,7 @@ from cloudprism.core.backend_factory import build_backend_from_params
 from cloudprism.core.session import Session
 from cloudprism.core.vault_manager import VaultManager
 from cloudprism.gui.baidu_auth import BaiduAuthDialog
+from cloudprism.gui.theme import semantic_color
 from cloudprism.storage.backend import StorageBackend
 from cloudprism.storage.baidu_backend import (
     BaiduCredentialStore,
@@ -175,7 +176,7 @@ class BackendConfigPage(QWizardPage):
         self.test_btn = QPushButton("测试连接", self)
         self.test_btn.clicked.connect(self._test_connection)
         self.test_status = QLabel("请填写信息后点击「测试连接」", self)
-        self.test_status.setStyleSheet("color: #5c5c5c;")
+        self.test_status.setStyleSheet(f"color: {semantic_color('muted')};")
         test_row.addWidget(self.test_btn)
         test_row.addWidget(self.test_status, stretch=1)
         lay.addLayout(test_row)
@@ -251,12 +252,12 @@ class BackendConfigPage(QWizardPage):
             "中填写与检查（附申请教程），也可点击下方按钮授权。",
             w,
         )
-        hint.setStyleSheet("color: #5c5c5c;")
+        hint.setStyleSheet(f"color: {semantic_color('muted')};")
         hint.setWordWrap(True)
         lay.addWidget(hint)
 
         self.baidu_status = QLabel("尚未授权", w)
-        self.baidu_status.setStyleSheet("color: #c00;")
+        self.baidu_status.setStyleSheet(f"color: {semantic_color('err')};")
         lay.addWidget(self.baidu_status)
 
         self.baidu_auth_btn = QPushButton("授权 / 更新凭证…", w)
@@ -273,10 +274,10 @@ class BackendConfigPage(QWizardPage):
         if dlg.exec() and dlg.token_data is not None:
             self._baidu_creds = dlg._store.load()
             self.baidu_status.setText("✓ 已授权（凭证已加密保存）")
-            self.baidu_status.setStyleSheet("color: #0a0; font-weight: bold;")
+            self.baidu_status.setStyleSheet(f"color: {semantic_color('ok')}; font-weight: bold;")
         self._test_passed = False
         self.test_status.setText("请点击上方「测试连接」验证")
-        self.test_status.setStyleSheet("color: #5c5c5c;")
+        self.test_status.setStyleSheet(f"color: {semantic_color('muted')};")
         self.completeChanged.emit()
 
     # ------------------------------------------------------------------
@@ -287,7 +288,7 @@ class BackendConfigPage(QWizardPage):
         """配置变更时重置测试状态。"""
         self._test_passed = False
         self.test_status.setText("配置已变更，请重新测试")
-        self.test_status.setStyleSheet("color: #5c5c5c;")
+        self.test_status.setStyleSheet(f"color: {semantic_color('muted')};")
         self.completeChanged.emit()
 
     def _test_connection(self) -> None:
@@ -300,11 +301,11 @@ class BackendConfigPage(QWizardPage):
                 backend.list_dir("")
             self._test_passed = True
             self.test_status.setText("连接成功")
-            self.test_status.setStyleSheet("color: #0a0; font-weight: bold;")
+            self.test_status.setStyleSheet(f"color: {semantic_color('ok')}; font-weight: bold;")
         except Exception as e:
             self._test_passed = False
             self.test_status.setText(f"连接失败：{e}")
-            self.test_status.setStyleSheet("color: #c00;")
+            self.test_status.setStyleSheet(f"color: {semantic_color('err')};")
         self.completeChanged.emit()
 
     # ------------------------------------------------------------------
@@ -334,17 +335,17 @@ class BackendConfigPage(QWizardPage):
         # 重置测试状态
         self._test_passed = False
         self.test_status.setText("请填写信息后点击「测试连接」")
-        self.test_status.setStyleSheet("color: #5c5c5c;")
+        self.test_status.setStyleSheet(f"color: {semantic_color('muted')};")
 
     def _refresh_baidu_status(self) -> None:
         """按磁盘凭证刷新百度授权状态（用于页面进入时）。"""
         self._baidu_creds = BaiduCredentialStore().load()
         if self._baidu_creds and self._baidu_creds.get("access_token"):
             self.baidu_status.setText("✓ 已授权（凭证已加密保存）")
-            self.baidu_status.setStyleSheet("color: #0a0; font-weight: bold;")
+            self.baidu_status.setStyleSheet(f"color: {semantic_color('ok')}; font-weight: bold;")
         else:
             self.baidu_status.setText("尚未授权")
-            self.baidu_status.setStyleSheet("color: #c00;")
+            self.baidu_status.setStyleSheet(f"color: {semantic_color('err')};")
 
     def isComplete(self) -> bool:  # noqa: N802
         """配置已填写且测试连接通过。"""
@@ -448,7 +449,7 @@ class FilenameEncPage(QWizardPage):
             "如需变更必须新建Mi库并重新加密上传所有文件。",
             self,
         )
-        warn.setStyleSheet("color: #b00; font-weight: bold;")
+        warn.setStyleSheet(f"color: {semantic_color('err')}; font-weight: bold;")
         lay.addWidget(warn)
 
         self.radio_off = QRadioButton("关闭（云端可见原始文件名，仅内容加密）", self)

@@ -31,6 +31,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cloudprism.gui.theme import semantic_color
+
 
 class VaultInfoPage(QWidget):
     """密库信息页。"""
@@ -61,7 +63,7 @@ class VaultInfoPage(QWidget):
 
         self._guide_title = QLabel("尚未连接密库", self._guide_widget)
         self._guide_title.setStyleSheet(
-            "font-size: 22px; font-weight: bold; color: #1a1a1a;"
+            "font-size: 22px; font-weight: bold;"
         )
         self._guide_title.setAlignment(Qt.AlignCenter)
         guide_lay.addWidget(self._guide_title)
@@ -71,7 +73,7 @@ class VaultInfoPage(QWidget):
             "连接已有密库或创建新密库以开始使用。",
             self._guide_widget,
         )
-        self._guide_desc.setStyleSheet("font-size: 14px; color: #5c5c5c;")
+        self._guide_desc.setStyleSheet(f"font-size: 14px; color: {semantic_color('muted')};")
         self._guide_desc.setAlignment(Qt.AlignCenter)
         self._guide_desc.setWordWrap(True)
         guide_lay.addWidget(self._guide_desc)
@@ -123,7 +125,7 @@ class VaultInfoPage(QWidget):
 
         # 标题
         title = QLabel("密库信息", self._info_widget)
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #1a1a1a;")
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
         info_lay.addWidget(title)
 
         # 基本信息组

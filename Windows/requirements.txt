@@ -2,6 +2,9 @@
 # 安装到根 .venv：python -m pip install -r requirements.txt
 pycryptodome>=3.20
 
+# GUI 主题（Material Design 明暗双主题，BSD-2-Clause）
+qt-material>=2.14
+
 # 测试依赖（开发期）
 pytest>=8
 pytest-qt>=4.4

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from cloudprism.core.backend_factory import build_backend_from_params
 from cloudprism.core.session import Session
 from cloudprism.core.vault_manager import VaultManager
+from cloudprism.gui.theme import semantic_color
 
 
 class QuickConnectDialog(QDialog):
@@ -55,7 +56,7 @@ class QuickConnectDialog(QDialog):
             f"上次连接：{record.get('last_used', '-')}",
             self,
         )
-        summary.setStyleSheet("color: #5c5c5c; font-size: 13px;")
+        summary.setStyleSheet(f"color: {semantic_color('muted')}; font-size: 13px;")
         summary.setWordWrap(True)
         lay.addWidget(summary)
 
@@ -95,7 +96,7 @@ class QuickConnectDialog(QDialog):
 
         self._status = QLabel("", self)
         self._status.setWordWrap(True)
-        self._status.setStyleSheet("color: #c00;")
+        self._status.setStyleSheet(f"color: {semantic_color('err')};")
         lay.addWidget(self._status)
 
         lay.addStretch()

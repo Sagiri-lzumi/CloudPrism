@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cloudprism.gui.theme import semantic_color
+
 
 class TransferProgressBar(QWidget):
     """底部内嵌传输进度条（默认隐藏）。"""
@@ -39,11 +41,11 @@ class TransferProgressBar(QWidget):
         # 上方：文件名 + 队列计数 + 取消按钮
         top_row = QHBoxLayout()
         self._name_label = QLabel("", self)
-        self._name_label.setStyleSheet("font-size: 9pt; color: #1a1a1a;")
+        self._name_label.setStyleSheet("font-size: 9pt;")
         top_row.addWidget(self._name_label)
 
         self._queue_label = QLabel("", self)
-        self._queue_label.setStyleSheet("font-size: 9pt; color: #5c5c5c;")
+        self._queue_label.setStyleSheet(f"font-size: 9pt; color: {semantic_color('muted')};")
         top_row.addWidget(self._queue_label)
 
         top_row.addStretch()

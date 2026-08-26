@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cloudprism.gui.theme import semantic_color
+
 if TYPE_CHECKING:
     from cloudprism.core.session import Session
     from cloudprism.storage.backend import StorageBackend
@@ -79,7 +81,7 @@ class PreviewPanel(QStackedWidget):
         wl = QVBoxLayout(self._welcome)
         welcome_label = QLabel("选择文件以预览", self._welcome)
         welcome_label.setAlignment(Qt.AlignCenter)
-        welcome_label.setStyleSheet("font-size: 18px; color: #5c5c5c;")
+        welcome_label.setStyleSheet(f"font-size: 18px; color: {semantic_color('muted')};")
         wl.addWidget(welcome_label)
         self.addWidget(self._welcome)
 
