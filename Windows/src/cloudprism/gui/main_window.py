@@ -27,13 +27,14 @@ from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
-    QLabel,
     QMenu,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 from qfluentwidgets import (
+    BodyLabel,
+    CaptionLabel,
     FluentIcon,
     FluentWindow,
     NavigationItemPosition,
@@ -44,6 +45,7 @@ from qfluentwidgets import (
 from cloudprism.gui.perf_monitor import format_cache, format_cpu, format_speed
 from cloudprism.gui.preview_panel import PreviewPanel
 from cloudprism.gui.side_panel import FilesPage, SettingsPage, TransfersPage
+from cloudprism.gui.theme import semantic_color
 from cloudprism.gui.transfer_progress_bar import TransferProgressBar
 from cloudprism.gui.vault_info_page import VaultInfoPage
 
@@ -222,20 +224,22 @@ class MainWindow(FluentWindow):
         self.transfer_progress_inline = TransferProgressBar(self)
 
         # 状态条（连接状态 | 速度 | 缓存 | CPU）
+        # 字体：连接状态用 BodyLabel（主信息），性能指标用 CaptionLabel
+        # （Fluent 辅助信息字号更小、颜色更淡，避免与主界面文字同权）
         self._status_bar = QWidget(self)
         status_lay = QHBoxLayout(self._status_bar)
         status_lay.setContentsMargins(12, 4, 12, 4)
         status_lay.setSpacing(16)
 
-        self._status_conn = QLabel("未连接")
+        self._status_conn = BodyLabel("未连接")
         status_lay.addWidget(self._status_conn)
         status_lay.addStretch()
 
-        self._status_speed = QLabel("速度: --")
+        self._status_speed = CaptionLabel("速度: --")
         status_lay.addWidget(self._status_speed)
-        self._status_cache = QLabel("缓存: --")
+        self._status_cache = CaptionLabel("缓存: --")
         status_lay.addWidget(self._status_cache)
-        self._status_cpu = QLabel("CPU: --")
+        self._status_cpu = CaptionLabel("CPU: --")
         status_lay.addWidget(self._status_cpu)
 
         # 顶部分隔线（细边框代替 QStatusBar 的视觉边界）
@@ -264,8 +268,15 @@ class MainWindow(FluentWindow):
         self._status_cpu.setText(format_cpu(cpu_pct))
 
     def set_connected(self, connected: bool) -> None:
-        """更新连接状态显示。"""
+        """更新连接状态显示（文本不变，仅配色区分状态）。"""
         self._status_conn.setText("已连接" if connected else "未连接")
+        # 已连接用成功色 + 加粗突出，未连接用淡灰弱化；空串（深色主题）时不覆盖
+        color = semantic_color("ok" if connected else "muted")
+        if color:
+            weight = "font-weight: 600;" if connected else ""
+            self._status_conn.setStyleSheet(f"color: {color}; {weight}")
+        else:
+            self._status_conn.setStyleSheet("")
 
     # ==================================================================
     # 菜单（RoundMenu 承载）与快捷键

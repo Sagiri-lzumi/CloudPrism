@@ -160,7 +160,7 @@ def test_local_record_no_webdav_field(qtbot, fake_vm):
 
 
 def test_vault_info_page_recent_list(qtbot):
-    """记录列表填充/空态切换/双击信号。"""
+    """记录卡片填充/空态切换/卡片动作信号。"""
     from cloudprism.gui.vault_info_page import VaultInfoPage
 
     page = VaultInfoPage()
@@ -171,26 +171,54 @@ def test_vault_info_page_recent_list(qtbot):
     assert not page._recent_list.isVisible()
     assert page._guide_title.text() == "尚未连接密库"
 
-    # 填充两条记录
+    # 填充两条记录（卡片化：每行一张 RecentVaultCard）
     page.set_recent_vaults([LOCAL_RECORD, WEBDAV_RECORD])
     assert page._recent_list.count() == 2
     assert page._recent_list.isVisible()
     assert page._guide_title.text() == "最近连接的密库"
-    assert "D:/v" in page._recent_list.item(0).text()
+    card0 = page.card_at(0)
+    assert card0 is not None
+    assert "D:/v" in card0.detail_label.text()
 
-    # 双击发射快速连接信号（携带记录）
+    # 点卡片「连接」按钮发射快速连接信号（携带记录）
+    card1 = page.card_at(1)
     with qtbot.waitSignal(page.quickConnectRequested, timeout=1000) as blocker:
-        page._recent_list.setCurrentRow(1)
-        page._connect_selected()
+        card1.connect_btn.click()
     assert blocker.args[0]["backend_type"] == "webdav"
 
-    # 移除信号携带记录
+    # 卡片右上角移除按钮：发射移除信号（同时播淡出动画）
     with qtbot.waitSignal(page.removeVaultRequested, timeout=1000) as blocker:
-        page._recent_list.setCurrentRow(0)
-        page._remove_selected()
+        card0.remove_btn.click()
     assert blocker.args[0]["backend_type"] == "local"
 
     # 清空后回退引导态
     page.set_recent_vaults([])
     assert not page._recent_list.isVisible()
     assert page._guide_title.text() == "尚未连接密库"
+
+
+def test_vault_info_page_card_double_click(qtbot):
+    """双击卡片 = 快速连接。"""
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    from cloudprism.gui.vault_info_page import VaultInfoPage
+
+    page = VaultInfoPage()
+    qtbot.addWidget(page)
+    page.show()
+    page.set_recent_vaults([LOCAL_RECORD])
+    card = page.card_at(0)
+    assert card is not None
+
+    dbl = QMouseEvent(
+        QEvent.Type.MouseButtonDblClick,
+        QPointF(10, 10),
+        QPointF(10, 10),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    with qtbot.waitSignal(page.quickConnectRequested, timeout=1000) as blocker:
+        card.mouseDoubleClickEvent(dbl)
+    assert blocker.args[0]["backend_type"] == "local"

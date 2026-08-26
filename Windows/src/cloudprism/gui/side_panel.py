@@ -15,12 +15,10 @@ from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QListWidgetItem,
     QMessageBox,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -28,11 +26,22 @@ from PySide6.QtWidgets import (
 # Fluent 组件（均继承自对应 Qt 原生控件，标准 API 全兼容）
 from qfluentwidgets import (
     ComboBox,
+    ComboBoxSettingCard,
+    ExpandGroupSettingCard,
+    FluentIcon,
     LineEdit,
     ListWidget,
+    OptionsConfigItem,
+    OptionsValidator,
     PrimaryPushButton,
     PushButton,
+    PushSettingCard,
+    ScrollArea,
+    SettingCard,
+    SettingCardGroup,
     SpinBox,
+    SubtitleLabel,
+    TitleLabel,
 )
 
 from cloudprism.gui.baidu_auth import BaiduAuthDialog
@@ -138,146 +147,232 @@ class SettingsPage(QWidget):
         # 百度凭证存储（DPAPI 加密落盘）；测试可注入假存储
         self._baidu_store = baidu_store or BaiduCredentialStore()
 
-        # 可滚动区域
-        from PySide6.QtWidgets import QScrollArea
-        scroll = QScrollArea(self)
+        # 可滚动区域（Fluent 风格，透明无边框）
+        scroll = ScrollArea(self)
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setFrameShape(ScrollArea.NoFrame)
+        scroll.setObjectName("settingsScrollArea")
 
         content = QWidget()
         lay = QVBoxLayout(content)
-        lay.setContentsMargins(12, 12, 12, 12)
-        lay.setSpacing(16)
+        lay.setContentsMargins(24, 16, 24, 24)
+        lay.setSpacing(12)
 
-        # ---- 外观设置 ----
-        appearance_group = QGroupBox("外观", content)
-        appearance_form = QFormLayout(appearance_group)
+        # 页头标题（Fluent 设置页风格）
+        title = TitleLabel("设置", content)
+        lay.addWidget(title)
+        subtitle = SubtitleLabel("外观、连接、缓存与安全等选项", content)
+        subtitle.setStyleSheet(f"color: {semantic_color('muted')};")
+        lay.addWidget(subtitle)
+        lay.addSpacing(8)
 
-        self._theme_combo = ComboBox(self)
-        self._theme_combo.addItems(["跟随系统", "深色", "浅色"])
-        self._theme_combo.currentIndexChanged.connect(self._on_theme_changed)
-        appearance_form.addRow("主题：", self._theme_combo)
+        # ---- 外观 ----
+        appearance_group = SettingCardGroup("外观", content)
 
-        self._font_size_combo = ComboBox(self)
-        self._font_size_combo.addItems(["小 (12px)", "中 (14px)", "大 (16px)", "特大 (18px)"])
-        self._font_size_combo.setCurrentIndex(1)  # 默认中
-        self._font_size_combo.currentIndexChanged.connect(self._on_font_size_changed)
-        appearance_form.addRow("字体大小：", self._font_size_combo)
+        self._theme_combo_card = ComboBoxSettingCard(
+            OptionsConfigItem(
+                "cloudprism", "theme", "system",
+                OptionsValidator(["system", "dark", "light"]),
+            ),
+            FluentIcon.CONSTRACT, "主题",
+            "跟随系统或手动切换明暗配色",
+            texts=["跟随系统", "深色", "浅色"], parent=appearance_group,
+        )
+        self._theme_combo_card.comboBox.currentIndexChanged.connect(self._on_theme_changed)
+        appearance_group.addSettingCard(self._theme_combo_card)
+
+        self._font_size_card = ComboBoxSettingCard(
+            OptionsConfigItem(
+                "cloudprism", "font_size", 14,
+                OptionsValidator([12, 14, 16, 18]),
+            ),
+            FluentIcon.FONT, "字体大小", "调整全局文字尺寸",
+            texts=["小 (12px)", "中 (14px)", "大 (16px)", "特大 (18px)"],
+            parent=appearance_group,
+        )
+        self._font_size_card.comboBox.setCurrentIndex(1)  # 默认中
+        self._font_size_card.comboBox.currentIndexChanged.connect(self._on_font_size_changed)
+        appearance_group.addSettingCard(self._font_size_card)
 
         lay.addWidget(appearance_group)
 
         # ---- 连接信息 ----
-        conn_group = QGroupBox("连接信息", content)
-        conn_form = QFormLayout(conn_group)
+        conn_group = SettingCardGroup("连接信息", content)
 
-        self._backend_type_label = QLabel("未连接", self)
-        conn_form.addRow("后端类型：", self._backend_type_label)
+        self._backend_type_card = SettingCard(
+            FluentIcon.LIBRARY, "后端类型", None, conn_group)
+        self._backend_type_label = QLabel("未连接", self._backend_type_card)
+        self._backend_type_card.hBoxLayout.addWidget(
+            self._backend_type_label, 0, Qt.AlignmentFlag.AlignRight)
+        conn_group.addSettingCard(self._backend_type_card)
 
-        self._backend_path_label = QLabel("-", self)
-        conn_form.addRow("路径/URL：", self._backend_path_label)
+        self._backend_path_card = SettingCard(
+            FluentIcon.LINK, "路径 / URL", None, conn_group)
+        self._backend_path_label = QLabel("-", self._backend_path_card)
+        self._backend_path_label.setWordWrap(True)
+        self._backend_path_card.hBoxLayout.addWidget(
+            self._backend_path_label, 0, Qt.AlignmentFlag.AlignRight)
+        conn_group.addSettingCard(self._backend_path_card)
 
-        self._filename_enc_label = QLabel("-", self)
-        conn_form.addRow("文件名加密：", self._filename_enc_label)
+        self._filename_enc_card = SettingCard(
+            FluentIcon.INFO, "文件名加密", None, conn_group)
+        self._filename_enc_label = QLabel("-", self._filename_enc_card)
+        self._filename_enc_card.hBoxLayout.addWidget(
+            self._filename_enc_label, 0, Qt.AlignmentFlag.AlignRight)
+        conn_group.addSettingCard(self._filename_enc_card)
 
-        btn_row = QHBoxLayout()
-        self._reconnect_btn = PrimaryPushButton("切换密库（打开向导）…", self)
-        self._reconnect_btn.setToolTip(
-            "打开初始化向导新建或连接密库；快速重连请用密库页的最近记录"
+        self._reconnect_btn = PushSettingCard(
+            "切换密库（打开向导）…", FluentIcon.UPDATE,
+            "重新连接", "新建或连接其他密库；快速重连请用密库页的最近记录",
+            parent=conn_group,
         )
         self._reconnect_btn.clicked.connect(self.reconnectRequested.emit)
-        btn_row.addWidget(self._reconnect_btn)
-        btn_row.addStretch()
-        conn_form.addRow(btn_row)
+        conn_group.addSettingCard(self._reconnect_btn)
 
         lay.addWidget(conn_group)
 
-        # ---- 缓存设置 ----
-        cache_group = QGroupBox("缓存设置", content)
-        cache_form = QFormLayout(cache_group)
+        # ---- 缓存 ----
+        cache_group = SettingCardGroup("缓存", content)
 
-        self._cache_limit_spin = SpinBox(self)
+        # 缓存大小限制（展开卡片内嵌 SpinBox：保留 setSuffix/valueChanged 等原生接口）
+        cache_limit_card = ExpandGroupSettingCard(
+            FluentIcon.HISTORY, "缓存大小限制",
+            "流式代理与传输管线的内存/磁盘缓冲上限", parent=cache_group,
+        )
+        limit_row = QWidget(cache_limit_card)
+        limit_lay = QHBoxLayout(limit_row)
+        limit_lay.setContentsMargins(48, 6, 24, 6)
+        limit_lay.setSpacing(8)
+        self._cache_limit_spin = SpinBox(limit_row)
         self._cache_limit_spin.setRange(64, 4096)
         self._cache_limit_spin.setValue(self.DEFAULT_CACHE_LIMIT_MB)
         self._cache_limit_spin.setSuffix(" MB")
         self._cache_limit_spin.setToolTip("流式代理与传输管线的内存/磁盘缓冲上限")
         self._cache_limit_spin.valueChanged.connect(self._emit_cache_settings)
-        cache_form.addRow("缓存大小限制：", self._cache_limit_spin)
+        limit_lay.addWidget(self._cache_limit_spin)
+        limit_lay.addStretch()
+        cache_limit_card.addGroupWidget(limit_row)
+        cache_group.addSettingCard(cache_limit_card)
 
-        cache_path_row = QHBoxLayout()
-        self._cache_path_edit = LineEdit(self)
+        # 缓存位置（展开分组卡片：路径输入 + 浏览 / 占用 + 清除）
+        cache_loc_card = ExpandGroupSettingCard(
+            FluentIcon.FOLDER, "缓存位置", "缓存文件存放路径与磁盘占用",
+            parent=cache_group,
+        )
+        cache_row1 = QWidget(cache_loc_card)
+        row1_lay = QHBoxLayout(cache_row1)
+        row1_lay.setContentsMargins(48, 6, 24, 6)
+        row1_lay.setSpacing(8)
+        self._cache_path_edit = LineEdit(cache_row1)
         self._cache_path_edit.setText(self._default_cache_path())
         self._cache_path_edit.setPlaceholderText("缓存文件存放路径")
         self._cache_path_edit.textChanged.connect(self._emit_cache_settings)
-        cache_path_row.addWidget(self._cache_path_edit)
-
-        browse_btn = PushButton("浏览…", self)
+        row1_lay.addWidget(self._cache_path_edit, 1)
+        browse_btn = PushButton("浏览…", cache_row1)
         browse_btn.clicked.connect(self._browse_cache_path)
-        cache_path_row.addWidget(browse_btn)
-        cache_form.addRow("缓存位置：", cache_path_row)
+        row1_lay.addWidget(browse_btn)
+        cache_loc_card.addGroupWidget(cache_row1)
 
-        self._cache_usage_label = QLabel("计算中…", self)
-        cache_form.addRow("当前缓存占用：", self._cache_usage_label)
-
-        clear_btn = PushButton("清除缓存", self)
+        cache_row2 = QWidget(cache_loc_card)
+        row2_lay = QHBoxLayout(cache_row2)
+        row2_lay.setContentsMargins(48, 6, 24, 6)
+        row2_lay.setSpacing(8)
+        self._cache_usage_label = QLabel("计算中…", cache_row2)
+        self._cache_usage_label.setStyleSheet(f"color: {semantic_color('muted')};")
+        row2_lay.addWidget(self._cache_usage_label)
+        row2_lay.addStretch()
+        clear_btn = PushButton("清除缓存", cache_row2)
         clear_btn.clicked.connect(self._on_clear_cache)
-        clear_row = QHBoxLayout()
-        clear_row.addStretch()
-        clear_row.addWidget(clear_btn)
-        cache_form.addRow(clear_row)
+        row2_lay.addWidget(clear_btn)
+        cache_loc_card.addGroupWidget(cache_row2)
+        cache_group.addSettingCard(cache_loc_card)
 
         lay.addWidget(cache_group)
 
-        # ---- 传输设置 ----
-        transfer_group = QGroupBox("传输", content)
-        transfer_form = QFormLayout(transfer_group)
+        # ---- 传输 ----
+        transfer_group = SettingCardGroup("传输", content)
 
-        self._chunk_size_combo = ComboBox(self)
-        self._chunk_size_combo.addItems(["256 KB", "512 KB", "1 MB", "4 MB"])
-        self._chunk_size_combo.setCurrentIndex(1)  # 默认 512KB
-        transfer_form.addRow("分块大小：", self._chunk_size_combo)
+        self._chunk_size_card = ComboBoxSettingCard(
+            OptionsConfigItem(
+                "cloudprism", "chunk_size", 1,
+                OptionsValidator([0, 1, 2, 3]),
+            ),
+            FluentIcon.DOCUMENT, "分块大小",
+            "上传/下载与加密分块的尺寸",
+            texts=["256 KB", "512 KB", "1 MB", "4 MB"], parent=transfer_group,
+        )
+        self._chunk_size_card.comboBox.setCurrentIndex(1)  # 默认 512KB
+        transfer_group.addSettingCard(self._chunk_size_card)
 
-        self._concurrent_spin = SpinBox(self)
+        # 并发传输数（预留功能：当前传输队列为串行）
+        concurrent_card = ExpandGroupSettingCard(
+            FluentIcon.SPEED_HIGH, "并发传输数（预留）",
+            "当前版本传输任务串行执行", parent=transfer_group,
+        )
+        concurrent_row = QWidget(concurrent_card)
+        c_lay = QHBoxLayout(concurrent_row)
+        c_lay.setContentsMargins(48, 6, 24, 6)
+        c_lay.setSpacing(8)
+        self._concurrent_spin = SpinBox(concurrent_row)
         self._concurrent_spin.setRange(1, 4)
         self._concurrent_spin.setValue(1)
-        # 并发传输为预留功能：当前传输队列为串行（单任务内多核加密已可充分利用 CPU）
+        # 并发传输为预留功能：单任务内多核加密已可充分利用 CPU，此处禁用交互
         self._concurrent_spin.setEnabled(False)
         self._concurrent_spin.setToolTip("预留功能：当前版本传输任务串行执行")
-        transfer_form.addRow("并发传输数（预留）：", self._concurrent_spin)
+        c_lay.addWidget(self._concurrent_spin)
+        c_lay.addStretch()
+        concurrent_card.addGroupWidget(concurrent_row)
+        transfer_group.addSettingCard(concurrent_card)
 
         lay.addWidget(transfer_group)
 
-        # ---- 安全设置 ----
-        security_group = QGroupBox("安全", content)
-        security_form = QFormLayout(security_group)
+        # ---- 安全 ----
+        security_group = SettingCardGroup("安全", content)
 
-        self._auto_lock_combo = ComboBox(self)
-        self._auto_lock_combo.addItems(["从不", "5 分钟", "15 分钟", "30 分钟"])
-        self._auto_lock_combo.setToolTip("无操作后自动锁定密库的时间")
-        security_form.addRow("自动锁定：", self._auto_lock_combo)
+        self._auto_lock_card = ComboBoxSettingCard(
+            OptionsConfigItem(
+                "cloudprism", "auto_lock", 0,
+                OptionsValidator([0, 1, 2, 3]),
+            ),
+            FluentIcon.VPN, "自动锁定",
+            "无操作后自动锁定密库的时间",
+            texts=["从不", "5 分钟", "15 分钟", "30 分钟"], parent=security_group,
+        )
+        security_group.addSettingCard(self._auto_lock_card)
 
         lay.addWidget(security_group)
 
         # ---- 百度网盘 ----
-        baidu_group = QGroupBox("百度网盘", content)
-        baidu_form = QFormLayout(baidu_group)
+        baidu_group = SettingCardGroup("百度网盘", content)
 
-        self._baidu_appid_edit = LineEdit(baidu_group)
-        self._baidu_appkey_edit = LineEdit(baidu_group)
-        self._baidu_secret_edit = LineEdit(baidu_group)
+        baidu_card = ExpandGroupSettingCard(
+            FluentIcon.ROBOT, "百度网盘凭证",
+            "AppKey / SecretKey 等开发者凭证（DPAPI 加密落盘）",
+            parent=baidu_group,
+        )
+        baidu_body = QWidget(baidu_card)
+        baidu_form = QFormLayout(baidu_body)
+        baidu_form.setContentsMargins(48, 6, 24, 6)
+        baidu_form.setHorizontalSpacing(12)
+        baidu_form.setVerticalSpacing(8)
+
+        self._baidu_appid_edit = LineEdit(baidu_body)
+        self._baidu_appkey_edit = LineEdit(baidu_body)
+        self._baidu_secret_edit = LineEdit(baidu_body)
         self._baidu_secret_edit.setEchoMode(LineEdit.EchoMode.Password)
-        self._baidu_signkey_edit = LineEdit(baidu_group)
+        self._baidu_signkey_edit = LineEdit(baidu_body)
         self._baidu_signkey_edit.setEchoMode(LineEdit.EchoMode.Password)
         baidu_form.addRow("Appid：", self._baidu_appid_edit)
         baidu_form.addRow("AppKey：", self._baidu_appkey_edit)
         baidu_form.addRow("SecretKey：", self._baidu_secret_edit)
         baidu_form.addRow("SignKey（可选）：", self._baidu_signkey_edit)
 
-        # 申请教程：按需查看，不主动弹出（保留原生 QPushButton 以维持扁平链接样式）
+        # 申请教程：按需查看，不主动弹出（扁平链接样式）
         guide_row = QHBoxLayout()
-        self._baidu_guide_btn = QPushButton("如何申请凭证…", baidu_group)
-        self._baidu_guide_btn.setFlat(True)
+        self._baidu_guide_btn = PushButton("如何申请凭证…", baidu_body)
         self._baidu_guide_btn.setStyleSheet(
-            f"color: {semantic_color('link')}; text-align: left; border: none;"
+            f"color: {semantic_color('link')}; text-align: left; border: none; "
+            "background: transparent; padding-left: 0;"
         )
         self._baidu_guide_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._baidu_guide_btn.clicked.connect(self._show_baidu_guide)
@@ -287,16 +382,16 @@ class SettingsPage(QWidget):
 
         # 检查 / 登录 / 清除 + 状态显示
         action_row = QHBoxLayout()
-        self._baidu_check_btn = PushButton("检查", baidu_group)
+        self._baidu_check_btn = PushButton("检查", baidu_body)
         self._baidu_check_btn.setToolTip(
             "校验格式与网络连通性；凭证最终有效性由登录授权时百度服务器验证"
         )
         self._baidu_check_btn.clicked.connect(self._check_baidu)
-        self._baidu_login_btn = PrimaryPushButton("登录百度账号…", baidu_group)
+        self._baidu_login_btn = PrimaryPushButton("登录百度账号…", baidu_body)
         self._baidu_login_btn.clicked.connect(self._login_baidu)
-        self._baidu_clear_btn = PushButton("清除", baidu_group)
+        self._baidu_clear_btn = PushButton("清除", baidu_body)
         self._baidu_clear_btn.clicked.connect(self._clear_baidu)
-        self._baidu_status = QLabel("", baidu_group)
+        self._baidu_status = QLabel("", baidu_body)
         self._baidu_status.setWordWrap(True)
         action_row.addWidget(self._baidu_check_btn)
         action_row.addWidget(self._baidu_login_btn)
@@ -304,18 +399,32 @@ class SettingsPage(QWidget):
         action_row.addWidget(self._baidu_status, stretch=1)
         baidu_form.addRow(action_row)
 
+        baidu_card.addGroupWidget(baidu_body)
+        baidu_group.addSettingCard(baidu_card)
+
         lay.addWidget(baidu_group)
 
-        # ---- 性能设置 ----
-        perf_group = QGroupBox("性能", content)
-        perf_form = QFormLayout(perf_group)
+        # ---- 性能 ----
+        perf_group = SettingCardGroup("性能", content)
 
         total_cores = os.cpu_count() or 4
-        self._max_cores_spin = SpinBox(self)
+        cores_card = ExpandGroupSettingCard(
+            FluentIcon.SPEED_HIGH, "加密最大内核数",
+            f"系统共 {total_cores} 个逻辑核心", parent=perf_group,
+        )
+        cores_row = QWidget(cores_card)
+        cores_lay = QHBoxLayout(cores_row)
+        cores_lay.setContentsMargins(48, 6, 24, 6)
+        cores_lay.setSpacing(8)
+        self._max_cores_spin = SpinBox(cores_row)
         self._max_cores_spin.setRange(1, total_cores)
         self._max_cores_spin.setValue(max(1, total_cores - 2))  # 默认留 2 核给系统
+        self._max_cores_spin.setSuffix(" 核")
         self._max_cores_spin.setToolTip(f"系统共 {total_cores} 个逻辑核心")
-        perf_form.addRow("加密最大内核数：", self._max_cores_spin)
+        cores_lay.addWidget(self._max_cores_spin)
+        cores_lay.addStretch()
+        cores_card.addGroupWidget(cores_row)
+        perf_group.addSettingCard(cores_card)
 
         lay.addWidget(perf_group)
 
@@ -332,6 +441,30 @@ class SettingsPage(QWidget):
 
         # 回填已保存的百度凭证并刷新授权状态
         self._load_baidu_credentials()
+
+    # ------------------------------------------------------------------
+    # 兼容别名（既有测试与持久化经旧属性名访问卡片内部控件）
+    # ------------------------------------------------------------------
+
+    @property
+    def _theme_combo(self):
+        """主题下拉框（指向主题设置卡片内部 ComboBox）。"""
+        return self._theme_combo_card.comboBox
+
+    @property
+    def _font_size_combo(self):
+        """字体大小下拉框（指向字号设置卡片内部 ComboBox）。"""
+        return self._font_size_card.comboBox
+
+    @property
+    def _chunk_size_combo(self):
+        """分块大小下拉框（指向分块设置卡片内部 ComboBox）。"""
+        return self._chunk_size_card.comboBox
+
+    @property
+    def _auto_lock_combo(self):
+        """自动锁定下拉框（指向自动锁定设置卡片内部 ComboBox）。"""
+        return self._auto_lock_card.comboBox
 
     # ------------------------------------------------------------------
     # 百度网盘凭证（用户自输模式：不落代码仓库，DPAPI 加密落盘）

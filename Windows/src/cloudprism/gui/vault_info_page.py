@@ -8,31 +8,166 @@
   - 本地缓存大小
   - 操作按钮：刷新 / 锁定
 
-未连接状态：
-  - 最近密库记录列表（双击/「连接所选」= 快速重连，可移除记录）
-  - 「新建连接 / 初始化」按钮
+未连接状态（Fluent 引导页）：
+  - 标题与说明文案（TitleLabel / BodyLabel）
+  - 最近密库记录卡片列表：每张卡片自带动作（「连接」按钮、
+    右上角移除图标按钮、双击快速连接），出现/移除均带淡入淡出动画
+  - 「新建连接 / 初始化」主按钮居中
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEasingCurve,
+    QPropertyAnimation,
+    QSize,
+    Qt,
+    Signal,
+)
 from PySide6.QtWidgets import (
     QFormLayout,
-    QGroupBox,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QListWidgetItem,
-    QMenu,
     QVBoxLayout,
     QWidget,
 )
 
 # Fluent 组件（均继承自对应 Qt 原生控件，标准 API 全兼容）
-from qfluentwidgets import ListWidget, PrimaryPushButton, PushButton
+from qfluentwidgets import (
+    BodyLabel,
+    CaptionLabel,
+    CardWidget,
+    FluentIcon,
+    IconWidget,
+    ListWidget,
+    PrimaryPushButton,
+    PushButton,
+    SimpleCardWidget,
+    StrongBodyLabel,
+    SubtitleLabel,
+    TitleLabel,
+    TransparentToolButton,
+)
 
 from cloudprism.gui.theme import semantic_color
+
+# 记录卡片固定高度（比旧版列表行略高，容纳两行信息）
+CARD_HEIGHT = 84
+
+
+class RecentVaultCard(SimpleCardWidget):
+    """最近密库记录卡片：自带动作（连接 / 移除），双击快速连接。
+
+    - 左侧图标 + 中间两行信息（库名称 / 后端·路径·上次使用时间）
+    - 右侧「连接」按钮；右上角绝对定位移除图标按钮
+    - 出现时淡入（play_in），移除时淡出（play_out）
+    """
+
+    # 请求连接本条记录（参数为记录 dict）
+    connectRequested = Signal(dict)
+    # 请求移除本条记录（参数为记录 dict）
+    removeClicked = Signal(dict)
+
+    def __init__(self, record: dict, parent=None) -> None:
+        super().__init__(parent)
+        self.record = record
+        self.setFixedHeight(CARD_HEIGHT)
+
+        # 淡入淡出动画载体（默认不透明，避免未调用 play_in 时不可见）
+        self._opacity_fx = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self._opacity_fx)
+
+        lay = QHBoxLayout(self)
+        # 右侧留出空间，避免与绝对定位的移除按钮重叠
+        lay.setContentsMargins(16, 12, 56, 12)
+        lay.setSpacing(12)
+
+        # 左侧类型图标
+        self._icon = IconWidget(self)
+        self._icon.setIcon(FluentIcon.LIBRARY)
+        self._icon.setFixedSize(30, 30)
+        lay.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # 中间两行信息：库名称（主）+ 后端·路径·上次使用（辅）
+        mid = QVBoxLayout()
+        mid.setSpacing(2)
+        self.name_label = StrongBodyLabel(record.get("vault_name", "-"), self)
+        detail = (
+            f"{record.get('label', record.get('backend_type', '?'))} · "
+            f"{record.get('path', '-')} · 上次 {record.get('last_used', '-')}"
+        )
+        self.detail_label = CaptionLabel(detail, self)
+        self.detail_label.setStyleSheet(f"color: {semantic_color('muted')};")
+        mid.addWidget(self.name_label)
+        mid.addWidget(self.detail_label)
+        lay.addLayout(mid, 1)
+
+        # 右侧连接按钮
+        self.connect_btn = PushButton("连接", self)
+        self.connect_btn.setFixedWidth(76)
+        self.connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.connect_btn.clicked.connect(
+            lambda: self.connectRequested.emit(self.record)
+        )
+        lay.addWidget(self.connect_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # 移除按钮：绝对定位右上角（精简、不占布局宽度）
+        self.remove_btn = TransparentToolButton(self)
+        self.remove_btn.setIcon(FluentIcon.DELETE)
+        self.remove_btn.setToolTip("移除记录")
+        self.remove_btn.setFixedSize(28, 28)
+        self.remove_btn.setIconSize(QSize(14, 14))
+        self.remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.remove_btn.clicked.connect(
+            lambda: self.removeClicked.emit(self.record)
+        )
+        self._move_remove_btn()
+
+    # ------------------------------------------------------------------
+    # 布局与事件
+    # ------------------------------------------------------------------
+
+    def _move_remove_btn(self) -> None:
+        """把移除按钮钉在卡片右上角。"""
+        self.remove_btn.move(self.width() - self.remove_btn.width() - 8, 6)
+
+    def resizeEvent(self, e) -> None:  # noqa: N802 - Qt 事件命名
+        super().resizeEvent(e)
+        self._move_remove_btn()
+
+    def mouseDoubleClickEvent(self, e) -> None:  # noqa: N802
+        """双击卡片 = 快速连接。"""
+        self.connectRequested.emit(self.record)
+
+    # ------------------------------------------------------------------
+    # 动画
+    # ------------------------------------------------------------------
+
+    def play_in(self) -> QPropertyAnimation:
+        """出现动画：淡入（0 → 1，200ms）。"""
+        self._opacity_fx.setOpacity(0.0)
+        anim = QPropertyAnimation(self._opacity_fx, b"opacity", self)
+        anim.setDuration(200)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+        return anim
+
+    def play_out(self) -> QPropertyAnimation:
+        """移除动画：淡出（当前透明度 → 0，150ms）。"""
+        anim = QPropertyAnimation(self._opacity_fx, b"opacity", self)
+        anim.setDuration(150)
+        anim.setStartValue(self._opacity_fx.opacity())
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.Type.InCubic)
+        anim.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+        return anim
 
 
 class VaultInfoPage(QWidget):
@@ -52,60 +187,53 @@ class VaultInfoPage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
 
-        # 主布局：居中卡片
+        # 记录卡片 -> 列表项映射（移除定位用）
+        self._cards: dict = {}
+
+        # 主布局
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 24, 24, 24)
 
-        # ---- 未连接引导页（含最近密库记录） ----
+        # ---- 未连接引导页（含最近密库记录卡片） ----
         self._guide_widget = QWidget(self)
         guide_lay = QVBoxLayout(self._guide_widget)
         guide_lay.setContentsMargins(0, 0, 0, 0)
-        guide_lay.setSpacing(12)
+        guide_lay.setSpacing(10)
 
-        self._guide_title = QLabel("尚未连接密库", self._guide_widget)
-        self._guide_title.setStyleSheet(
-            "font-size: 22px; font-weight: bold;"
-        )
-        self._guide_title.setAlignment(Qt.AlignCenter)
+        self._guide_title = TitleLabel("尚未连接密库", self._guide_widget)
+        self._guide_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         guide_lay.addWidget(self._guide_title)
 
-        self._guide_desc = QLabel(
+        self._guide_desc = BodyLabel(
             "密库是您的端到端加密存储空间。\n"
             "连接已有密库或创建新密库以开始使用。",
             self._guide_widget,
         )
-        self._guide_desc.setStyleSheet(f"font-size: 14px; color: {semantic_color('muted')};")
-        self._guide_desc.setAlignment(Qt.AlignCenter)
+        self._guide_desc.setStyleSheet(f"color: {semantic_color('muted')};")
+        self._guide_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._guide_desc.setWordWrap(True)
         guide_lay.addWidget(self._guide_desc)
 
-        guide_lay.addSpacing(8)
+        guide_lay.addSpacing(6)
 
-        # 最近密库记录列表（双击行 = 快速连接）
+        # 主按钮居中（新建连接 / 初始化）
+        connect_wrap = QHBoxLayout()
+        connect_wrap.addStretch(1)
+        self._connect_btn = PrimaryPushButton(
+            "新建连接 / 初始化", self._guide_widget
+        )
+        self._connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._connect_btn.clicked.connect(self.connectRequested.emit)
+        connect_wrap.addWidget(self._connect_btn)
+        connect_wrap.addStretch(1)
+        guide_lay.addLayout(connect_wrap)
+
+        guide_lay.addSpacing(10)
+
+        # 最近密库记录卡片列表（卡片自带动作；双击卡片 = 快速连接）
         self._recent_list = ListWidget(self._guide_widget)
-        self._recent_list.setAlternatingRowColors(True)
-        self._recent_list.itemDoubleClicked.connect(self._on_item_double_clicked)
-        self._recent_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self._recent_list.customContextMenuRequested.connect(self._on_list_context_menu)
+        self._recent_list.setStyleSheet("background: transparent; border: none;")
         guide_lay.addWidget(self._recent_list)
-
-        # 操作按钮行：连接所选 / 移除记录 … 新建连接（主按钮）
-        btn_row = QHBoxLayout()
-        self._connect_sel_btn = PushButton("连接所选", self._guide_widget)
-        self._connect_sel_btn.clicked.connect(self._connect_selected)
-        btn_row.addWidget(self._connect_sel_btn)
-
-        self._remove_sel_btn = PushButton("移除记录", self._guide_widget)
-        self._remove_sel_btn.clicked.connect(self._remove_selected)
-        btn_row.addWidget(self._remove_sel_btn)
-
-        btn_row.addStretch()
-
-        connect_btn = PrimaryPushButton("新建连接 / 初始化", self._guide_widget)
-        connect_btn.setCursor(Qt.PointingHandCursor)
-        connect_btn.clicked.connect(self.connectRequested.emit)
-        btn_row.addWidget(connect_btn)
-        guide_lay.addLayout(btn_row)
 
         outer.addWidget(self._guide_widget)
 
@@ -113,49 +241,56 @@ class VaultInfoPage(QWidget):
         self._info_widget = QWidget(self)
         info_lay = QVBoxLayout(self._info_widget)
         info_lay.setContentsMargins(8, 8, 8, 8)
-        info_lay.setSpacing(12)
+        info_lay.setSpacing(10)
 
         # 标题
-        title = QLabel("密库信息", self._info_widget)
-        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        title = TitleLabel("密库信息", self._info_widget)
         info_lay.addWidget(title)
 
-        # 基本信息组
-        basic_group = QGroupBox("基本信息", self._info_widget)
-        basic_form = QFormLayout(basic_group)
+        # 基本信息卡片（圆角卡片容器代替 QGroupBox）
+        info_lay.addWidget(SubtitleLabel("基本信息", self._info_widget))
+        basic_card = CardWidget(self._info_widget)
+        basic_form = QFormLayout(basic_card)
+        basic_form.setContentsMargins(20, 16, 20, 16)
+        basic_form.setHorizontalSpacing(16)
+        basic_form.setVerticalSpacing(8)
 
-        self._vault_name_label = QLabel("-", self._info_widget)
+        self._vault_name_label = QLabel("-", basic_card)
         basic_form.addRow("库名称：", self._vault_name_label)
 
-        self._backend_type_label = QLabel("-", self._info_widget)
+        self._backend_type_label = QLabel("-", basic_card)
         basic_form.addRow("后端类型：", self._backend_type_label)
 
-        self._backend_path_label = QLabel("-", self._info_widget)
+        self._backend_path_label = QLabel("-", basic_card)
         self._backend_path_label.setWordWrap(True)
         basic_form.addRow("后端路径：", self._backend_path_label)
 
-        self._filename_enc_label = QLabel("-", self._info_widget)
+        self._filename_enc_label = QLabel("-", basic_card)
         basic_form.addRow("文件名加密：", self._filename_enc_label)
 
-        self._connect_time_label = QLabel("-", self._info_widget)
+        self._connect_time_label = QLabel("-", basic_card)
         basic_form.addRow("连接时间：", self._connect_time_label)
 
-        info_lay.addWidget(basic_group)
+        info_lay.addWidget(basic_card)
 
-        # 存储信息组
-        storage_group = QGroupBox("存储信息", self._info_widget)
-        storage_form = QFormLayout(storage_group)
+        # 存储信息卡片
+        info_lay.addWidget(SubtitleLabel("存储信息", self._info_widget))
+        storage_card = CardWidget(self._info_widget)
+        storage_form = QFormLayout(storage_card)
+        storage_form.setContentsMargins(20, 16, 20, 16)
+        storage_form.setHorizontalSpacing(16)
+        storage_form.setVerticalSpacing(8)
 
-        self._cloud_size_label = QLabel("-", self._info_widget)
+        self._cloud_size_label = QLabel("-", storage_card)
         storage_form.addRow("云端占用：", self._cloud_size_label)
 
-        self._cache_size_label = QLabel("-", self._info_widget)
+        self._cache_size_label = QLabel("-", storage_card)
         storage_form.addRow("本地缓存：", self._cache_size_label)
 
-        self._file_count_label = QLabel("-", self._info_widget)
+        self._file_count_label = QLabel("-", storage_card)
         storage_form.addRow("文件数量：", self._file_count_label)
 
-        info_lay.addWidget(storage_group)
+        info_lay.addWidget(storage_card)
 
         # 操作按钮
         btn_row = QHBoxLayout()
@@ -213,77 +348,58 @@ class VaultInfoPage(QWidget):
         self._file_count_label.setText(file_count)
 
     # ------------------------------------------------------------------
-    # 最近密库记录
+    # 最近密库记录卡片
     # ------------------------------------------------------------------
 
     def set_recent_vaults(self, items: list[dict]) -> None:
-        """填充最近密库记录（为空时回退纯引导文案）。"""
+        """填充最近密库记录卡片（为空时回退纯引导文案）。
+
+        重建前先 ``clear()`` 销毁旧卡片；每张卡片自带动作，
+        信号经实例闭包绑定记录，无选中行依赖。
+        """
         self._recent_list.clear()
+        self._cards.clear()
         for rec in items:
-            name = rec.get("vault_name", "-")
-            text = (
-                f"{rec.get('label', rec.get('backend_type', '?'))} · "
-                f"{rec.get('path', '-')} — 库 {name} · "
-                f"上次 {rec.get('last_used', '-')}"
-            )
-            item = QListWidgetItem(text)
-            item.setData(Qt.UserRole, rec)
+            item = QListWidgetItem()
+            item.setSizeHint(QSize(0, CARD_HEIGHT + 8))
+            card = RecentVaultCard(rec)
+            card.connectRequested.connect(self.quickConnectRequested.emit)
+            card.removeClicked.connect(self._on_card_remove_clicked)
+            # 记录卡片与 item 的对应关系，供移除时定位（信号只携带记录）
+            self._cards[card] = item
             self._recent_list.addItem(item)
+            self._recent_list.setItemWidget(item, card)
+            card.play_in()
 
         has = bool(items)
         self._recent_list.setVisible(has)
-        self._connect_sel_btn.setVisible(has)
-        self._remove_sel_btn.setVisible(has)
         self._guide_title.setText("最近连接的密库" if has else "尚未连接密库")
         self._guide_desc.setText(
-            "双击记录或点「连接所选」快速重连（仅需输入主密码）。"
+            "点击卡片上的「连接」或双击卡片快速重连（仅需输入主密码）。"
             if has
             else "密库是您的端到端加密存储空间。\n"
             "连接已有密库或创建新密库以开始使用。"
         )
-        if has:
-            self._recent_list.setCurrentRow(0)
 
-    def _selected_record(self) -> dict | None:
-        """当前选中行对应的记录。"""
-        item = self._recent_list.currentItem()
-        return item.data(Qt.UserRole) if item else None
-
-    def _connect_selected(self) -> None:
-        """连接所选记录。"""
-        rec = self._selected_record()
-        if rec:
-            self.quickConnectRequested.emit(rec)
-
-    def _remove_selected(self) -> None:
-        """移除所选记录。"""
-        rec = self._selected_record()
-        if rec:
-            self.removeVaultRequested.emit(rec)
-
-    def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
-        """双击行 = 快速连接。"""
-        rec = item.data(Qt.UserRole)
-        if rec:
-            self.quickConnectRequested.emit(rec)
-
-    def _on_list_context_menu(self, pos) -> None:
-        """右键菜单：连接 / 移除记录。"""
-        item = self._recent_list.itemAt(pos)
+    def card_at(self, row: int) -> RecentVaultCard | None:
+        """取指定行的记录卡片（测试辅助）。"""
+        item = self._recent_list.item(row)
         if item is None:
-            return
-        self._recent_list.setCurrentItem(item)
-        rec = item.data(Qt.UserRole)
-        menu = QMenu(self)
-        act_connect = menu.addAction("连接")
-        act_connect.triggered.connect(
-            lambda: self.quickConnectRequested.emit(rec)
-        )
-        act_remove = menu.addAction("移除记录")
-        act_remove.triggered.connect(
-            lambda: self.removeVaultRequested.emit(rec)
-        )
-        menu.exec(self._recent_list.mapToGlobal(pos))
+            return None
+        widget = self._recent_list.itemWidget(item)
+        return widget if isinstance(widget, RecentVaultCard) else None
+
+    def _on_card_remove_clicked(self, rec: dict) -> None:
+        """卡片移除按钮：立即发射移除信号，同时播淡出动画。
+
+        信号先行保证删除确认流程不被动画阻塞；若用户取消确认，
+        控制器重载记录会重建卡片，视觉状态自然恢复。
+        """
+        card = next((c for c in self._cards if c.record is rec), None)
+        if card is not None:
+            card.setEnabled(False)  # 防止动画期间重复触发
+            card.play_out()
+        self.removeVaultRequested.emit(rec)
 
     # ------------------------------------------------------------------
     # 内部方法
