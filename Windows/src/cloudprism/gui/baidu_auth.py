@@ -21,11 +21,12 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
+
+# Fluent 组件（均继承自对应 Qt 原生控件，标准 API 全兼容）
+from qfluentwidgets import LineEdit, PrimaryPushButton, PushButton
 
 from cloudprism.gui.theme import semantic_color
 from cloudprism.storage.baidu_backend import BaiduCredentialStore
@@ -109,12 +110,12 @@ class BaiduAuthDialog(QDialog):
         # ---- 凭证输入 ----
         form_widget = QWidget(self)
         form = QFormLayout(form_widget)
-        self._appid_edit = QLineEdit(form_widget)
-        self._appkey_edit = QLineEdit(form_widget)
-        self._secret_edit = QLineEdit(form_widget)
-        self._secret_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self._signkey_edit = QLineEdit(form_widget)
-        self._signkey_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._appid_edit = LineEdit(form_widget)
+        self._appkey_edit = LineEdit(form_widget)
+        self._secret_edit = LineEdit(form_widget)
+        self._secret_edit.setEchoMode(LineEdit.EchoMode.Password)
+        self._signkey_edit = LineEdit(form_widget)
+        self._signkey_edit.setEchoMode(LineEdit.EchoMode.Password)
         form.addRow("Appid：", self._appid_edit)
         form.addRow("AppKey：", self._appkey_edit)
         form.addRow("SecretKey：", self._secret_edit)
@@ -146,7 +147,7 @@ class BaiduAuthDialog(QDialog):
 
         # ---- 第一步：打开授权页 ----
         step1_row = QHBoxLayout()
-        self._open_btn = QPushButton("第一步：打开授权页面", self)
+        self._open_btn = PushButton("第一步：打开授权页面", self)
         self._open_btn.clicked.connect(self._open_auth_page)
         step1_row.addWidget(self._open_btn)
         step1_row.addStretch()
@@ -154,12 +155,12 @@ class BaiduAuthDialog(QDialog):
 
         # ---- 第二步：粘贴 code ----
         lay.addWidget(QLabel("第二步：授权后页面会显示一串 code，粘贴到下方：", self))
-        self._code_edit = QLineEdit(self)
+        self._code_edit = LineEdit(self)
         self._code_edit.setPlaceholderText("授权页面显示的 code（一次性）")
         lay.addWidget(self._code_edit)
 
         # ---- 完成授权 ----
-        self._finish_btn = QPushButton("完成授权", self)
+        self._finish_btn = PrimaryPushButton("完成授权", self)
         self._finish_btn.clicked.connect(self._finish_auth)
         lay.addWidget(self._finish_btn)
 

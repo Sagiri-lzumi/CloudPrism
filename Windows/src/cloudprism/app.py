@@ -16,6 +16,10 @@ import time
 from PySide6.QtCore import QEvent, QModelIndex, QObject, Signal, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
 
+# Fluent 提示组件（模态确认用 MessageBox，非阻断提示用 InfoBar）
+from qfluentwidgets import InfoBar, InfoBarPosition
+from qfluentwidgets import MessageBox as FluentMessageBox
+
 from cloudprism.core.session import Session
 from cloudprism.core.settings_store import SettingsStore
 from cloudprism.core.backend_factory import describe_backend
@@ -266,12 +270,12 @@ class AppController(QObject):
 
     def _on_remove_vault(self, record: dict) -> None:
         """移除最近密库记录（仅删记录，不影响云端数据）。"""
-        ret = QMessageBox.question(
-            self.window,
+        box = FluentMessageBox(
             "移除记录",
             f"确定移除该密库记录？（不影响云端数据）\n{record.get('path', '')}",
+            self.window,
         )
-        if ret == QMessageBox.StandardButton.Yes:
+        if box.exec():
             self._store.forget_vault(record.get("key", ""))
             self.window.vault_info_page.set_recent_vaults(
                 self._store.recent_vaults()
@@ -432,6 +436,7 @@ class AppController(QObject):
     def _require_vault(self) -> bool:
         """未连接Mi库时提示并返回 False。"""
         if self.session is None or self.backend is None:
+            # 保留 QMessageBox.information：测试（test_player_view）经 app_mod.QMessageBox patch 拦截
             QMessageBox.information(
                 self.window, "提示", "请先通过「Mi库 - 初始化/连接」连接云盘"
             )
@@ -512,7 +517,10 @@ class AppController(QObject):
             return
         name = name.strip()
         if "/" in name:
-            QMessageBox.warning(self.window, "提示", "文件夹名称不能包含 /")
+            InfoBar.warning(
+                title="提示", content="文件夹名称不能包含 /",
+                parent=self.window, position=InfoBarPosition.TOP_RIGHT, duration=3000,
+            )
             return
         enc_name = self._encrypt_filename(name) if self._is_filename_enc() else name
         base = self._resolve_remote_path(display_dir) if display_dir else ""
@@ -520,7 +528,10 @@ class AppController(QObject):
         try:
             self.backend.mkdir(remote)
         except Exception as e:
-            QMessageBox.warning(self.window, "新建失败", str(e))
+            InfoBar.warning(
+                title="新建失败", content=str(e),
+                parent=self.window, position=InfoBarPosition.TOP_RIGHT, duration=4000,
+            )
             return
         self._refresh_tree()
 
@@ -538,7 +549,10 @@ class AppController(QObject):
             return
         new_name = new_name.strip()
         if "/" in new_name:
-            QMessageBox.warning(self.window, "提示", "名称不能包含 /")
+            InfoBar.warning(
+                title="提示", content="名称不能包含 /",
+                parent=self.window, position=InfoBarPosition.TOP_RIGHT, duration=3000,
+            )
             return
 
         old_remote = self._resolve_remote_path(display_path)
@@ -552,7 +566,10 @@ class AppController(QObject):
         try:
             self.backend.rename(old_remote, new_remote)
         except Exception as e:
-            QMessageBox.warning(self.window, "重命名失败", str(e))
+            InfoBar.warning(
+                title="重命名失败", content=str(e),
+                parent=self.window, position=InfoBarPosition.TOP_RIGHT, duration=4000,
+            )
             return
         self._refresh_tree()
 
@@ -561,17 +578,21 @@ class AppController(QObject):
         if not self._require_vault():
             return
         name = display_path.rsplit("/", 1)[-1]
-        ret = QMessageBox.question(
-            self.window, "确认删除",
+        box = FluentMessageBox(
+            "确认删除",
             f"确定删除「{name}」吗？\n此操作不可撤销。",
+            self.window,
         )
-        if ret != QMessageBox.Yes:
+        if not box.exec():
             return
         remote = self._resolve_remote_path(display_path)
         try:
             self.backend.delete(remote)
         except Exception as e:
-            QMessageBox.warning(self.window, "删除失败", str(e))
+            InfoBar.warning(
+                title="删除失败", content=str(e),
+                parent=self.window, position=InfoBarPosition.TOP_RIGHT, duration=4000,
+            )
             return
         self._refresh_tree()
 

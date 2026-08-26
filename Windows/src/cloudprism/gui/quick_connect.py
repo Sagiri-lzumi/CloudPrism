@@ -11,10 +11,11 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QPushButton,
     QVBoxLayout,
 )
+
+# Fluent 组件（均继承自对应 Qt 原生控件，标准 API 全兼容）
+from qfluentwidgets import LineEdit, PrimaryPushButton, PushButton
 
 from cloudprism.core.backend_factory import build_backend_from_params
 from cloudprism.core.session import Session
@@ -67,15 +68,15 @@ class QuickConnectDialog(QDialog):
         self._webdav_pass_edit = None
         if record.get("backend_type") == "webdav":
             user = record.get("webdav_user", "")
-            self._webdav_pass_edit = QLineEdit(self)
-            self._webdav_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
+            self._webdav_pass_edit = LineEdit(self)
+            self._webdav_pass_edit.setEchoMode(LineEdit.EchoMode.Password)
             self._webdav_pass_edit.setPlaceholderText(
                 f"WebDAV 账号 {user} 的服务器密码" if user else "WebDAV 服务器密码"
             )
             form.addRow("服务器密码：", self._webdav_pass_edit)
 
-        self._pw_edit = QLineEdit(self)
-        self._pw_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._pw_edit = LineEdit(self)
+        self._pw_edit.setEchoMode(LineEdit.EchoMode.Password)
         self._pw_edit.setPlaceholderText("密库主密码（仅存内存，不落盘）")
         self._pw_edit.returnPressed.connect(self._connect)
         form.addRow("主密码：", self._pw_edit)
@@ -84,10 +85,10 @@ class QuickConnectDialog(QDialog):
 
         # ---- 按钮行 ----
         btn_row = QHBoxLayout()
-        self._connect_btn = QPushButton("连接", self)
+        self._connect_btn = PrimaryPushButton("连接", self)
         self._connect_btn.setDefault(True)
         self._connect_btn.clicked.connect(self._connect)
-        cancel_btn = QPushButton("取消", self)
+        cancel_btn = PushButton("取消", self)
         cancel_btn.clicked.connect(self.reject)
         btn_row.addStretch()
         btn_row.addWidget(self._connect_btn)

@@ -21,14 +21,15 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QPushButton,
     QRadioButton,
     QStackedWidget,
     QVBoxLayout,
     QWizard,
     QWizardPage,
 )
+
+# Fluent 组件（均继承自对应 Qt 原生控件，标准 API 全兼容）
+from qfluentwidgets import LineEdit, PrimaryPushButton, PushButton
 
 from cloudprism.core.backend_factory import build_backend_from_params
 from cloudprism.core.session import Session
@@ -173,7 +174,7 @@ class BackendConfigPage(QWizardPage):
 
         # 测试连接区域（所有类型共用）
         test_row = QHBoxLayout()
-        self.test_btn = QPushButton("测试连接", self)
+        self.test_btn = PrimaryPushButton("测试连接", self)
         self.test_btn.clicked.connect(self._test_connection)
         self.test_status = QLabel("请填写信息后点击「测试连接」", self)
         self.test_status.setStyleSheet(f"color: {semantic_color('muted')};")
@@ -192,10 +193,10 @@ class BackendConfigPage(QWizardPage):
         w = QWidget(self)
         lay = QVBoxLayout(w)
         dir_row = QHBoxLayout()
-        self.local_dir_edit = QLineEdit(w)
+        self.local_dir_edit = LineEdit(w)
         self.local_dir_edit.setPlaceholderText("选择本地文件夹…")
         self.local_dir_edit.textChanged.connect(self._on_config_changed)
-        browse_btn = QPushButton("浏览…", w)
+        browse_btn = PushButton("浏览…", w)
         browse_btn.clicked.connect(self._browse_dir)
         dir_row.addWidget(self.local_dir_edit)
         dir_row.addWidget(browse_btn)
@@ -218,15 +219,15 @@ class BackendConfigPage(QWizardPage):
         from PySide6.QtWidgets import QWidget
         w = QWidget(self)
         lay = QVBoxLayout(w)
-        self.webdav_url_edit = QLineEdit(w)
+        self.webdav_url_edit = LineEdit(w)
         self.webdav_url_edit.setPlaceholderText("https://dav.example.com/path/")
         self.webdav_url_edit.textChanged.connect(self._on_config_changed)
-        self.webdav_user_edit = QLineEdit(w)
+        self.webdav_user_edit = LineEdit(w)
         self.webdav_user_edit.setPlaceholderText("用户名")
         self.webdav_user_edit.textChanged.connect(self._on_config_changed)
-        self.webdav_pass_edit = QLineEdit(w)
+        self.webdav_pass_edit = LineEdit(w)
         self.webdav_pass_edit.setPlaceholderText("密码")
-        self.webdav_pass_edit.setEchoMode(QLineEdit.Password)
+        self.webdav_pass_edit.setEchoMode(LineEdit.Password)
         self.webdav_pass_edit.textChanged.connect(self._on_config_changed)
         lay.addWidget(QLabel("WebDAV 地址：", w))
         lay.addWidget(self.webdav_url_edit)
@@ -260,7 +261,7 @@ class BackendConfigPage(QWizardPage):
         self.baidu_status.setStyleSheet(f"color: {semantic_color('err')};")
         lay.addWidget(self.baidu_status)
 
-        self.baidu_auth_btn = QPushButton("授权 / 更新凭证…", w)
+        self.baidu_auth_btn = PushButton("授权 / 更新凭证…", w)
         self.baidu_auth_btn.clicked.connect(self._open_baidu_auth)
         lay.addWidget(self.baidu_auth_btn)
         lay.addStretch()
@@ -395,8 +396,8 @@ class PasswordPage(QWizardPage):
         self.setSubTitle("主密码仅存内存，不落盘、不上传云端")
 
         lay = QVBoxLayout(self)
-        self.pw_edit = QLineEdit(self)
-        self.pw_edit.setEchoMode(QLineEdit.Password)
+        self.pw_edit = LineEdit(self)
+        self.pw_edit.setEchoMode(LineEdit.Password)
         self.pw_edit.setPlaceholderText("输入主密码")
         self.pw_edit.textChanged.connect(lambda: self.completeChanged.emit())
         lay.addWidget(QLabel("主密码：", self))
@@ -404,8 +405,8 @@ class PasswordPage(QWizardPage):
 
         # 二次确认（仅新建模式显示）
         self.confirm_label = QLabel("再次输入确认：", self)
-        self.confirm_edit = QLineEdit(self)
-        self.confirm_edit.setEchoMode(QLineEdit.Password)
+        self.confirm_edit = LineEdit(self)
+        self.confirm_edit.setEchoMode(LineEdit.Password)
         self.confirm_edit.textChanged.connect(lambda: self.completeChanged.emit())
         lay.addWidget(self.confirm_label)
         lay.addWidget(self.confirm_edit)

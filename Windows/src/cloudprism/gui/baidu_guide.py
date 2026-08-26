@@ -13,10 +13,12 @@ import sys
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
-    QPushButton,
     QTextBrowser,
     QVBoxLayout,
 )
+
+# Fluent 组件（继承自对应 Qt 原生控件，标准 API 全兼容）
+from qfluentwidgets import PushButton
 
 # 资源缺失时的兜底文案
 _FALLBACK_TEXT = (
@@ -70,7 +72,7 @@ class BaiduGuideDialog(QDialog):
         self._browser.setMarkdown(load_guide_text(guide_path))
         lay.addWidget(self._browser)
 
-        close_btn = QPushButton("关闭", self)
+        close_btn = PushButton("关闭", self)
         close_btn.clicked.connect(self.accept)
         lay.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
 
