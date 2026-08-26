@@ -14,19 +14,25 @@ import tempfile
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
+)
+
+# Fluent 组件（均继承自对应 Qt 原生控件，标准 API 全兼容）
+from qfluentwidgets import (
+    ComboBox,
+    LineEdit,
+    ListWidget,
+    PrimaryPushButton,
+    PushButton,
+    SpinBox,
 )
 
 from cloudprism.gui.baidu_auth import BaiduAuthDialog
@@ -83,7 +89,7 @@ class TransfersPage(QWidget):
         desc.setStyleSheet(f"color: {semantic_color('muted')}; font-size: 13px;")
         lay.addWidget(desc)
 
-        self.task_list = QListWidget(self)
+        self.task_list = ListWidget(self)
         self.task_list.setAlternatingRowColors(True)
         lay.addWidget(self.task_list)
 
@@ -147,12 +153,12 @@ class SettingsPage(QWidget):
         appearance_group = QGroupBox("外观", content)
         appearance_form = QFormLayout(appearance_group)
 
-        self._theme_combo = QComboBox(self)
+        self._theme_combo = ComboBox(self)
         self._theme_combo.addItems(["跟随系统", "深色", "浅色"])
         self._theme_combo.currentIndexChanged.connect(self._on_theme_changed)
         appearance_form.addRow("主题：", self._theme_combo)
 
-        self._font_size_combo = QComboBox(self)
+        self._font_size_combo = ComboBox(self)
         self._font_size_combo.addItems(["小 (12px)", "中 (14px)", "大 (16px)", "特大 (18px)"])
         self._font_size_combo.setCurrentIndex(1)  # 默认中
         self._font_size_combo.currentIndexChanged.connect(self._on_font_size_changed)
@@ -174,7 +180,7 @@ class SettingsPage(QWidget):
         conn_form.addRow("文件名加密：", self._filename_enc_label)
 
         btn_row = QHBoxLayout()
-        self._reconnect_btn = QPushButton("切换密库（打开向导）…", self)
+        self._reconnect_btn = PrimaryPushButton("切换密库（打开向导）…", self)
         self._reconnect_btn.setToolTip(
             "打开初始化向导新建或连接密库；快速重连请用密库页的最近记录"
         )
@@ -189,7 +195,7 @@ class SettingsPage(QWidget):
         cache_group = QGroupBox("缓存设置", content)
         cache_form = QFormLayout(cache_group)
 
-        self._cache_limit_spin = QSpinBox(self)
+        self._cache_limit_spin = SpinBox(self)
         self._cache_limit_spin.setRange(64, 4096)
         self._cache_limit_spin.setValue(self.DEFAULT_CACHE_LIMIT_MB)
         self._cache_limit_spin.setSuffix(" MB")
@@ -198,13 +204,13 @@ class SettingsPage(QWidget):
         cache_form.addRow("缓存大小限制：", self._cache_limit_spin)
 
         cache_path_row = QHBoxLayout()
-        self._cache_path_edit = QLineEdit(self)
+        self._cache_path_edit = LineEdit(self)
         self._cache_path_edit.setText(self._default_cache_path())
         self._cache_path_edit.setPlaceholderText("缓存文件存放路径")
         self._cache_path_edit.textChanged.connect(self._emit_cache_settings)
         cache_path_row.addWidget(self._cache_path_edit)
 
-        browse_btn = QPushButton("浏览…", self)
+        browse_btn = PushButton("浏览…", self)
         browse_btn.clicked.connect(self._browse_cache_path)
         cache_path_row.addWidget(browse_btn)
         cache_form.addRow("缓存位置：", cache_path_row)
@@ -212,7 +218,7 @@ class SettingsPage(QWidget):
         self._cache_usage_label = QLabel("计算中…", self)
         cache_form.addRow("当前缓存占用：", self._cache_usage_label)
 
-        clear_btn = QPushButton("清除缓存", self)
+        clear_btn = PushButton("清除缓存", self)
         clear_btn.clicked.connect(self._on_clear_cache)
         clear_row = QHBoxLayout()
         clear_row.addStretch()
@@ -225,12 +231,12 @@ class SettingsPage(QWidget):
         transfer_group = QGroupBox("传输", content)
         transfer_form = QFormLayout(transfer_group)
 
-        self._chunk_size_combo = QComboBox(self)
+        self._chunk_size_combo = ComboBox(self)
         self._chunk_size_combo.addItems(["256 KB", "512 KB", "1 MB", "4 MB"])
         self._chunk_size_combo.setCurrentIndex(1)  # 默认 512KB
         transfer_form.addRow("分块大小：", self._chunk_size_combo)
 
-        self._concurrent_spin = QSpinBox(self)
+        self._concurrent_spin = SpinBox(self)
         self._concurrent_spin.setRange(1, 4)
         self._concurrent_spin.setValue(1)
         # 并发传输为预留功能：当前传输队列为串行（单任务内多核加密已可充分利用 CPU）
@@ -244,7 +250,7 @@ class SettingsPage(QWidget):
         security_group = QGroupBox("安全", content)
         security_form = QFormLayout(security_group)
 
-        self._auto_lock_combo = QComboBox(self)
+        self._auto_lock_combo = ComboBox(self)
         self._auto_lock_combo.addItems(["从不", "5 分钟", "15 分钟", "30 分钟"])
         self._auto_lock_combo.setToolTip("无操作后自动锁定密库的时间")
         security_form.addRow("自动锁定：", self._auto_lock_combo)
@@ -255,18 +261,18 @@ class SettingsPage(QWidget):
         baidu_group = QGroupBox("百度网盘", content)
         baidu_form = QFormLayout(baidu_group)
 
-        self._baidu_appid_edit = QLineEdit(baidu_group)
-        self._baidu_appkey_edit = QLineEdit(baidu_group)
-        self._baidu_secret_edit = QLineEdit(baidu_group)
-        self._baidu_secret_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self._baidu_signkey_edit = QLineEdit(baidu_group)
-        self._baidu_signkey_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._baidu_appid_edit = LineEdit(baidu_group)
+        self._baidu_appkey_edit = LineEdit(baidu_group)
+        self._baidu_secret_edit = LineEdit(baidu_group)
+        self._baidu_secret_edit.setEchoMode(LineEdit.EchoMode.Password)
+        self._baidu_signkey_edit = LineEdit(baidu_group)
+        self._baidu_signkey_edit.setEchoMode(LineEdit.EchoMode.Password)
         baidu_form.addRow("Appid：", self._baidu_appid_edit)
         baidu_form.addRow("AppKey：", self._baidu_appkey_edit)
         baidu_form.addRow("SecretKey：", self._baidu_secret_edit)
         baidu_form.addRow("SignKey（可选）：", self._baidu_signkey_edit)
 
-        # 申请教程：按需查看，不主动弹出
+        # 申请教程：按需查看，不主动弹出（保留原生 QPushButton 以维持扁平链接样式）
         guide_row = QHBoxLayout()
         self._baidu_guide_btn = QPushButton("如何申请凭证…", baidu_group)
         self._baidu_guide_btn.setFlat(True)
@@ -281,14 +287,14 @@ class SettingsPage(QWidget):
 
         # 检查 / 登录 / 清除 + 状态显示
         action_row = QHBoxLayout()
-        self._baidu_check_btn = QPushButton("检查", baidu_group)
+        self._baidu_check_btn = PushButton("检查", baidu_group)
         self._baidu_check_btn.setToolTip(
             "校验格式与网络连通性；凭证最终有效性由登录授权时百度服务器验证"
         )
         self._baidu_check_btn.clicked.connect(self._check_baidu)
-        self._baidu_login_btn = QPushButton("登录百度账号…", baidu_group)
+        self._baidu_login_btn = PrimaryPushButton("登录百度账号…", baidu_group)
         self._baidu_login_btn.clicked.connect(self._login_baidu)
-        self._baidu_clear_btn = QPushButton("清除", baidu_group)
+        self._baidu_clear_btn = PushButton("清除", baidu_group)
         self._baidu_clear_btn.clicked.connect(self._clear_baidu)
         self._baidu_status = QLabel("", baidu_group)
         self._baidu_status.setWordWrap(True)
@@ -305,7 +311,7 @@ class SettingsPage(QWidget):
         perf_form = QFormLayout(perf_group)
 
         total_cores = os.cpu_count() or 4
-        self._max_cores_spin = QSpinBox(self)
+        self._max_cores_spin = SpinBox(self)
         self._max_cores_spin.setRange(1, total_cores)
         self._max_cores_spin.setValue(max(1, total_cores - 2))  # 默认留 2 核给系统
         self._max_cores_spin.setToolTip(f"系统共 {total_cores} 个逻辑核心")

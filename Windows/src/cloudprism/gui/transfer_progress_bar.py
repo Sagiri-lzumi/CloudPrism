@@ -11,15 +11,16 @@ TransferProgressBar 嵌入主窗口底部（状态栏上方），
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QProgressBar,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
+
+# Fluent 组件（均继承自对应 Qt 原生控件，标准 API 全兼容）
+from qfluentwidgets import ProgressBar, PushButton
 
 from cloudprism.gui.theme import semantic_color
 
@@ -50,18 +51,15 @@ class TransferProgressBar(QWidget):
 
         top_row.addStretch()
 
-        self._cancel_btn = QPushButton("取消", self)
+        self._cancel_btn = PushButton("取消", self)
         self._cancel_btn.setFixedHeight(24)
-        self._cancel_btn.setStyleSheet(
-            "QPushButton { padding: 2px 12px; font-size: 9pt; }"
-        )
         self._cancel_btn.clicked.connect(self.cancelRequested.emit)
         top_row.addWidget(self._cancel_btn)
 
         lay.addLayout(top_row)
 
-        # 下方：进度条
-        self._bar = QProgressBar(self)
+        # 下方：进度条（Fluent 版，带流畅动画）
+        self._bar = ProgressBar(self)
         self._bar.setRange(0, 100)
         self._bar.setValue(0)
         self._bar.setTextVisible(False)

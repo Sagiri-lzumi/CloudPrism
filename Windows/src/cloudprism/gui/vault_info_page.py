@@ -23,13 +23,14 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QListWidget,
     QListWidgetItem,
     QMenu,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
+
+# Fluent 组件（均继承自对应 Qt 原生控件，标准 API 全兼容）
+from qfluentwidgets import ListWidget, PrimaryPushButton, PushButton
 
 from cloudprism.gui.theme import semantic_color
 
@@ -81,7 +82,7 @@ class VaultInfoPage(QWidget):
         guide_lay.addSpacing(8)
 
         # 最近密库记录列表（双击行 = 快速连接）
-        self._recent_list = QListWidget(self._guide_widget)
+        self._recent_list = ListWidget(self._guide_widget)
         self._recent_list.setAlternatingRowColors(True)
         self._recent_list.itemDoubleClicked.connect(self._on_item_double_clicked)
         self._recent_list.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -90,26 +91,17 @@ class VaultInfoPage(QWidget):
 
         # 操作按钮行：连接所选 / 移除记录 … 新建连接（主按钮）
         btn_row = QHBoxLayout()
-        self._connect_sel_btn = QPushButton("连接所选", self._guide_widget)
+        self._connect_sel_btn = PushButton("连接所选", self._guide_widget)
         self._connect_sel_btn.clicked.connect(self._connect_selected)
         btn_row.addWidget(self._connect_sel_btn)
 
-        self._remove_sel_btn = QPushButton("移除记录", self._guide_widget)
+        self._remove_sel_btn = PushButton("移除记录", self._guide_widget)
         self._remove_sel_btn.clicked.connect(self._remove_selected)
         btn_row.addWidget(self._remove_sel_btn)
 
         btn_row.addStretch()
 
-        connect_btn = QPushButton("新建连接 / 初始化", self._guide_widget)
-        connect_btn.setStyleSheet(
-            "QPushButton {"
-            "  background-color: #0067b8; color: white;"
-            "  border: none; border-radius: 6px;"
-            "  padding: 8px 20px; font-size: 14px; font-weight: 600;"
-            "}"
-            "QPushButton:hover { background-color: #106ebe; }"
-            "QPushButton:pressed { background-color: #005a9e; }"
-        )
+        connect_btn = PrimaryPushButton("新建连接 / 初始化", self._guide_widget)
         connect_btn.setCursor(Qt.PointingHandCursor)
         connect_btn.clicked.connect(self.connectRequested.emit)
         btn_row.addWidget(connect_btn)
@@ -167,11 +159,11 @@ class VaultInfoPage(QWidget):
 
         # 操作按钮
         btn_row = QHBoxLayout()
-        refresh_btn = QPushButton("刷新信息", self._info_widget)
+        refresh_btn = PushButton("刷新信息", self._info_widget)
         refresh_btn.clicked.connect(self.refreshRequested.emit)
         btn_row.addWidget(refresh_btn)
 
-        lock_btn = QPushButton("锁定密库", self._info_widget)
+        lock_btn = PushButton("锁定密库", self._info_widget)
         lock_btn.clicked.connect(self.lockRequested.emit)
         btn_row.addWidget(lock_btn)
 
