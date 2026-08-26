@@ -2,8 +2,9 @@
 # 安装到根 .venv：python -m pip install -r requirements.txt
 pycryptodome>=3.20
 
-# GUI 主题（Material Design 明暗双主题，BSD-2-Clause）
-qt-material>=2.14
+# GUI 组件库（Win11 Fluent 风格，明暗双主题 + 动画，GPLv3）
+# 注意：必须用 PySide6 绑定版；PyQt-Fluent-Widgets 是 PyQt5/6 版，混用会崩溃
+PySide6-Fluent-Widgets>=1.11
 
 # 测试依赖（开发期）
 pytest>=8

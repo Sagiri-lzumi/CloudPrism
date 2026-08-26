@@ -1,11 +1,12 @@
-"""主题系统测试（qt-material 包装层 + 语义色表）。
+"""主题系统测试（qfluentwidgets 包装层 + 语义色表）。
 
-全部离屏运行；用 fixture 保存/恢复全局样式表与模块状态，
+全部离屏运行；用 fixture 保存/恢复模块级主题状态与库主题，
 避免影响同会话内的其他测试文件。
 """
 
 import pytest
 from PySide6.QtWidgets import QApplication
+from qfluentwidgets import Theme, qconfig
 
 from cloudprism.gui import theme as theme_mod
 from cloudprism.gui.theme import (
@@ -20,38 +21,33 @@ from cloudprism.gui.theme import (
 
 @pytest.fixture(autouse=True)
 def _restore_theme():
-    """保存/恢复全局样式表与模块级主题状态。"""
-    app = QApplication.instance()
-    saved_qss = app.styleSheet() if app is not None else ""
+    """保存/恢复模块级主题状态与库全局主题。"""
     saved_mode = theme_mod._current_mode
     saved_size = theme_mod._current_font_size
+    saved_qfw_theme = qconfig.theme
     yield
     theme_mod._current_mode = saved_mode
     theme_mod._current_font_size = saved_size
-    app = QApplication.instance()
-    if app is not None:
-        app.setStyleSheet(saved_qss)
+    qconfig.theme = saved_qfw_theme
 
 
 def test_apply_light_and_dark_differ(qtbot):
-    """明暗主题应用后样式表均非空且互不相同。"""
+    """明暗主题应用后库主题状态随之切换。"""
     app = QApplication.instance()
     apply_theme(app, "light")
-    light_qss = app.styleSheet()
     assert current_mode() == "light"
+    assert qconfig.theme == Theme.LIGHT
     apply_theme(app, "dark")
-    dark_qss = app.styleSheet()
     assert current_mode() == "dark"
-    assert light_qss and dark_qss
-    assert light_qss != dark_qss
+    assert qconfig.theme == Theme.DARK
 
 
 def test_system_mode_resolves_and_applies(qtbot):
-    """mode=system 不抛异常，且解析为具体的明/暗。"""
+    """mode=system 不抛异常；库的 AUTO 会立即解析为具体明/暗。"""
     app = QApplication.instance()
     apply_theme(app, "system")
+    assert qconfig.theme in (Theme.LIGHT, Theme.DARK)
     assert current_mode() in ("light", "dark")
-    assert app.styleSheet() != ""
 
 
 def test_resolve_mode_unknown_falls_back_to_light():
@@ -59,6 +55,14 @@ def test_resolve_mode_unknown_falls_back_to_light():
     assert resolve_mode("dark") == "dark"
     assert resolve_mode("system") in ("light", "dark")
     assert resolve_mode("no-such-mode") == "light"
+
+
+def test_unknown_mode_falls_back_to_light(qtbot):
+    """apply_theme 收到未知模式时回退浅色，不抛异常。"""
+    app = QApplication.instance()
+    apply_theme(app, "no-such-mode")
+    assert current_mode() == "light"
+    assert qconfig.theme == Theme.LIGHT
 
 
 def test_semantic_color_varies_by_mode(qtbot):
@@ -88,7 +92,7 @@ def test_apply_fluent_style_alias(qtbot):
     """兼容别名：等同应用浅色主题。"""
     apply_fluent_style(QApplication.instance())
     assert current_mode() == "light"
-    assert QApplication.instance().styleSheet() != ""
+    assert qconfig.theme == Theme.LIGHT
 
 
 def test_system_prefers_dark_returns_bool():
@@ -100,6 +104,7 @@ def test_font_size_persists_across_reapply(qtbot):
     app = QApplication.instance()
     apply_theme(app, "light", font_size=18)
     assert theme_mod._current_font_size == 18
+    assert app.font().pointSize() == 18
     apply_theme(app, "dark")
     assert theme_mod._current_font_size == 18
     assert current_mode() == "dark"

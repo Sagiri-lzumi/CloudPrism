@@ -165,7 +165,7 @@ class AppController(QObject):
     # ------------------------------------------------------------------
 
     def _on_theme_changed(self, theme: str) -> None:
-        """主题切换：实时应用 qt-material 明/暗主题（system 自动解析）。"""
+        """主题切换：实时应用 Fluent 明/暗主题（system 自动解析）。"""
         app = QApplication.instance()
         if app is not None:
             apply_theme(app, theme)
@@ -177,7 +177,7 @@ class AppController(QObject):
             font = app.font()
             font.setPointSize(size)
             app.setFont(font)
-            # qt-material 样式表会覆盖基础字号，须携带字号重套样式
+            # 字号经 apply_theme 统一应用（携带字号避免沿用旧值丢失）
             apply_theme(app, current_mode(), font_size=size)
 
     # ------------------------------------------------------------------
@@ -845,12 +845,12 @@ def main() -> int:
 
     app = QApplication(sys.argv)
     store = SettingsStore()
-    # 应用 Material 主题（浅色 / 深色 / 跟随系统，沿用持久化选择）
+    # 应用 Fluent 主题（浅色 / 深色 / 跟随系统，沿用持久化选择）
     modes = ["system", "dark", "light"]
     idx = store.theme_index()
     mode = modes[idx] if 0 <= idx < len(modes) else "system"
     apply_theme(app, mode, font_size=store.font_size())
-    # 恢复持久化的字体大小（兼顾样式表未覆盖的控件）
+    # 恢复持久化的字体大小（apply_theme 内部已设置，此处兼顾其他控件）
     font = app.font()
     font.setPointSize(store.font_size())
     app.setFont(font)
