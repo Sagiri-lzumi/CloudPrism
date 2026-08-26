@@ -20,7 +20,12 @@ from qfluentwidgets import CheckBox, LineEdit, PrimaryPushButton, PushButton
 from cloudprism.core.backend_factory import build_backend_from_params
 from cloudprism.core.session import Session
 from cloudprism.core.vault_manager import VaultManager
+from cloudprism.gui.busy_op import run_busy
 from cloudprism.gui.theme import semantic_color
+
+
+class _ConnectError(Exception):
+    """连接业务错误：消息直接展示在对话框状态栏。"""
 
 
 class QuickConnectDialog(QDialog):
@@ -29,6 +34,10 @@ class QuickConnectDialog(QDialog):
     连接成功后产物存于实例属性：
       backend / metadata / session
     """
+
+    # 开库含数秒级 PBKDF2 派生，默认后台线程执行避免冻结界面；
+    # 测试置 True 走同步路径（无需事件循环）
+    sync_ops = False
 
     def __init__(
         self,
@@ -155,7 +164,7 @@ class QuickConnectDialog(QDialog):
         btype = self._record.get("backend_type", "")
         path = self._record.get("path", "")
         self._connect_btn.setEnabled(False)
-        self._status.setText("")
+        self._status.setText("正在校验主密码，约需数秒…")
         try:
             backend = self._factory(
                 btype,
@@ -164,31 +173,47 @@ class QuickConnectDialog(QDialog):
                 webdav_user=self._record.get("webdav_user", ""),
                 webdav_pass=webdav_pass,
             )
-            vm = VaultManager(backend)
-            if use_recovery:
-                meta = vm.open_vault_with_recovery(recovery, self.vault_path)
-                if meta is None:
-                    self._status.setText(
-                        "恢复码无效，或该位置不存在带恢复码的密库"
-                    )
-                    return
-                pw = vm.recovered_password or ""
-            else:
+        except Exception as e:  # noqa: BLE001
+            self._connect_btn.setEnabled(True)
+            self._status.setText(f"连接失败：{e}")
+            return
+
+        def op():
+            """后台重操作：开库校验（含数秒级 PBKDF2 派生）。"""
+            try:
+                vm = VaultManager(backend)
+                if use_recovery:
+                    meta = vm.open_vault_with_recovery(recovery, self.vault_path)
+                    if meta is None:
+                        raise _ConnectError(
+                            "恢复码无效，或该位置不存在带恢复码的密库"
+                        )
+                    return meta, vm.recovered_password or ""
                 meta = vm.open_vault(pw, self.vault_path)
                 if meta is None:
                     # 区分"位置无密库"与"密码错误"，避免误导性报错
                     if not vm.has_vault(self.vault_path):
-                        self._status.setText(
-                            "该位置不存在Mi库，请检查密库位置记录"
-                        )
-                    else:
-                        self._status.setText("主密码错误，请重试")
-                    return
+                        raise _ConnectError("该位置不存在Mi库，请检查密库位置记录")
+                    raise _ConnectError("主密码错误，请重试")
+                return meta, pw
+            except _ConnectError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                raise _ConnectError(f"连接失败：{e}")
+
+        def on_done(result):
+            meta, final_pw = result
+            self._connect_btn.setEnabled(True)
             self.backend = backend
             self.metadata = meta
-            self.session = Session(pw)
+            self.session = Session(final_pw)
             self.accept()
-        except Exception as e:  # noqa: BLE001
-            self._status.setText(f"连接失败：{e}")
-        finally:
+
+        def on_error(msg: str):
             self._connect_btn.setEnabled(True)
+            self._status.setText(msg or "未知错误")
+
+        # 同步模式（测试）原地执行；异步模式持有线程引用防 GC
+        self._op_thread = run_busy(
+            op, on_done, on_error, parent=self, sync=self.sync_ops,
+        )

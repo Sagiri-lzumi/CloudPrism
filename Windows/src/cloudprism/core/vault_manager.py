@@ -123,6 +123,47 @@ class VaultManager:
         self._upload_marker(data, vault_path)
         return meta
 
+    def create_vault_with_recovery(
+        self,
+        master_password: str,
+        filename_enc: bool,
+        name: str = "",
+        vault_path: str = "",
+    ) -> tuple[VaultMetadata, str]:
+        """新建Mi库并同步生成恢复码（一次性写入，推荐的新建入口）。
+
+        相比 create_vault + generate_recovery_code 两步流程，省去开库复核与
+        二次重写 Marker，PBKDF2 派生从 4 次降到 2 次（每次约数秒，
+        迭代次数与 Android 端协议绑定不可调），显著缩短建库耗时。
+
+        返回:
+            (VaultMetadata, 恢复码)；恢复码仅返回给调用方展示，不落盘/上传；
+            元信息 has_recovery=True
+
+        异常:
+            VaultError: 目标位置已存在Mi库（防止覆盖）
+        """
+        from Crypto.Random import get_random_bytes
+
+        if self.has_vault(vault_path):
+            raise VaultError("该位置已存在Mi库，请选择「连接」或更换位置")
+
+        if vault_path.strip("/"):
+            # 子目录密库：确保目录存在（已存在时容错）
+            try:
+                self.backend.mkdir(vault_path.strip("/"))
+            except Exception:  # noqa: BLE001
+                pass
+
+        meta = VaultMarker.generate_metadata(filename_enc=filename_enc, name=name)
+        secret = get_random_bytes(constants.RECOVERY_SECRET_LEN)
+        code = self.encode_recovery_code(secret)
+        blob = VaultMarker.build_recovery_blob(secret, master_password)
+        # 一次写入：Marker 加密与恢复块同时落盘，无需事后复核重传
+        data = VaultMarker.create(meta, master_password, recovery_blob=blob)
+        self._upload_marker(data, vault_path)
+        return dataclasses.replace(meta, has_recovery=True), code
+
     # ------------------------------------------------------------------
     # 连接
     # ------------------------------------------------------------------

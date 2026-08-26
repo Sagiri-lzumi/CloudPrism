@@ -16,3 +16,17 @@ def sample_salt() -> bytes:
 def sample_master_password() -> str:
     """参考主密码。"""
     return "test"
+
+
+@pytest.fixture(autouse=True)
+def _sync_vault_ops(monkeypatch):
+    """测试环境把密库重操作（建库/开库）切到同步路径。
+
+    产品默认后台线程执行避免冻结界面；测试里同步执行才能
+    在 accept()/_connect() 返回后立即断言产物。
+    """
+    from cloudprism.gui.init_wizard import InitWizard
+    from cloudprism.gui.quick_connect import QuickConnectDialog
+
+    monkeypatch.setattr(InitWizard, "sync_ops", True)
+    monkeypatch.setattr(QuickConnectDialog, "sync_ops", True)

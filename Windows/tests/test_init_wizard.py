@@ -11,6 +11,8 @@ from cloudprism.core.vault_manager import VaultError, VaultManager
 from cloudprism.gui.init_wizard import InitWizard
 from cloudprism.storage.local_backend import LocalFolderBackend
 
+from PySide6.QtWidgets import QLabel, QRadioButton, QWizard
+
 
 # ---------------------------------------------------------------------------
 # VaultManager（非 GUI）
@@ -116,6 +118,33 @@ class TestVaultManager:
         (root / "plain_dir").mkdir()  # 无 Marker 的普通目录不算密库
         paths = sorted(v["path"] for v in vm.list_vaults())
         assert paths == ["", "backup"]
+
+    def test_create_vault_with_recovery_roundtrip(self, tmp_path):
+        """一次性建库带恢复码：主密码与恢复码均可开库（子目录位置）。"""
+        root = tmp_path / "b"; root.mkdir()
+        vm = VaultManager(LocalFolderBackend(root))
+        meta, code = vm.create_vault_with_recovery(
+            "pw123", filename_enc=True, name="新库", vault_path="work",
+        )
+        assert len(code) == constants.RECOVERY_CODE_LEN
+        assert meta.has_recovery is True
+        assert meta.name == "新库"
+        # 主密码开库（子目录位置）仍带恢复块
+        opened = vm.open_vault("pw123", "work")
+        assert opened is not None
+        assert opened.has_recovery is True
+        # 凭恢复码开库还原主密码（含分组/小写清洗）
+        meta2 = vm.open_vault_with_recovery(code, "work")
+        assert meta2 is not None
+        assert vm.recovered_password == "pw123"
+
+    def test_create_vault_with_recovery_on_existing_raises(self, tmp_path):
+        """一次性建库：目标已有密库同样抛 VaultError（防覆盖）。"""
+        root = tmp_path / "b"; root.mkdir()
+        vm = VaultManager(LocalFolderBackend(root))
+        vm.create_vault_with_recovery("pw", filename_enc=False)
+        with pytest.raises(VaultError):
+            vm.create_vault_with_recovery("pw2", filename_enc=False)
 
 
 class TestRecoveryCode:
@@ -308,6 +337,23 @@ class TestInitWizardNewVault:
         assert w.metadata is None
         assert "失败" in w.error_label_text or w.error_label_text
 
+    def test_new_vault_generates_recovery_code(self, qtbot, tmp_path):
+        """新建即生成恢复码：元信息 has_recovery=True 且落盘生效。"""
+        w = _make_wizard(qtbot)
+        root = _setup_local_backend(w, tmp_path)
+        w.page_password.pw_edit.setText("pw")
+        w.page_password.confirm_edit.setText("pw")
+        w.page_enc.radio_off.setChecked(True)
+        w.accept()
+        assert w.metadata is not None
+        assert w.recovery_code
+        assert len(w.recovery_code) == constants.RECOVERY_CODE_LEN
+        assert w.metadata.has_recovery is True
+        # 落盘验证：重开后恢复块仍在
+        reopened = VaultManager(LocalFolderBackend(root)).open_vault("pw")
+        assert reopened is not None
+        assert reopened.has_recovery is True
+
 
 class TestInitWizardConnect:
     """连接已有Mi库向导流程。"""
@@ -390,6 +436,30 @@ class TestInitWizardConnect:
         w.page_backend_cfg.initializePage()
         assert not w.page_backend_cfg.location_edit.isHidden()
         assert not w.page_backend_cfg.location_label.isHidden()
+
+
+# ---------------------------------------------------------------------------
+# 新增：向导字体统一（ModernStyle + 14px 像素字体）
+# ---------------------------------------------------------------------------
+
+
+class TestWizardFonts:
+    """向导观感与主界面一致：样式与字号。"""
+
+    def test_wizard_uses_modern_style(self, qtbot):
+        w = _make_wizard(qtbot)
+        assert w.wizardStyle() == QWizard.WizardStyle.ModernStyle
+
+    def test_wizard_body_fonts_14px(self, qtbot):
+        """页内标签/单选钮/输入框统一 14px 像素字体。"""
+        w = _make_wizard(qtbot)
+        labels = w.page_backend_cfg.findChildren(QLabel)
+        assert labels
+        assert all(l.fontInfo().pixelSize() == 14 for l in labels)
+        radios = w.page_backend_type.findChildren(QRadioButton)
+        assert radios
+        assert all(r.fontInfo().pixelSize() == 14 for r in radios)
+        assert w.page_password.pw_edit.fontInfo().pixelSize() == 14
 
 
 # ---------------------------------------------------------------------------

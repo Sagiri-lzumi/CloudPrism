@@ -33,6 +33,7 @@ from cloudprism.core.thumbnail import ThumbnailCache
 from cloudprism.core.backend_factory import describe_backend
 from cloudprism.core.vault_manager import VaultManager
 from cloudprism.crypto.filename import FilenameCipher
+from cloudprism.gui.busy_op import run_busy
 from cloudprism.gui.dir_tree_model import DirTreeModel
 from cloudprism.gui.init_wizard import InitWizard, RecoveryCodeDialog
 from cloudprism.gui.main_window import MainWindow
@@ -85,6 +86,12 @@ class AppController(QObject):
 
         # 目录树模型
         self._tree_model: DirTreeModel | None = None
+
+        # 子目录密库的根前缀（连接后由 _apply_connection 填充）
+        self._vault_root: str = ""
+        # 恢复码生成后台线程引用（防 GC）；测试可置 _sync_vault_ops 同步执行
+        self._recovery_thread = None
+        self._sync_vault_ops = False
 
         # 接入设置持久化存储（须在自动锁定定时器同步前完成载入）
         self._store = SettingsStore()
@@ -251,8 +258,9 @@ class AppController(QObject):
         """弹出初始化向导；成功后装载后端与目录树。"""
         wizard = InitWizard(self.window, store=self._store)
         wizard.finishedSetup.connect(lambda: self._apply_setup(wizard))
-        if wizard.exec() == InitWizard.Accepted and wizard.metadata is not None:
-            self._apply_setup(wizard)
+        # 建库/开库完成（可能异步）时经 finishedSetup 应用一次即可，
+        # exec 返回后不再重复应用，避免恢复码弹窗与装载动作执行两次
+        wizard.exec()
 
     def _apply_setup(self, wizard: InitWizard) -> None:
         """应用向导产出并记录最近密库。"""
@@ -278,17 +286,29 @@ class AppController(QObject):
         )
         if not ok or not password:
             return
-        try:
-            code, meta = VaultManager(self.backend).generate_recovery_code(
-                password, self._vault_root
-            )
-        except Exception as exc:  # noqa: BLE001
-            box = FluentMessageBox("生成恢复码失败", str(exc), self.window)
+
+        vm = VaultManager(self.backend)
+        vault_root = self._vault_root
+
+        def op():
+            # 3 次数秒级派生，后台执行避免冻结界面
+            return vm.generate_recovery_code(password, vault_root)
+
+        def on_done(result):
+            code, meta = result
+            self.metadata = meta
+            self.window.settings_page.update_recovery_state(True)
+            RecoveryCodeDialog(code, parent=self.window).exec()
+
+        def on_error(msg: str):
+            box = FluentMessageBox("生成恢复码失败", msg, self.window)
             box.exec()
-            return
-        self.metadata = meta
-        self.window.settings_page.update_recovery_state(True)
-        RecoveryCodeDialog(code, parent=self.window).exec()
+
+        # 持有线程引用防 GC；测试可置 _sync_vault_ops 走同步路径
+        self._recovery_thread = run_busy(
+            op, on_done, on_error,
+            parent=self.window, sync=self._sync_vault_ops,
+        )
 
     def _on_sync_folder(self, local_dir: str) -> None:
         """文件夹同步：对比索引生成计划，新增/变更文件走统一队列。"""

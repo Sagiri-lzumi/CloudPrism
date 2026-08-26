@@ -38,6 +38,7 @@ from cloudprism.core.backend_factory import build_backend_from_params
 from cloudprism.core.session import Session
 from cloudprism.core.vault_manager import VaultManager
 from cloudprism.gui.baidu_auth import BaiduAuthDialog
+from cloudprism.gui.busy_op import run_busy
 from cloudprism.gui.theme import semantic_color
 from cloudprism.storage.backend import StorageBackend
 from cloudprism.storage.baidu_backend import (
@@ -554,16 +555,53 @@ class RecoveryCodeDialog(QDialog):
         )
 
 
+class _OpError(Exception):
+    """向导重操作的业务错误：消息直接面向用户展示。"""
+
+
+def _unify_wizard_fonts(wizard) -> None:
+    """统一向导字体，与主界面 Fluent 观感对齐（同 _unify_expand_font 惯例）。
+
+    Windows 原生向导样式下标题/正文走系统字体，与应用级 pt 字号脱节；
+    此处对向导与每页显式设定像素级 14px 字体（widget 级），
+    未被继承链覆盖的 QLabel / QRadioButton / 输入框经 fontInfo 探测补设。
+    """
+    font = QFont()
+    # 字体族回退链：首选 Segoe UI Variable，缺失时回退到中文友好字体
+    font.setFamilies(["Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI"])
+    font.setPixelSize(14)  # 与库卡片/展开区字号一致
+    wizard.setFont(font)
+    for page_id in wizard.pageIds():
+        page = wizard.page(page_id)
+        if page is None:
+            continue
+        page.setFont(font)
+        # 逐类型探测（本版本 PySide6 的 findChildren 不支持元组参数）
+        widgets = []
+        for cls in (QLabel, QRadioButton, LineEdit):
+            widgets.extend(page.findChildren(cls))
+        for w in widgets:
+            if w.fontInfo().pixelSize() != 14:
+                w.setFont(font)
+
+
 class InitWizard(QWizard):
     """初始化向导。"""
 
     # 完成信号（供 MainWindow 刷新界面）
     finishedSetup = Signal()
 
+    # 建库/开库含数秒级 PBKDF2 派生，默认后台线程执行避免冻结界面；
+    # 测试置 True 走同步路径（无需事件循环）
+    sync_ops = False
+
     def __init__(self, parent=None, store=None):
         super().__init__(parent)
         self.setWindowTitle("CloudPrism 初始化")
         self.setOption(QWizard.NoBackButtonOnStartPage)
+        # Windows 默认 AeroStyle 向导走原生字体，与主界面不匹配；
+        # 改 ModernStyle 并统一 14px 像素字体（见 _unify_wizard_fonts）
+        self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
 
         # 设置持久化存储（回填上次连接参数 / 保存本次选择）
         self.store = store
@@ -596,6 +634,8 @@ class InitWizard(QWizard):
         self.setPage(PAGE_FILENAME_ENC, self.page_enc)
         # 立即定位到首页（show() 之前 currentPage 为空，便于程序化导航/测试）
         self.restart()
+        # 页面就绪后统一字体（须在页实例创建后执行）
+        _unify_wizard_fonts(self)
 
     # ------------------------------------------------------------------
     # 模式与结果
@@ -611,8 +651,19 @@ class InitWizard(QWizard):
         # 用副标题位展示错误，避免模态对话框阻塞测试
         self.page_password.setSubTitle(msg)
 
+    def _set_busy(self, busy: bool) -> None:
+        """后台建库/开库期间锁定导航按钮并提示耗时原因。"""
+        for role in (QWizard.WizardButton.NextButton, QWizard.WizardButton.FinishButton):
+            btn = self.button(role)
+            if btn is not None:
+                btn.setEnabled(not busy)
+        if busy:
+            self.page_password.setSubTitle(
+                "正在处理，密码校验约需数秒，请稍候…"
+            )
+
     def accept(self) -> None:  # noqa: D102
-        """完成：执行新建或连接。"""
+        """完成：执行新建或连接（重操作在后台线程，界面不冻结）。"""
         try:
             backend = self.page_backend_cfg.build_backend()
         except Exception as e:
@@ -625,63 +676,73 @@ class InitWizard(QWizard):
         self.vault_path = (
             self.page_backend_cfg.location_edit.text().strip().strip("/")
         )
+        is_new = self.is_new_mode()
+        filename_enc = self.page_enc.radio_on.isChecked()
+        vault_name = self.page_password.name_edit.text().strip()
+        recovery = self.page_password.recovery_edit.text().strip()
 
-        if self.is_new_mode():
-            # 新建Mi库（可选携带自定义名称与密库位置）
-            filename_enc = self.page_enc.radio_on.isChecked()
+        def op():
+            """后台重操作：建库/开库（含数秒级 PBKDF2 派生）。"""
             try:
-                meta = vm.create_vault(
-                    pw,
-                    filename_enc,
-                    name=self.page_password.name_edit.text().strip(),
-                    vault_path=self.vault_path,
-                )
-            except Exception as e:
-                self._error(f"新建Mi库失败：{e}")
-                return
-            # 新建即生成恢复码（失败不阻断建库，后续可在设置页补生成）
-            try:
-                code, meta = vm.generate_recovery_code(pw, self.vault_path)
-                self.recovery_code = code
-            except Exception:  # noqa: BLE001
-                self.recovery_code = ""
-        else:
-            # 连接已有Mi库（主密码或恢复码二选一，均按填写的位置查找）
-            recovery = self.page_password.recovery_edit.text().strip()
-            if recovery:
-                meta = vm.open_vault_with_recovery(recovery, self.vault_path)
-                if meta is None:
-                    self._error("恢复码无效，或该位置不存在带恢复码的Mi库")
-                    return
-                pw = vm.recovered_password or pw
-            else:
+                if is_new:
+                    # 一次性建库并生成恢复码（派生 2 次，省掉复核重传）
+                    meta, code = vm.create_vault_with_recovery(
+                        pw, filename_enc, name=vault_name,
+                        vault_path=self.vault_path,
+                    )
+                    return meta, pw, code
+                if recovery:
+                    meta = vm.open_vault_with_recovery(recovery, self.vault_path)
+                    if meta is None:
+                        raise _OpError("恢复码无效，或该位置不存在带恢复码的Mi库")
+                    return meta, vm.recovered_password or pw, ""
                 meta = vm.open_vault(pw, self.vault_path)
                 if meta is None:
                     # 区分"位置无密库"与"密码错误"，避免误导性报错
                     if not vm.has_vault(self.vault_path):
-                        self._error("该位置不存在Mi库，请检查密库位置")
-                    else:
-                        self._error("主密码错误，请重试")
-                    return
-
-        self.backend = backend
-        self.metadata = meta
-        self.session = Session(pw)
-
-        # 保存本次连接参数（密码不落盘）
-        if self.store is not None:
-            self.store.set_backend_type(self.backend_type)
-            if self.backend_type == "local":
-                self.store.set_local_dir(
-                    self.page_backend_cfg.local_dir_edit.text().strip()
-                )
-            elif self.backend_type == "webdav":
-                self.store.set_webdav_url(
-                    self.page_backend_cfg.webdav_url_edit.text().strip()
-                )
-                self.store.set_webdav_user(
-                    self.page_backend_cfg.webdav_user_edit.text().strip()
+                        raise _OpError("该位置不存在Mi库，请检查密库位置")
+                    raise _OpError("主密码错误，请重试")
+                return meta, pw, ""
+            except _OpError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                raise _OpError(
+                    f"新建Mi库失败：{e}" if is_new else f"连接失败：{e}"
                 )
 
-        self.finishedSetup.emit()
-        super().accept()
+        def on_done(result):
+            meta, final_pw, code = result
+            self._set_busy(False)
+            self.metadata = meta
+            self.recovery_code = code
+            self.backend = backend
+            self.session = Session(final_pw)
+
+            # 保存本次连接参数（密码不落盘）
+            if self.store is not None:
+                self.store.set_backend_type(self.backend_type)
+                if self.backend_type == "local":
+                    self.store.set_local_dir(
+                        self.page_backend_cfg.local_dir_edit.text().strip()
+                    )
+                elif self.backend_type == "webdav":
+                    self.store.set_webdav_url(
+                        self.page_backend_cfg.webdav_url_edit.text().strip()
+                    )
+                    self.store.set_webdav_user(
+                        self.page_backend_cfg.webdav_user_edit.text().strip()
+                    )
+
+            self.finishedSetup.emit()
+            super(InitWizard, self).accept()
+
+        def on_error(msg: str):
+            self._set_busy(False)
+            self._error(msg or "未知错误")
+
+        self._set_busy(True)
+        # 同步模式（测试）原地执行；异步模式持有线程引用防 GC，
+        # 完成回调在事件循环内触发，exec() 会在其后返回，引用不提前失效
+        self._op_thread = run_busy(
+            op, on_done, on_error, parent=self, sync=self.sync_ops,
+        )
