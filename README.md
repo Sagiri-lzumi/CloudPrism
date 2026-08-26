@@ -1,6 +1,5 @@
 # CloudPrism
 
-[![Python](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)](https://github.com/Sagiri-lzumi/CloudPrism)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-green.svg)](LICENSE)
 
@@ -12,92 +11,46 @@ This solution uses cloud storage as the medium, with local devices handling encr
 
 ## ✨ 核心特性
 
-- **端到端加密**：文件上传前在本地加密、下载后在本地解密，云端（网盘/服务器）仅存密文
-- **流式解密播放**：视频/音频无需整文件下载，边解密边播放；图片、文本即点即预览
-- **多存储后端**：本地文件夹、WebDAV，以及预留的百度网盘接入（统一 `StorageBackend` 接口，可插拔扩展）
-- **可选文件名加密**：密库初始化时可开启，远端目录结构同样不可见
-- **快速连接**：最近密库记录（上限 8 条），双击一键重连，仅输一次主密码，免重走初始化向导
-- **密码零落盘**：主密码仅存内存、退出清零；任何配置与记录均不持久化密码
+- **端到端加密**：文件在本地加密后才上传，下载后在本地解密，云端（网盘/服务器）永远只存密文
+- **流式播放**：视频、音频无需整文件下载即可边解密边播放；图片、文本即点即预览
+- **多存储位置**：支持本地文件夹与 WebDAV 服务器，百度网盘接入预留中
+- **可选文件名加密**：初始化密库时可开启，连远端目录结构也完全不可见
+- **快速重连**：最近使用的密库会自动记录，双击即可一键重连，只需输入一次主密码
+- **密码零落盘**：主密码仅存在内存中，退出即清零，任何地方都不会保存你的密码
 
-## 🔐 安全模型
+## 🔐 安全设计
 
-| 环节 | 设计 |
-| --- | --- |
-| 密钥派生 | 主密码经 PBKDF2（高迭代 + 随机 Salt）派生，结果用完即弃 |
-| 文件加密 | AES-CTR 流式加密，支持任意字节区间的随机访问解密 |
-| 完整性 | 密库元信息（Vault Marker）使用 AES-GCM 保护，篡改即校验失败 |
-| 主密码 | 仅驻内存，退出时清零；不落盘、不上传 |
-| 日志 | 全链路脱敏，不输出密码、密钥与 Salt |
+- 主密码经高强度密钥派生算法（PBKDF2 + 随机盐）处理，密钥用完即弃
+- 文件采用 AES 流式加密，支持任意位置的随机访问解密
+- 密库元信息经 AES-GCM 认证加密，任何篡改都会立即被发现
+- 日志全程脱敏，不会记录密码、密钥等敏感信息
 
-密库以存储后端根目录的隐藏文件 `.cloudprism_vault` 为元信息入口，连接时下载并用主密码校验。
+## 🖥️ 界面一览
 
-## 🖥️ Windows 客户端
+仿 IDE 风格的三栏布局桌面界面：
 
-基于 **PySide6** 的 IDE 风格桌面客户端：
-
-- 三栏布局：活动栏 → 侧面板（文件 / 传输 / 密库 / 设置）→ 预览区
-- 文件树浏览、上传（支持文件夹）、下载、重命名、删除、拖放
-- 传输队列实时进度；密库信息页展示占用、文件数等统计
-- 初始化向导：后端类型选择 → 配置与测试连接 → 主密码 → 文件名加密开关
-
-## 📁 项目结构
-
-```
-CloudPrism/
-├── Windows/          # Windows 桌面客户端（PySide6，已实现）
-│   ├── src/cloudprism/
-│   │   ├── core/     # 加密、密库管理、会话、设置存储
-│   │   ├── storage/  # 存储后端（本地 / WebDAV / 百度网盘）
-│   │   ├── gui/      # 界面（主窗口、向导、快速连接、预览等）
-│   │   └── app.py    # 组合根与控制器
-│   └── tests/        # pytest 测试（323 项）
-├── Android/          # Android 客户端（规划中）
-└── Plan/             # 设计文档与协议规范
-```
+- **文件**：浏览密库中的目录树，支持上传（含文件夹）、下载、重命名、删除与拖放
+- **传输**：实时查看上传/下载队列与进度
+- **密库**：查看密库信息、最近连接记录，一键快速重连
+- **设置**：外观、传输、安全（自动锁定）等选项
 
 ## 🚀 快速开始
 
-环境要求：**Windows + Python ≥ 3.12**
+1. 从 [Release](https://github.com/Sagiri-lzumi/CloudPrism/tree/main/Release) 下载 `CloudPrism.exe` 并运行
+2. 首次启动会进入初始化向导：选择存储位置（本地文件夹 / WebDAV）→ 测试连接 → 设置主密码 → 选择是否加密文件名
+3. 完成后即可浏览、上传、下载密库中的文件，选中即可预览或播放
 
-```bash
-cd Windows
-
-# 安装运行依赖
-python -m pip install -r requirements.txt
-
-# 或安装含 GUI 与开发/测试依赖
-pip install .[gui,dev]
-
-# 启动客户端（首次启动将进入初始化向导）
-cloudprism
-```
-
-### 运行测试
-
-```bash
-cd Windows
-pytest        # 全量测试（323 通过 / 1 跳过）
-```
-
-### 打包发布
-
-使用 PyInstaller 双模式打包（spec 已配置图标与资源）：
-
-```bash
-# 目录模式：产物含 CloudPrism.exe + _internal
-python -m PyInstaller cloudprism.spec
-
-# 单文件模式：产物为独立 CloudPrism.exe
-python -m PyInstaller cloudprism_onefile.spec
-```
+> ⚠️ 请牢记你的主密码。它不会保存在任何地方，忘记后将**无法找回**密库中的数据。
+>
+> ⚠️ 文件名加密选项在密库创建后**无法中途修改**，请在初始化时谨慎选择。
 
 ## 🗺️ 路线图
 
-- [x] Windows 客户端：加密/解密、浏览、传输、流式播放、预览
-- [x] WebDAV 后端与测试连接验证
-- [x] 密库快速连接与最近记录
-- [ ] 百度网盘后端真实联调（开放平台凭证申请中）
-- [ ] Android 客户端（与 Windows 端共享同一套加密协议）
+- [x] Windows 客户端：加密浏览、上传下载、流式播放、文件预览
+- [x] WebDAV 后端支持
+- [x] 密库快速重连
+- [ ] 百度网盘后端接入
+- [ ] Android 客户端（与 Windows 端通用同一套加密格式）
 
 ## 📄 许可证
 
