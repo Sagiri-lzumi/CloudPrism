@@ -68,13 +68,14 @@ class TestVaultMarkerCreate:
         payload_len = struct.unpack(">I", data[64:68])[0]
         # 载荷从偏移 68 到末尾
         assert payload_len == len(data) - 68
-        # 内部明文 1+4+8+4 = 17 字节，GCM 不填充，密文 17 + 标签 16 = 33
-        assert payload_len == 17 + 16
+        # v2 内部明文 1+4+8+4+2（名称长度字段，空名称）= 19 字节，
+        # GCM 不填充，密文 19 + 标签 16 = 35
+        assert payload_len == 19 + 16
 
     def test_create_total_length(self, meta_enc_on, master_password):
-        """总长 = 前缀 68 + 载荷 33 = 101。"""
+        """总长 = 前缀 68 + 载荷 35 = 103（v2；空名称仍写长度字段）。"""
         data = VaultMarker.create(meta_enc_on, master_password)
-        assert len(data) == 101
+        assert len(data) == 103
 
 
 class TestVaultMarkerVerify:
@@ -175,3 +176,70 @@ class TestVaultMarkerGenerateMetadata:
         assert result is not None
         assert result.vault_id == meta.vault_id
         assert result.filename_enc is True
+
+
+class TestVaultMarkerName:
+    """用户自定义密库名称（v2 内部明文尾部字段）。"""
+
+    def test_name_roundtrip(self, master_password):
+        """名称随 Marker 加密保存，create/verify 往返一致。"""
+        meta = VaultMarker.generate_metadata(
+            filename_enc=False, name="我的网盘密库"
+        )
+        data = VaultMarker.create(meta, master_password)
+        result = VaultMarker.verify(data, master_password)
+        assert result is not None
+        assert result.name == "我的网盘密库"
+
+    def test_empty_name_default(self, master_password):
+        """未指定名称时 verify 返回空字符串。"""
+        meta = VaultMarker.generate_metadata(filename_enc=False)
+        data = VaultMarker.create(meta, master_password)
+        result = VaultMarker.verify(data, master_password)
+        assert result is not None
+        assert result.name == ""
+
+    def test_v1_legacy_file_compat(self, master_password):
+        """v1 旧文件（内部明文无名称字段）解析兼容：name 为空。
+
+        手工构造 v1 布局（17 字节内部明文）并 GCM 加密，
+        验证新版解析器向后兼容存量密库。
+        """
+        from Crypto.Cipher import AES
+
+        from cloudprism.crypto.kdf import Kdf
+
+        salt = b"\x44" * 16
+        iv = b"\x55" * 16
+        inner = (
+            bytes([0x00])                       # filename_enc 关
+            + struct.pack(">I", 1)             # protocol_version
+            + b"\x00" * constants.VAULT_RESERVED_LEN
+            + constants.VAULT_VERIFY_MAGIC      # 共 17 字节，无名称字段
+        )
+        key = Kdf.derive_key(master_password, salt)
+        cipher = AES.new(key, AES.MODE_GCM, nonce=iv)
+        ct, tag = cipher.encrypt_and_digest(inner)
+        payload = ct + tag
+        data = (
+            constants.VAULT_MAGIC
+            + struct.pack(">I", 1)             # v1 版本字段原样保留在明文前缀
+            + uuid.uuid4().bytes
+            + salt
+            + iv
+            + struct.pack(">I", len(payload))
+            + payload
+        )
+        result = VaultMarker.verify(data, master_password)
+        assert result is not None
+        assert result.name == ""
+        assert result.filename_enc is False
+
+    def test_name_over_limit_truncated(self, master_password):
+        """超过上限的名称在 create 时截断到字符上限。"""
+        long_name = "名" * (constants.VAULT_NAME_MAX_LEN + 10)
+        meta = VaultMarker.generate_metadata(filename_enc=False, name=long_name)
+        data = VaultMarker.create(meta, master_password)
+        result = VaultMarker.verify(data, master_password)
+        assert result is not None
+        assert result.name == "名" * constants.VAULT_NAME_MAX_LEN

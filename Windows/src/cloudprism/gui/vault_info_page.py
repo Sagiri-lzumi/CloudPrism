@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGraphicsOpacityEffect,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidgetItem,
     QVBoxLayout,
@@ -51,6 +52,7 @@ from qfluentwidgets import (
     StrongBodyLabel,
     SubtitleLabel,
     TitleLabel,
+    ToolButton,
     TransparentToolButton,
 )
 
@@ -179,6 +181,8 @@ class VaultInfoPage(QWidget):
     quickConnectRequested = Signal(dict)
     # 请求移除某条最近密库记录
     removeVaultRequested = Signal(dict)
+    # 请求修改当前密库名称（参数为新名称）
+    renameRequested = Signal(str)
     # 请求刷新信号
     refreshRequested = Signal()
     # 请求锁定密库信号
@@ -256,7 +260,19 @@ class VaultInfoPage(QWidget):
         basic_form.setVerticalSpacing(8)
 
         self._vault_name_label = QLabel("-", basic_card)
-        basic_form.addRow("库名称：", self._vault_name_label)
+        # 名称行：显示标签 + 编辑小按钮（修改后随 Vault Marker 加密保存）
+        name_row = QHBoxLayout()
+        name_row.setSpacing(6)
+        name_row.addWidget(self._vault_name_label)
+        self._rename_btn = ToolButton(FluentIcon.EDIT, basic_card)
+        self._rename_btn.setToolTip("修改密库名称")
+        self._rename_btn.setFixedSize(26, 26)
+        self._rename_btn.setIconSize(QSize(14, 14))
+        self._rename_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._rename_btn.clicked.connect(self._on_rename_clicked)
+        name_row.addWidget(self._rename_btn)
+        name_row.addStretch()
+        basic_form.addRow("库名称：", name_row)
 
         self._backend_type_label = QLabel("-", basic_card)
         basic_form.addRow("后端类型：", self._backend_type_label)
@@ -346,6 +362,20 @@ class VaultInfoPage(QWidget):
         self._cloud_size_label.setText(cloud_size)
         self._cache_size_label.setText(cache_size)
         self._file_count_label.setText(file_count)
+
+    def _on_rename_clicked(self) -> None:
+        """库名称编辑按钮：弹输入框收集新名称，非空且变化时发射信号。"""
+        current = self._vault_name_label.text()
+        # 去掉回退名的省略号作为输入初值，避免用户沿用
+        new_name, ok = QInputDialog.getText(
+            self,
+            "修改密库名称",
+            "新名称（随密库文件保存，最多 32 字符）：",
+            text=current.rstrip(".") if current.endswith("...") else current,
+        )
+        new_name = (new_name or "").strip()
+        if ok and new_name and new_name != current:
+            self.renameRequested.emit(new_name[:32])
 
     # ------------------------------------------------------------------
     # 最近密库记录卡片

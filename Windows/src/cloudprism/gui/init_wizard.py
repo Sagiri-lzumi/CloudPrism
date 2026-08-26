@@ -388,7 +388,7 @@ class BackendConfigPage(QWizardPage):
 
 
 class PasswordPage(QWizardPage):
-    """页 4：主密码输入（新建时含二次确认）。"""
+    """页 4：主密码输入（新建时含密库名称与二次确认）。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -396,6 +396,15 @@ class PasswordPage(QWizardPage):
         self.setSubTitle("主密码仅存内存，不落盘、不上传云端")
 
         lay = QVBoxLayout(self)
+
+        # 密库名称（仅新建模式显示）：随 Vault Marker 加密保存，后续可修改
+        self.name_label = QLabel("密库名称（可选）：", self)
+        self.name_edit = LineEdit(self)
+        self.name_edit.setPlaceholderText("例如：我的网盘密库")
+        self.name_edit.setMaxLength(32)
+        lay.addWidget(self.name_label)
+        lay.addWidget(self.name_edit)
+
         self.pw_edit = LineEdit(self)
         self.pw_edit.setEchoMode(LineEdit.Password)
         self.pw_edit.setPlaceholderText("输入主密码")
@@ -413,9 +422,11 @@ class PasswordPage(QWizardPage):
         lay.addStretch()
 
     def initializePage(self) -> None:
-        """根据模式显示/隐藏确认框。"""
+        """根据模式显示/隐藏名称框与确认框。"""
         wizard = self.wizard()
         is_new = wizard.is_new_mode()
+        self.name_label.setVisible(is_new)
+        self.name_edit.setVisible(is_new)
         self.confirm_label.setVisible(is_new)
         self.confirm_edit.setVisible(is_new)
 
@@ -527,10 +538,14 @@ class InitWizard(QWizard):
         vm = VaultManager(backend)
 
         if self.is_new_mode():
-            # 新建Mi库
+            # 新建Mi库（可选携带自定义名称）
             filename_enc = self.page_enc.radio_on.isChecked()
             try:
-                meta = vm.create_vault(pw, filename_enc)
+                meta = vm.create_vault(
+                    pw,
+                    filename_enc,
+                    name=self.page_password.name_edit.text().strip(),
+                )
             except Exception as e:
                 self._error(f"新建Mi库失败：{e}")
                 return

@@ -235,3 +235,37 @@ class TestMainWindow:
         assert sp._concurrent_spin is not None
         # 安全设置
         assert sp._auto_lock_combo is not None
+
+    def test_settings_page_vault_name_card(self, qtbot):
+        """设置页连接信息含密库名称卡，可经 update_connection_info 更新。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        sp = win.settings_page
+        assert sp._vault_name_card is not None
+        assert sp._vault_rename_btn is not None
+        sp.update_connection_info(
+            "本地文件夹", "D:/vault", False, vault_name="我的库"
+        )
+        assert sp._vault_name_label.text() == "我的库"
+        # 默认参数兼容：不传名称时回退占位符，既有签名不破坏
+        sp.update_connection_info("本地文件夹", "D:/vault", False)
+        assert sp._vault_name_label.text() == "-"
+
+    def test_settings_page_expand_font_unified(self, qtbot):
+        """二级展开区控件字体统一为 14px，与一级卡片观感对齐。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        sp = win.settings_page
+        # 展开区内嵌控件（均为展开卡子控件）经字体继承链应为 14px
+        for w in (sp._cache_limit_spin, sp._concurrent_spin, sp._max_cores_spin,
+                  sp._cache_path_edit, sp._baidu_appid_edit):
+            assert w.font().pixelSize() == 14, f"{type(w).__name__} 字体未统一"
+
+    def test_vault_info_page_rename_entry(self, qtbot):
+        """密库信息页库名称行含编辑按钮，update_info 更新名称显示。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        vip = win.vault_info_page
+        assert vip._rename_btn is not None
+        vip.update_info(vault_name="自定义名")
+        assert vip._vault_name_label.text() == "自定义名"

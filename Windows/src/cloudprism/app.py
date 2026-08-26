@@ -23,6 +23,7 @@ from qfluentwidgets import MessageBox as FluentMessageBox
 from cloudprism.core.session import Session
 from cloudprism.core.settings_store import SettingsStore
 from cloudprism.core.backend_factory import describe_backend
+from cloudprism.core.vault_manager import VaultManager
 from cloudprism.crypto.filename import FilenameCipher
 from cloudprism.gui.dir_tree_model import DirTreeModel
 from cloudprism.gui.init_wizard import InitWizard
@@ -42,6 +43,21 @@ def _human_size(n: int) -> str:
             return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
         size /= 1024
     return f"{n} B"
+
+
+def _vault_display_name(metadata, ellipsis: bool = False) -> str:
+    """密库显示名：用户自定义名称优先，否则回退 vault_id 前 8 位。
+
+    :param ellipsis: 回退名是否追加省略号（信息页长标识用）
+    """
+    if metadata is None:
+        return "-"
+    name = getattr(metadata, "name", "") or ""
+    if name.strip():
+        return name.strip()
+    vault_id_hex = metadata.vault_id.hex()
+    short = vault_id_hex[:8]
+    return short + "..." if ellipsis and len(vault_id_hex) > 8 else short
 
 
 class AppController(QObject):
@@ -105,12 +121,16 @@ class AppController(QObject):
         window.settings_page.fontSizeChanged.connect(self._on_font_size_changed)
         window.settings_page.autoLockChanged.connect(self._sync_lock_timer)
 
-        # 密库信息页信号（含最近密库快速连接/移除）
+        # 密库信息页信号（含最近密库快速连接/移除/重命名）
         window.vault_info_page.connectRequested.connect(self.show_init_wizard)
         window.vault_info_page.quickConnectRequested.connect(self._on_quick_connect)
         window.vault_info_page.removeVaultRequested.connect(self._on_remove_vault)
+        window.vault_info_page.renameRequested.connect(self._on_rename_vault)
         window.vault_info_page.refreshRequested.connect(self._refresh_vault_info)
         window.vault_info_page.lockRequested.connect(self._lock_vault)
+
+        # 设置页密库重命名请求（与密库页共用同一控制器槽）
+        window.settings_page.vaultRenameRequested.connect(self._on_rename_vault)
 
         # 文件树拖放信号
         window.file_tree.filesDropped.connect(self._on_files_dropped)
@@ -230,12 +250,13 @@ class AppController(QObject):
         # 更新状态栏
         self.window.set_connected(True)
 
-        # 更新设置页连接信息（友好显示名而非类名）
+        # 更新设置页连接信息（友好显示名而非类名；含自定义密库名称）
         backend_label, backend_path, _ = describe_backend(self.backend)
         self.window.settings_page.update_connection_info(
             backend_type=backend_label,
             backend_path=backend_path,
             filename_enc=self.metadata.filename_enc,
+            vault_name=_vault_display_name(self.metadata),
         )
         self.window.settings_page._refresh_cache_usage()
 
@@ -247,12 +268,11 @@ class AppController(QObject):
         if self.backend is None:
             return
         label, path, btype = describe_backend(self.backend)
-        vault_id_hex = self.metadata.vault_id.hex() if self.metadata else ""
         record = {
             "backend_type": btype,
             "label": label,
             "path": path,
-            "vault_name": vault_id_hex[:8] if vault_id_hex else "-",
+            "vault_name": _vault_display_name(self.metadata),
         }
         if btype == "webdav":
             # 仅存账号，密码绝不落盘
@@ -280,6 +300,35 @@ class AppController(QObject):
             self.window.vault_info_page.set_recent_vaults(
                 self._store.recent_vaults()
             )
+
+    def _on_rename_vault(self, new_name: str) -> None:
+        """修改当前密库名称：重新加密 Vault Marker 并覆盖上传。
+
+        名称随文件保存，跨设备跟随密库；失败时界面状态不变更。
+        """
+        if not self._require_vault():
+            return
+        new_name = (new_name or "").strip()
+        if not new_name:
+            return
+        try:
+            self.metadata = VaultManager(self.backend).rename_vault(
+                self.session.master_password, new_name
+            )
+        except Exception as e:  # noqa: BLE001
+            box = FluentMessageBox("修改名称失败", str(e), self.window)
+            box.exec()
+            return
+        # 成功后同步刷新信息页、设置页与最近记录（名称全局一致）
+        self._update_vault_info_page()
+        backend_label, backend_path, _ = describe_backend(self.backend)
+        self.window.settings_page.update_connection_info(
+            backend_type=backend_label,
+            backend_path=backend_path,
+            filename_enc=self.metadata.filename_enc,
+            vault_name=new_name,
+        )
+        self._remember_current_vault()
 
     # ------------------------------------------------------------------
     # 文件树选中 -> 预览
@@ -772,9 +821,8 @@ class AppController(QObject):
 
         self.window.vault_info_page.show_connected()
 
-        # 计算库名称（vault_id 截短）
-        vault_id_hex = self.metadata.vault_id.hex() if self.metadata else "-"
-        vault_name = vault_id_hex[:8] + "..." if len(vault_id_hex) > 8 else vault_id_hex
+        # 库名称：用户自定义名称优先，否则回退 vault_id 截短
+        vault_name = _vault_display_name(self.metadata, ellipsis=True)
 
         # 后端信息（友好显示名而非类名）
         backend_type, backend_path, _ = describe_backend(self.backend)

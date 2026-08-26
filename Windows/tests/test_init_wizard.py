@@ -7,7 +7,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from cloudprism import constants
-from cloudprism.core.vault_manager import VaultManager
+from cloudprism.core.vault_manager import VaultError, VaultManager
 from cloudprism.gui.init_wizard import InitWizard
 from cloudprism.storage.local_backend import LocalFolderBackend
 
@@ -64,6 +64,48 @@ class TestVaultManager:
         vm = VaultManager(LocalFolderBackend(root))
         assert vm.open_vault("pw") is None
 
+    def test_create_vault_with_name(self, tmp_path):
+        """新建：自定义名称随 Marker 加密保存。"""
+        root = tmp_path / "b"; root.mkdir()
+        vm = VaultManager(LocalFolderBackend(root))
+        meta = vm.create_vault("pw123", filename_enc=False, name="工作资料库")
+        assert meta.name == "工作资料库"
+        opened = vm.open_vault("pw123")
+        assert opened is not None
+        assert opened.name == "工作资料库"
+
+    def test_rename_vault_roundtrip(self, tmp_path):
+        """重命名：名称更新且 vault_id / 加密配置不变。"""
+        root = tmp_path / "b"; root.mkdir()
+        vm = VaultManager(LocalFolderBackend(root))
+        created = vm.create_vault("pw123", filename_enc=True, name="旧名")
+        renamed = vm.rename_vault("pw123", "新名称")
+        assert renamed.name == "新名称"
+        assert renamed.vault_id == created.vault_id
+        assert renamed.filename_enc is True
+        # 落盘后重新打开仍为新名称（名称随文件保存）
+        reopened = VaultManager(LocalFolderBackend(root)).open_vault("pw123")
+        assert reopened is not None
+        assert reopened.name == "新名称"
+        assert reopened.vault_id == created.vault_id
+
+    def test_rename_vault_wrong_password(self, tmp_path):
+        """重命名：错误密码抛 VaultError 且不改动云端数据。"""
+        root = tmp_path / "b"; root.mkdir()
+        vm = VaultManager(LocalFolderBackend(root))
+        vm.create_vault("pw123", filename_enc=False, name="原名")
+        with pytest.raises(VaultError):
+            vm.rename_vault("wrong", "新名")
+        # 云端名称未被破坏
+        assert vm.open_vault("pw123").name == "原名"
+
+    def test_rename_vault_no_vault(self, tmp_path):
+        """重命名：后端无Mi库抛 VaultError。"""
+        root = tmp_path / "b"; root.mkdir()
+        vm = VaultManager(LocalFolderBackend(root))
+        with pytest.raises(VaultError):
+            vm.rename_vault("pw", "任意名")
+
 
 # ---------------------------------------------------------------------------
 # InitWizard（GUI 流程）
@@ -115,6 +157,22 @@ class TestInitWizardNewVault:
         assert isinstance(w.backend, LocalFolderBackend)
         # 根目录已写入 Vault Marker
         assert (root / constants.VAULT_MARKER_NAME).is_file()
+
+    def test_new_vault_with_name(self, qtbot, tmp_path):
+        """新建：填写密库名称后写入 metadata。"""
+        w = _make_wizard(qtbot)
+        root = _setup_local_backend(w, tmp_path)
+        w.page_password.name_edit.setText("我的第一个库")
+        w.page_password.pw_edit.setText("pw")
+        w.page_password.confirm_edit.setText("pw")
+        w.page_enc.radio_off.setChecked(True)
+        w.accept()
+        assert w.metadata is not None
+        assert w.metadata.name == "我的第一个库"
+        # 落盘验证：重新打开同目录仍可读回名称（名称随文件保存）
+        reopened = VaultManager(LocalFolderBackend(root)).open_vault("pw")
+        assert reopened is not None
+        assert reopened.name == "我的第一个库"
 
     def test_new_vault_filename_enc_on(self, qtbot, tmp_path):
         """新建：开启文件名加密。"""
@@ -177,9 +235,10 @@ class TestInitWizardConnect:
         w.next()
         w.page_backend_cfg.local_dir_edit.setText(str(root))
         w.page_backend_cfg._test_passed = True
-        # 导航：后端配置页 -> 密码页
+        # 导航：后端配置页 -> 密码页（连接模式隐藏名称框与确认框）
         w.next()
         assert w.page_password.confirm_edit.isVisibleTo(w.page_password) is False
+        assert w.page_password.name_edit.isVisibleTo(w.page_password) is False
         w.page_password.pw_edit.setText(pw)
         w.accept()
         assert w.metadata is not None

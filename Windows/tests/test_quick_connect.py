@@ -222,3 +222,54 @@ def test_vault_info_page_card_double_click(qtbot):
     with qtbot.waitSignal(page.quickConnectRequested, timeout=1000) as blocker:
         card.mouseDoubleClickEvent(dbl)
     assert blocker.args[0]["backend_type"] == "local"
+
+
+def test_card_shows_custom_vault_name(qtbot):
+    """记录卡片显示自定义密库名称（非 vault_id 截短）。"""
+    from cloudprism.gui.vault_info_page import VaultInfoPage
+
+    page = VaultInfoPage()
+    qtbot.addWidget(page)
+    rec = dict(LOCAL_RECORD)
+    rec["vault_name"] = "工作资料库"
+    page.set_recent_vaults([rec])
+    card = page.card_at(0)
+    assert card is not None
+    assert card.name_label.text() == "工作资料库"
+
+
+def test_vault_info_page_rename_signal(qtbot, monkeypatch):
+    """库名称编辑按钮：输入框确认后发射重命名信号。"""
+    import cloudprism.gui.vault_info_page as vip_mod
+    from cloudprism.gui.vault_info_page import VaultInfoPage
+
+    page = VaultInfoPage()
+    qtbot.addWidget(page)
+    page.update_info(vault_name="旧名")
+
+    # 拦截模态输入框：模拟用户确认新名称（避免测试中弹窗阻塞）
+    monkeypatch.setattr(
+        vip_mod.QInputDialog, "getText",
+        staticmethod(lambda *a, **kw: ("新名称", True)),
+    )
+    with qtbot.waitSignal(page.renameRequested, timeout=1000) as blocker:
+        page._rename_btn.click()
+    assert blocker.args[0] == "新名称"
+
+
+def test_vault_info_page_rename_cancel_no_signal(qtbot, monkeypatch):
+    """输入框取消或名称未变时不发射信号。"""
+    import cloudprism.gui.vault_info_page as vip_mod
+    from cloudprism.gui.vault_info_page import VaultInfoPage
+
+    page = VaultInfoPage()
+    qtbot.addWidget(page)
+    page.update_info(vault_name="保持")
+    monkeypatch.setattr(
+        vip_mod.QInputDialog, "getText",
+        staticmethod(lambda *a, **kw: ("", False)),
+    )
+    fired = []
+    page.renameRequested.connect(lambda name: fired.append(name))
+    page._rename_btn.click()
+    assert fired == []

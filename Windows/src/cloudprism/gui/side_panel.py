@@ -12,10 +12,12 @@ import shutil
 import tempfile
 
 from PySide6.QtCore import Signal, Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFormLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidgetItem,
     QMessageBox,
@@ -50,6 +52,30 @@ from cloudprism.gui.dir_tree_model import DirTreeModel
 from cloudprism.gui.file_tree_view import FileTreeView
 from cloudprism.gui.theme import semantic_color
 from cloudprism.storage.baidu_backend import BaiduCredentialStore
+
+
+def _unify_expand_font(card) -> None:
+    """统一展开设置卡二级区的字体，与一级卡片观感对齐。
+
+    应用级字号为 pt 单位（可随设置项调节），而库卡片标题经样式表固定
+    14px；展开区原生控件若继承应用字体会显得偏大，故在卡片 ``view``
+    容器上显式设定像素级字体（widget 级，不受后续 app.setFont 影响），
+    子控件（输入框/按钮等）经字体继承链同步生效。
+    部分 QLabel 未设置 objectName 时字体解析不到 view 级字体，
+    另用 fontInfo 探测并逐个补设，确保展开区全部文字同字号。
+    """
+    font = QFont()
+    # 字体族回退链：首选 Segoe UI Variable，缺失时回退到中文友好字体
+    font.setFamilies(["Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI"])
+    font.setPixelSize(14)  # 与库卡片标题字号一致
+    card.view.setFont(font)
+    # 探测未被继承链覆盖的 QLabel（如 QFormLayout 行标签）并补设字体；
+    # 库自身带 objectName 的标签（titleLabel/contentLabel）由样式表接管，不动
+    for label in card.view.findChildren(QLabel):
+        if label.objectName() in ("titleLabel", "contentLabel"):
+            continue
+        if label.fontInfo().pixelSize() != 14:
+            label.setFont(font)
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +162,7 @@ class SettingsPage(QWidget):
     fontSizeChanged = Signal(int)    # 12 / 14 / 16 / 18
     reconnectRequested = Signal()    # 重新连接密库
     autoLockChanged = Signal()       # 自动锁定时长变更（供控制器同步定时器）
+    vaultRenameRequested = Signal(str)  # 修改当前密库名称（参数为新名称）
 
     # 默认缓存配置
     DEFAULT_CACHE_LIMIT_MB = 512
@@ -199,6 +226,21 @@ class SettingsPage(QWidget):
         # ---- 连接信息 ----
         conn_group = SettingCardGroup("连接信息", content)
 
+        # 密库名称（随 Vault Marker 加密保存，可修改）
+        self._vault_name_card = SettingCard(
+            FluentIcon.TAG, "密库名称", None, conn_group)
+        self._vault_name_label = QLabel("未连接", self._vault_name_card)
+        self._vault_rename_btn = PushButton("修改…", self._vault_name_card)
+        self._vault_rename_btn.setToolTip("名称随密库文件保存，跨设备可见")
+        self._vault_rename_btn.clicked.connect(self._on_vault_rename_clicked)
+        self._vault_name_card.hBoxLayout.addWidget(
+            self._vault_name_label, 0, Qt.AlignmentFlag.AlignRight)
+        self._vault_name_card.hBoxLayout.addSpacing(8)
+        self._vault_name_card.hBoxLayout.addWidget(
+            self._vault_rename_btn, 0, Qt.AlignmentFlag.AlignRight)
+        self._vault_name_card.hBoxLayout.addSpacing(16)
+        conn_group.addSettingCard(self._vault_name_card)
+
         self._backend_type_card = SettingCard(
             FluentIcon.LIBRARY, "后端类型", None, conn_group)
         self._backend_type_label = QLabel("未连接", self._backend_type_card)
@@ -252,6 +294,7 @@ class SettingsPage(QWidget):
         limit_lay.addWidget(self._cache_limit_spin)
         limit_lay.addStretch()
         cache_limit_card.addGroupWidget(limit_row)
+        _unify_expand_font(cache_limit_card)
         cache_group.addSettingCard(cache_limit_card)
 
         # 缓存位置（展开分组卡片：路径输入 + 浏览 / 占用 + 清除）
@@ -285,6 +328,7 @@ class SettingsPage(QWidget):
         clear_btn.clicked.connect(self._on_clear_cache)
         row2_lay.addWidget(clear_btn)
         cache_loc_card.addGroupWidget(cache_row2)
+        _unify_expand_font(cache_loc_card)
         cache_group.addSettingCard(cache_loc_card)
 
         lay.addWidget(cache_group)
@@ -322,6 +366,7 @@ class SettingsPage(QWidget):
         c_lay.addWidget(self._concurrent_spin)
         c_lay.addStretch()
         concurrent_card.addGroupWidget(concurrent_row)
+        _unify_expand_font(concurrent_card)
         transfer_group.addSettingCard(concurrent_card)
 
         lay.addWidget(transfer_group)
@@ -400,6 +445,7 @@ class SettingsPage(QWidget):
         baidu_form.addRow(action_row)
 
         baidu_card.addGroupWidget(baidu_body)
+        _unify_expand_font(baidu_card)
         baidu_group.addSettingCard(baidu_card)
 
         lay.addWidget(baidu_group)
@@ -424,6 +470,7 @@ class SettingsPage(QWidget):
         cores_lay.addWidget(self._max_cores_spin)
         cores_lay.addStretch()
         cores_card.addGroupWidget(cores_row)
+        _unify_expand_font(cores_card)
         perf_group.addSettingCard(cores_card)
 
         lay.addWidget(perf_group)
@@ -620,12 +667,29 @@ class SettingsPage(QWidget):
         backend_type: str,
         backend_path: str,
         filename_enc: bool,
+        vault_name: str = "-",
     ) -> None:
-        """更新连接信息显示。"""
+        """更新连接信息（含自定义密库名称）显示。"""
+        self._vault_name_label.setText(vault_name)
         self._backend_type_label.setText(backend_type)
         self._backend_path_label.setText(backend_path)
         self._filename_enc_label.setText("开" if filename_enc else "关")
         self._backend_path_label.setWordWrap(True)
+
+    def _on_vault_rename_clicked(self) -> None:
+        """密库名称修改按钮：弹输入框收集新名称，非空且变化时发射信号。"""
+        current = self._vault_name_label.text()
+        if current in ("", "-", "未连接"):
+            return
+        new_name, ok = QInputDialog.getText(
+            self,
+            "修改密库名称",
+            "新名称（随密库文件保存，最多 32 字符）：",
+            text=current,
+        )
+        new_name = (new_name or "").strip()
+        if ok and new_name and new_name != current:
+            self.vaultRenameRequested.emit(new_name[:32])
 
     @property
     def cache_limit_mb(self) -> int:

@@ -15,12 +15,14 @@ Vault Marker 文件（.cloudprism_vault）用于识别云盘是否被本系统�
 加密载荷（偏移 68，长度 = PayloadLen）：
     AES-256-GCM(内部明文) ‖ GCM_Tag[16]
 
-内部明文：
+内部明文（v2；v1 无名称字段，尾部到 VerifyMagic 即结束）：
     偏移 长度 字段
     0    1    FilenameEncryptionFlag   0x00/0x01
     1    4    ProtocolVersion          uint32 BE
     5    8    Reserved
     9    4    VerifyMagic              b"CPV\x00"
+    17   2    NameLen                  uint16 BE，名称 UTF-8 字节长（可 0）
+    19   N    Name                     UTF-8 编码的用户自定义密库名称
 
 密钥由主密码 + KDF Salt 派生（见 Kdf.derive_key）；GCM 认证标签即密码校验器，
 解密标签通过 = 密码正确，失败 = 密码错误。
@@ -51,6 +53,7 @@ class VaultMetadata:
     iv: bytes                  # 16 字节 GCM nonce
     filename_enc: bool         # 文件名加密开关
     protocol_version: int      # 协议版本，与加密文件 VERSION 一致
+    name: str = ""             # 用户自定义密库名称（v1 旧文件缺省为空）
 
 
 class VaultMarker:
@@ -73,20 +76,25 @@ class VaultMarker:
         # 1. 从主密码 + 盐派生 GCM 密钥
         key = Kdf.derive_key(master_password, meta.salt)
 
-        # 2. 构造内部明文：标志 + 协议版本 + 保留 + 校验魔数
+        # 2. 名称截断防御：字符数限上限，再按 UTF-8 编码（超长字节兜底截断）
+        name_bytes = meta.name[: constants.VAULT_NAME_MAX_LEN].encode("utf-8")
+
+        # 3. 构造内部明文：标志 + 协议版本 + 保留 + 校验魔数 + 名称字段（v2）
         inner = (
             bytes([0x01 if meta.filename_enc else 0x00])
             + struct.pack(">I", meta.protocol_version)
             + b"\x00" * constants.VAULT_RESERVED_LEN
             + constants.VAULT_VERIFY_MAGIC
+            + struct.pack(">H", len(name_bytes))
+            + name_bytes
         )
 
-        # 3. AES-256-GCM 加密（16 字节 nonce，两端一致，不截断）
+        # 4. AES-256-GCM 加密（16 字节 nonce，两端一致，不截断）
         cipher = AES.new(key, AES.MODE_GCM, nonce=meta.iv)
         ct, tag = cipher.encrypt_and_digest(inner)
         payload = ct + tag        # 密文 + 16 字节标签
 
-        # 4. 拼接明文前缀 + 加密载荷
+        # 5. 拼接明文前缀 + 加密载荷
         prefix = (
             VaultMarker.MAGIC
             + struct.pack(">I", meta.version)
@@ -154,9 +162,22 @@ class VaultMarker:
             # GCM 标签校验失败 = 密码错误
             return None
 
-        # 3. 解析内部明文
+        # 3. 解析内部明文（头部 17 字节；v2 尾部追加名称字段）
         filename_enc = inner[0] == 0x01
         protocol_version = struct.unpack(">I", inner[1:5])[0]
+
+        # 名称字段容错解析：v1 旧文件无剩余字节 → name=""；
+        # 长度字段越界/字节不足等异常布局同样回退空名称，不阻断校验
+        name = ""
+        tail = inner[17:]
+        if len(tail) >= 2:
+            name_len = struct.unpack(">H", tail[:2])[0]
+            name_raw = tail[2: 2 + name_len]
+            if len(name_raw) == name_len:
+                try:
+                    name = name_raw.decode("utf-8", errors="strict")
+                except UnicodeDecodeError:
+                    name = ""
 
         return VaultMetadata(
             version=version,
@@ -165,6 +186,7 @@ class VaultMarker:
             iv=iv,
             filename_enc=filename_enc,
             protocol_version=protocol_version,
+            name=name,
         )
 
     @staticmethod
@@ -175,6 +197,7 @@ class VaultMarker:
         vault_id: bytes | None = None,
         salt: bytes | None = None,
         iv: bytes | None = None,
+        name: str = "",
     ) -> VaultMetadata:
         """便捷生成 VaultMetadata，未指定参数时自动随机生成。
 
@@ -189,4 +212,5 @@ class VaultMarker:
             iv=iv or get_random_bytes(constants.IV_LEN),
             filename_enc=filename_enc,
             protocol_version=protocol_version,
+            name=name,
         )

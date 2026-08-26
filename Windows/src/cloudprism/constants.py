@@ -49,8 +49,13 @@ VAULT_MAGIC: bytes = b"CPRISM_VAULT"
 # Vault Marker 文件名；固定存放于云盘根目录，隐藏文件名减少误删
 VAULT_MARKER_NAME: str = ".cloudprism_vault"
 
-# Vault Marker 格式版本号（uint32，大端序）；当前为 1
-VAULT_VERSION: int = 1
+# Vault Marker 格式版本号（uint32，大端序）；当前为 2
+# v2：内部明文尾部追加用户自定义密库名称（name_len + name_utf8），
+# 解析端对无名称字段的 v1 文件保持兼容（name 置空）
+VAULT_VERSION: int = 2
+
+# 密库名称上限（字符数）；随 Vault Marker 加密保存，跨设备跟随密库
+VAULT_NAME_MAX_LEN: int = 32
 
 # Vault Marker 内部明文中的校验魔数；调试用，GCM 标签已提供完整性校验
 VAULT_VERIFY_MAGIC: bytes = b"CPV\x00"
