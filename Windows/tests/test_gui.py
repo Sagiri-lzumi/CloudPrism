@@ -125,10 +125,13 @@ class TestMainWindow:
     """主窗口骨架（IDE 风格）。"""
 
     def test_construct_menus(self, qtbot):
-        """无后端构造：菜单齐备（Mi库/文件/播放）。"""
+        """无后端构造：菜单齐备（Mi库/文件/播放）。
+
+        FluentWindow 无真实菜单栏，经 menuBar() 兼容层查询菜单结构。
+        """
         win = MainWindow()
         qtbot.addWidget(win)
-        titles = [m.text() for m in win.menuBar().actions()]
+        titles = [m.title() for m in win.menuBar().actions()]
         assert any("Mi库" in t for t in titles)
         assert any("文件" in t for t in titles)
         assert any("播放" in t for t in titles)

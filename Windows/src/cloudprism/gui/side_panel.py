@@ -1,6 +1,7 @@
-"""侧面板容器：文件树 / 传输队列 / 密库信息 / 设置。
+"""页面容器：文件树 / 传输队列 / 设置。
 
-QStackedWidget 容纳四个子面板，由活动栏（ActivityBar）切换。
+密库信息页见 vault_info_page.py。四个页面由主窗口的
+FluentWindow 导航栏切换（旧版 SidePanel 堆栈容器已退役）。
 设置页包含外观、连接信息、缓存管理、传输设置、安全设置。
 """
 
@@ -24,7 +25,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSpinBox,
-    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -34,55 +34,7 @@ from cloudprism.gui.baidu_guide import BaiduGuideDialog
 from cloudprism.gui.dir_tree_model import DirTreeModel
 from cloudprism.gui.file_tree_view import FileTreeView
 from cloudprism.gui.theme import semantic_color
-from cloudprism.gui.vault_info_page import VaultInfoPage
 from cloudprism.storage.baidu_backend import BaiduCredentialStore
-
-
-# ---------------------------------------------------------------------------
-# 侧面板容器
-# ---------------------------------------------------------------------------
-
-
-class SidePanel(QStackedWidget):
-    """侧面板：四页切换（文件树 / 传输队列 / 密库信息 / 设置）。"""
-
-    # 页面索引
-    PAGE_FILES = 0
-    PAGE_TRANSFERS = 1
-    PAGE_VAULTS = 2
-    PAGE_SETTINGS = 3
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-
-        # 文件树页
-        self.files_page = FilesPage()
-        self.addWidget(self.files_page)
-
-        # 传输队列页
-        self.transfers_page = TransfersPage()
-        self.addWidget(self.transfers_page)
-
-        # 密库信息页
-        self.vault_info_page = VaultInfoPage()
-        self.addWidget(self.vault_info_page)
-
-        # 设置页
-        self.settings_page = SettingsPage()
-        self.addWidget(self.settings_page)
-
-        # 默认显示文件页
-        self.setCurrentIndex(self.PAGE_FILES)
-
-    def show_page(self, page_id: str) -> None:
-        """按活动栏页面标识切换。"""
-        mapping = {
-            "files": self.PAGE_FILES,
-            "transfers": self.PAGE_TRANSFERS,
-            "vaults": self.PAGE_VAULTS,
-            "settings": self.PAGE_SETTINGS,
-        }
-        self.setCurrentIndex(mapping.get(page_id, self.PAGE_FILES))
 
 
 # ---------------------------------------------------------------------------
