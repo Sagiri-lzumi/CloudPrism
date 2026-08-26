@@ -61,6 +61,9 @@ from cloudprism.gui.theme import semantic_color
 # 记录卡片固定高度（比旧版列表行略高，容纳两行信息）
 CARD_HEIGHT = 84
 
+# 其他密库卡片固定高度（单行信息，比记录卡片矮）
+OTHER_CARD_HEIGHT = 56
+
 
 class RecentVaultCard(SimpleCardWidget):
     """最近密库记录卡片：自带动作（连接 / 移除），双击快速连接。
@@ -172,6 +175,40 @@ class RecentVaultCard(SimpleCardWidget):
         return anim
 
 
+class OtherVaultCard(CardWidget):
+    """同后端其他密库卡片：显示密库位置（路径），提供连接入口。
+
+    连接时复用当前后端，仅需目标密库的主密码（控制器侧弹输入框）。
+    """
+
+    # 请求连接该密库（参数为密库位置路径，根密库为 ""）
+    connectClicked = Signal(str)
+
+    def __init__(self, vault_path: str, parent=None) -> None:
+        super().__init__(parent)
+        self.vault_path = vault_path
+        self.setFixedHeight(OTHER_CARD_HEIGHT)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(16, 10, 16, 10)
+        lay.setSpacing(12)
+
+        icon = IconWidget(self)
+        icon.setIcon(FluentIcon.LIBRARY)
+        icon.setFixedSize(24, 24)
+        lay.addWidget(icon, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        label = BodyLabel(vault_path or "根目录", self)
+        lay.addWidget(label, 1)
+
+        btn = PushButton("连接", self)
+        btn.setFixedWidth(76)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(lambda: self.connectClicked.emit(self.vault_path))
+        lay.addWidget(btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.connect_btn = btn  # 测试辅助入口
+
+
 class VaultInfoPage(QWidget):
     """密库信息页。"""
 
@@ -183,6 +220,8 @@ class VaultInfoPage(QWidget):
     removeVaultRequested = Signal(dict)
     # 请求修改当前密库名称（参数为新名称）
     renameRequested = Signal(str)
+    # 请求连接本后端的其他密库（参数为密库位置路径）
+    connectOtherVaultRequested = Signal(str)
     # 请求刷新信号
     refreshRequested = Signal()
     # 请求锁定密库信号
@@ -308,6 +347,17 @@ class VaultInfoPage(QWidget):
 
         info_lay.addWidget(storage_card)
 
+        # 本后端的其他密库（子目录 Marker 扫描；无其他密库时整块隐藏）
+        self._other_title = SubtitleLabel("本后端的其他密库", self._info_widget)
+        self._other_container = QWidget(self._info_widget)
+        self._other_lay = QVBoxLayout(self._other_container)
+        self._other_lay.setContentsMargins(0, 0, 0, 0)
+        self._other_lay.setSpacing(8)
+        info_lay.addWidget(self._other_title)
+        info_lay.addWidget(self._other_container)
+        self._other_title.setVisible(False)
+        self._other_container.setVisible(False)
+
         # 操作按钮
         btn_row = QHBoxLayout()
         refresh_btn = PushButton("刷新信息", self._info_widget)
@@ -362,6 +412,33 @@ class VaultInfoPage(QWidget):
         self._cloud_size_label.setText(cloud_size)
         self._cache_size_label.setText(cache_size)
         self._file_count_label.setText(file_count)
+
+    def set_other_vaults(self, vaults: list[dict]) -> None:
+        """填充本后端的其他密库列表（调用方应已排除当前连接的密库）。
+
+        每项为 {path, vault_id}；名称需打开后才能解密，卡片先显示路径。
+        """
+        while self._other_lay.count():
+            item = self._other_lay.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        for v in vaults:
+            card = OtherVaultCard(v.get("path", ""), self._other_container)
+            card.connectClicked.connect(self.connectOtherVaultRequested.emit)
+            self._other_lay.addWidget(card)
+        has = bool(vaults)
+        self._other_title.setVisible(has)
+        self._other_container.setVisible(has)
+
+    def other_vault_cards(self) -> list[OtherVaultCard]:
+        """当前展示的其他密库卡片列表（测试辅助）。"""
+        cards: list[OtherVaultCard] = []
+        for i in range(self._other_lay.count()):
+            w = self._other_lay.itemAt(i).widget()
+            if isinstance(w, OtherVaultCard):
+                cards.append(w)
+        return cards
 
     def _on_rename_clicked(self) -> None:
         """库名称编辑按钮：弹输入框收集新名称，非空且变化时发射信号。"""

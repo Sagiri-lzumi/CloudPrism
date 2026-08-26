@@ -188,13 +188,13 @@ class PreviewPanel(QStackedWidget):
         if file_type == "media":
             self.show_media(session, backend, remote_path)
         elif file_type == "image":
-            data = backend.download(remote_path)
+            data = self._decrypt_all(session, backend, remote_path)
             if data:
                 self.show_image(data)
             else:
-                self.show_info(filename, "-", "图片（下载失败）")
+                self.show_info(filename, "-", "图片（解密失败）")
         elif file_type == "text":
-            data = backend.download(remote_path)
+            data = self._decrypt_all(session, backend, remote_path)
             if data:
                 try:
                     text = data.decode("utf-8", errors="replace")
@@ -202,17 +202,30 @@ class PreviewPanel(QStackedWidget):
                 except Exception:
                     self.show_info(filename, _size_str(len(data)), "文本（解码失败）")
             else:
-                self.show_info(filename, "-", "文本（下载失败）")
+                self.show_info(filename, "-", "文本（解密失败）")
         else:
-            # 其他类型：显示文件信息
+            # 其他类型：显示文件信息（明文大小 = 密文大小 - 文件头长）
             size_str = "-"
             try:
-                data = backend.download(remote_path)
-                if data:
-                    size_str = _size_str(len(data))
+                from cloudprism.core.decryptor import Decryptor
+
+                dec = Decryptor(session, backend)
+                header = dec._fetch_header(remote_path)
+                plain_size = backend.get_size(remote_path) - header.header_length
+                size_str = _size_str(max(0, plain_size))
             except Exception:
                 pass
             self.show_info(filename, size_str, _ext_type(filename))
+
+    @staticmethod
+    def _decrypt_all(session, backend, remote_path: str) -> bytes:
+        """全量解密到内存（不落盘，接口本就为此设计）；失败返回空字节。"""
+        try:
+            from cloudprism.core.decryptor import Decryptor
+
+            return Decryptor(session, backend).decrypt_range_to_bytes(remote_path)
+        except Exception:
+            return b""
 
     def _stop_current_player(self) -> None:
         """停止并移除当前播放器组件。"""
