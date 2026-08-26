@@ -119,6 +119,15 @@ class TransferProgressBar(QWidget):
         """更新进度（0.0~1.0）。"""
         self._bar.setValue(int(progress * 100))
 
+    def update_aggregate(self, done: int, total: int) -> None:
+        """聚合进度（字节级）：并发任务下进度条反映全部任务总字节。
+
+        仅在进度条可见时生效（显示由 show_task 触发）。
+        """
+        if not self.isVisible() or total <= 0:
+            return
+        self._bar.setValue(min(100, int(done * 100 / total)))
+
     def task_finished(self, success: bool = True) -> None:
         """当前任务完成或失败；全部结束时短暂停留展示结果后隐藏。"""
         if success:

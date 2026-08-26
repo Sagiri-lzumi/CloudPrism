@@ -43,6 +43,8 @@ class FileTreeView(QTreeView):
         self.setDragDropMode(QAbstractItemView.DragDrop)
         self.setDropIndicatorShown(True)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        # 多选（Ctrl/Shift）：批量下载/删除等操作的入口
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
     # ------------------------------------------------------------------
     # 拖入：接受外部文件
@@ -100,6 +102,10 @@ class FileTreeView(QTreeView):
                 act_upload.triggered.connect(
                     lambda: self.uploadHereRequested.emit(remote)
                 )
+                act_dl_dir = menu.addAction("下载整个文件夹…")
+                act_dl_dir.triggered.connect(
+                    lambda: self.downloadRequested.emit(remote)
+                )
             else:
                 act_download = menu.addAction("下载…")
                 act_download.triggered.connect(
@@ -143,15 +149,17 @@ class FileTreeView(QTreeView):
         if not indexes:
             return
 
-        # 收集选中节点信息（路径复用 _remote_path）
+        # 收集选中节点信息（路径复用 _remote_path；目录也允许拖出）
         remote_paths: list[str] = []
         display_names: list[str] = []
+        seen: set[int] = set()
         for idx in indexes:
             if idx.column() != 0:
                 continue
             node = idx.internalPointer()
-            if node is None or node.is_dir:
-                continue  # 暂不支持拖出目录
+            if node is None or id(node) in seen:
+                continue  # 多选时同一节点可能重复出现，去重（目录拖出含子项）
+            seen.add(id(node))
             remote_paths.append(self._remote_path(node))
             display_names.append(node.name)
 

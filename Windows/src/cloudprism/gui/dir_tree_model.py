@@ -62,12 +62,15 @@ class DirTreeModel(QAbstractItemModel):
         backend: StorageBackend,
         name_decryptor: Callable[[str], str] | None = None,
         parent=None,
+        root: str = "",
     ) -> None:
         super().__init__(parent)
         self.backend = backend
         # 文件名解密回调（文件名加密开启时由上层注入）
         self._decryptor = name_decryptor
-        # 根节点（不可见），对应后端根目录
+        # 根前缀：子目录密库时为其路径，树以该目录为可见根；默认为后端根
+        self._root_path = root.strip("/")
+        # 根节点（不可见），对应密库根目录
         self._root = DirNode("", is_dir=True)
 
     # ------------------------------------------------------------------
@@ -146,9 +149,12 @@ class DirTreeModel(QAbstractItemModel):
         if node is None or node.loaded:
             return
         entries = self.backend.list_dir(self._remote_path(node))
-        # 过滤Mi库标识文件（系统内部文件，不在界面展示）
+        # 过滤系统内部文件（Mi库标识与同步索引，不在界面展示）
         entries = [
-            e for e in entries if e.name != constants.VAULT_MARKER_NAME
+            e for e in entries
+            if e.name not in (
+                constants.VAULT_MARKER_NAME, constants.SYNC_INDEX_NAME
+            )
         ]
         children = [
             DirNode(e.name, e.is_dir, e.size, parent=node) for e in entries
@@ -165,13 +171,16 @@ class DirTreeModel(QAbstractItemModel):
     # ------------------------------------------------------------------
 
     def _remote_path(self, node: DirNode) -> str:
-        """节点对应的后端相对路径。"""
+        """节点对应的后端相对路径（含子目录密库的根前缀）。"""
         parts: list[str] = []
         cur = node
         while cur is not None and cur is not self._root:
             parts.append(cur.name)
             cur = cur.parent
-        return "/".join(reversed(parts))
+        parts.reverse()
+        if self._root_path:
+            parts.insert(0, self._root_path)
+        return "/".join(parts)
 
     def display_name(self, backend_name: str) -> str:
         """后端名 -> 展示名：去 .cpenc，必要时解密。"""
@@ -190,6 +199,18 @@ class DirTreeModel(QAbstractItemModel):
     def node_for_index(self, index: QModelIndex) -> DirNode | None:
         """QModelIndex -> DirNode（供上层操作取路径）。"""
         return index.internalPointer() if index.isValid() else None
+
+    def dir_entries(self, node: DirNode | None) -> list[DirNode]:
+        """目录节点（None 为根）的子节点列表；未加载时返回空列表。
+
+        供网格视图枚举当前目录条目。
+        """
+        target = node if node is not None else self._root
+        return list(target.children or [])
+
+    def remote_path(self, node: DirNode) -> str:
+        """节点对应的后端相对路径（公开版）。"""
+        return self._remote_path(node)
 
     def reload(self) -> None:
         """整树重载（刷新）。"""

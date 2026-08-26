@@ -168,7 +168,7 @@ def start_transfer(
     返回对话框（模态由调用方决定）；线程随传输结束自动清理。
     注意：新代码应优先使用 start_transfer_bg()。
     """
-    worker, thread = _create_worker_and_thread(
+    worker, thread = create_worker_thread(
         kind, session, backend, local_path, remote_path, chunk, parent, max_workers
     )
 
@@ -178,6 +178,38 @@ def start_transfer(
     dialog._thread = thread  # noqa: SLF001
     thread.start()
     return dialog
+
+
+def create_worker_thread(
+    kind: str,
+    session: Session,
+    backend: StorageBackend,
+    local_path: str,
+    remote_path: str,
+    chunk: int = 1 << 20,
+    parent=None,
+    max_workers: int = 1,
+) -> tuple[TransferWorker, QThread]:
+    """创建 worker + 线程并接线，但不启动线程。
+
+    供 TransferQueue 等调度器使用：调用方自行决定启动时机，
+    并连接 worker 的 progress/finished/cancelled/error 信号。
+    """
+    thread = QThread(parent)
+    worker = TransferWorker(
+        kind, session, backend, local_path, remote_path,
+        chunk=chunk, max_workers=max_workers,
+    )
+    worker.moveToThread(thread)
+
+    # 生命周期：started -> run；结束信号 -> 线程退出；线程收尾 -> 对象清理
+    thread.started.connect(worker.run)
+    for sig in (worker.finished, worker.cancelled, worker.error):
+        sig.connect(thread.quit)
+    thread.finished.connect(worker.deleteLater)
+    thread.finished.connect(thread.deleteLater)
+
+    return worker, thread
 
 
 def start_transfer_bg(
@@ -195,36 +227,8 @@ def start_transfer_bg(
     调用方负责连接 worker 的 progress/finished/cancelled/error 信号。
     线程在传输结束后自动清理。
     """
-    worker, thread = _create_worker_and_thread(
+    worker, thread = create_worker_thread(
         kind, session, backend, local_path, remote_path, chunk, parent, max_workers
     )
     thread.start()
-    return worker, thread
-
-
-def _create_worker_and_thread(
-    kind: str,
-    session: Session,
-    backend: StorageBackend,
-    local_path: str,
-    remote_path: str,
-    chunk: int,
-    parent,
-    max_workers: int,
-) -> tuple[TransferWorker, QThread]:
-    """创建 worker + 线程并接线，不启动线程。"""
-    thread = QThread(parent)
-    worker = TransferWorker(
-        kind, session, backend, local_path, remote_path,
-        chunk=chunk, max_workers=max_workers,
-    )
-    worker.moveToThread(thread)
-
-    # 生命周期：started -> run；结束信号 -> 线程退出；线程收尾 -> 对象清理
-    thread.started.connect(worker.run)
-    for sig in (worker.finished, worker.cancelled, worker.error):
-        sig.connect(thread.quit)
-    thread.finished.connect(worker.deleteLater)
-    thread.finished.connect(thread.deleteLater)
-
     return worker, thread

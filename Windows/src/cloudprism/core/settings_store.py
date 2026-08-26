@@ -94,6 +94,41 @@ class SettingsStore:
     def set_chunk_index(self, index: int) -> None:
         self._set("transfer/chunk_index", index)
 
+    def concurrent_count(self) -> int:
+        """并发传输任务数上限（1~4），默认 2。"""
+        return self._get("transfer/concurrent", 2, int)
+
+    def set_concurrent_count(self, n: int) -> None:
+        self._set("transfer/concurrent", n)
+
+    def pending_transfers(self) -> list[dict]:
+        """上次未完成的传输记录（续传用）；密码与会话信息不落盘。
+
+        每条含 local/remote/name/direction/size/mtime；损坏时容错返回空。
+        """
+        raw = self._get("transfer/pending", "", str)
+        if not raw:
+            return []
+        try:
+            items = json.loads(raw)
+        except (ValueError, TypeError):
+            return []
+        return items if isinstance(items, list) else []
+
+    def set_pending_transfers(self, items: list[dict]) -> None:
+        """写入/清空未完成传输记录（空列表即清空）。"""
+        if items:
+            self._set("transfer/pending", json.dumps(items, ensure_ascii=False))
+        else:
+            self._set("transfer/pending", "")
+
+    def sync_dir(self) -> str:
+        """文件夹同步的本地目录；空串表示未设置。"""
+        return self._get("sync/local_dir", "", str)
+
+    def set_sync_dir(self, d: str) -> None:
+        self._set("sync/local_dir", d)
+
     def max_cores(self) -> int:
         """加密最大内核数，0 表示未设置（使用界面默认）。"""
         return self._get("perf/max_cores", 0, int)
