@@ -224,5 +224,8 @@ AGENTS.md
 # Plan
 Plan/
 
+# qfluentwidgets 运行时配置（qconfig 落盘产物，仅测试环境可能生成）
+config/
+
 # dist
 Release/

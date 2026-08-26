@@ -863,6 +863,16 @@ class AppController(QObject):
 def main() -> int:
     """程序入口。"""
     import os
+    import tempfile
+
+    # 重定向 qfluentwidgets 的 qconfig 落盘路径：库设置卡片默认把配置写到
+    # 工作目录的 config/config.json，会污染源码目录/打包目录；本应用自有
+    # 持久化（SettingsStore），此处仅把库配置引到临时目录
+    from qfluentwidgets import qconfig
+
+    qconfig.load(
+        os.path.join(tempfile.gettempdir(), "cloudprism_qfluent_config.json")
+    )
 
     app = QApplication(sys.argv)
     store = SettingsStore()
