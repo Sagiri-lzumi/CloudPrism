@@ -32,7 +32,12 @@ from PySide6.QtWidgets import (
 )
 
 # Fluent 组件（均继承自对应 Qt 原生控件，标准 API 全兼容）
-from qfluentwidgets import LineEdit, PrimaryPushButton, PushButton
+from qfluentwidgets import (
+    IndeterminateProgressBar,
+    LineEdit,
+    PrimaryPushButton,
+    PushButton,
+)
 
 from cloudprism.core.backend_factory import build_backend_from_params
 from cloudprism.core.session import Session
@@ -441,6 +446,12 @@ class PasswordPage(QWizardPage):
         self.recovery_edit.setPlaceholderText("XXXX-XXXX-XXXX-XXXX（留空则使用主密码）")
         lay.addWidget(self.recovery_label)
         lay.addWidget(self.recovery_edit)
+
+        # 后台建库/开库期间的不定进度条（PBKDF2 无百分比可报，
+        # 阶段文案由副标题展示；默认隐藏）
+        self.busy_bar = IndeterminateProgressBar(self)
+        self.busy_bar.setVisible(False)
+        lay.addWidget(self.busy_bar)
         lay.addStretch()
 
     def initializePage(self) -> None:
@@ -590,6 +601,9 @@ class InitWizard(QWizard):
 
     # 完成信号（供 MainWindow 刷新界面）
     finishedSetup = Signal()
+    # 后台建库/开库阶段进度（文案来自 vault_manager 的 progress_cb，
+    # 跨线程 emit 自动排队投递主线程）
+    progressed = Signal(str)
 
     # 建库/开库含数秒级 PBKDF2 派生，默认后台线程执行避免冻结界面；
     # 测试置 True 走同步路径（无需事件循环）
@@ -632,6 +646,8 @@ class InitWizard(QWizard):
         self.setPage(PAGE_BACKEND_CFG, self.page_backend_cfg)
         self.setPage(PAGE_PASSWORD, self.page_password)
         self.setPage(PAGE_FILENAME_ENC, self.page_enc)
+        # 阶段进度 -> 密码页副标题实时展示（避免数秒空白等待误以为卡死）
+        self.progressed.connect(self._on_progress)
         # 立即定位到首页（show() 之前 currentPage 为空，便于程序化导航/测试）
         self.restart()
         # 页面就绪后统一字体（须在页实例创建后执行）
@@ -651,12 +667,21 @@ class InitWizard(QWizard):
         # 用副标题位展示错误，避免模态对话框阻塞测试
         self.page_password.setSubTitle(msg)
 
+    def _on_progress(self, msg: str) -> None:
+        """阶段进度文案实时写入密码页副标题。"""
+        self.page_password.setSubTitle(msg)
+
     def _set_busy(self, busy: bool) -> None:
-        """后台建库/开库期间锁定导航按钮并提示耗时原因。"""
+        """后台建库/开库期间锁定导航按钮并展示不定进度条。
+
+        阶段文案经 progressed 信号逐条更新副标题；结束/出错时
+        隐藏进度条，副标题留给错误文案或恢复默认。
+        """
         for role in (QWizard.WizardButton.NextButton, QWizard.WizardButton.FinishButton):
             btn = self.button(role)
             if btn is not None:
                 btn.setEnabled(not busy)
+        self.page_password.busy_bar.setVisible(busy)
         if busy:
             self.page_password.setSubTitle(
                 "正在处理，密码校验约需数秒，请稍候…"
@@ -689,14 +714,21 @@ class InitWizard(QWizard):
                     meta, code = vm.create_vault_with_recovery(
                         pw, filename_enc, name=vault_name,
                         vault_path=self.vault_path,
+                        progress_cb=self.progressed.emit,
                     )
                     return meta, pw, code
                 if recovery:
-                    meta = vm.open_vault_with_recovery(recovery, self.vault_path)
+                    meta = vm.open_vault_with_recovery(
+                        recovery, self.vault_path,
+                        progress_cb=self.progressed.emit,
+                    )
                     if meta is None:
                         raise _OpError("恢复码无效，或该位置不存在带恢复码的Mi库")
                     return meta, vm.recovered_password or pw, ""
-                meta = vm.open_vault(pw, self.vault_path)
+                meta = vm.open_vault(
+                    pw, self.vault_path,
+                    progress_cb=self.progressed.emit,
+                )
                 if meta is None:
                     # 区分"位置无密库"与"密码错误"，避免误导性报错
                     if not vm.has_vault(self.vault_path):

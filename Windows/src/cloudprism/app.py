@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 import time
+from datetime import datetime
 
 from PySide6.QtCore import QEvent, QModelIndex, QObject, Signal, Qt, QTimer
 from PySide6.QtWidgets import (
@@ -58,6 +59,27 @@ def _human_size(n: int) -> str:
     return f"{n} B"
 
 
+def _format_connect_time(connected_at: datetime | None, now: datetime | None = None) -> str:
+    """连接时间显示：连接时刻 + 已连接时长（每秒刷新用）。
+
+    时长格式：不足 1 分钟显示秒；不足 1 小时显示分秒；
+    更长显示时分秒。未连接时返回横杠。
+    """
+    if connected_at is None:
+        return "-"
+    now = now or datetime.now()
+    secs = max(0, int((now - connected_at).total_seconds()))
+    h, rem = divmod(secs, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        dur = f"{h}小时{m}分{s}秒"
+    elif m:
+        dur = f"{m}分{s}秒"
+    else:
+        dur = f"{s}秒"
+    return f"{connected_at.strftime('%Y-%m-%d %H:%M:%S')} · 已连接 {dur}"
+
+
 def _vault_display_name(metadata, ellipsis: bool = False) -> str:
     """密库显示名：用户自定义名称优先，否则回退 vault_id 前 8 位。
 
@@ -76,6 +98,9 @@ def _vault_display_name(metadata, ellipsis: bool = False) -> str:
 class AppController(QObject):
     """应用控制器：连接窗口信号与各功能模块。"""
 
+    # 恢复码生成阶段进度（工作线程 emit，跨线程排队投递主线程更新 InfoBar）
+    recoveryProgress = Signal(str)
+
     def __init__(self, window: MainWindow) -> None:
         super().__init__(window)  # QObject 父级：随窗口销毁，支持事件过滤
         self.window = window
@@ -89,8 +114,13 @@ class AppController(QObject):
 
         # 子目录密库的根前缀（连接后由 _apply_connection 填充）
         self._vault_root: str = ""
+        # 连接时刻（信息页连接时间行每秒刷新；锁库时清空）
+        self._connected_at: datetime | None = None
         # 恢复码生成后台线程引用（防 GC）；测试可置 _sync_vault_ops 同步执行
         self._recovery_thread = None
+        # 其他密库连接后台线程引用（防 GC）；恢复码生成进度提示条
+        self._other_vault_thread = None
+        self._recovery_bar = None
         self._sync_vault_ops = False
 
         # 接入设置持久化存储（须在自动锁定定时器同步前完成载入）
@@ -125,6 +155,16 @@ class AppController(QObject):
         # 密库统计后台线程引用（防回收）
         self._stats_thread = None
         self._stats_seq = 0  # 统计序号：仅最新一次的结果回填界面
+        self._stats_running = False  # 防重叠：运行中不重复发起全库遍历
+
+        # 密库信息页定时刷新：整体信息 5 秒一次，连接时间每秒一次；
+        # 连接成功后启动，锁库时停止（仿 _lock_timer 惯例）
+        self._info_timer = QTimer(self.window)
+        self._info_timer.setInterval(5_000)
+        self._info_timer.timeout.connect(self._update_vault_info_page)
+        self._clock_timer = QTimer(self.window)
+        self._clock_timer.setInterval(1_000)
+        self._clock_timer.timeout.connect(self._tick_connect_time)
 
         # 性能监控
         self._perf = PerfMonitor(parent=window)
@@ -132,6 +172,8 @@ class AppController(QObject):
 
         # 信号接线
         window.initRequested.connect(self.show_init_wizard)
+        # 恢复码生成阶段进度（工作线程 -> 主线程提示条）
+        self.recoveryProgress.connect(self._on_recovery_progress)
         window.uploadRequested.connect(self.upload_file)
         window.downloadRequested.connect(self.download_file)
         window.playRequested.connect(self.play_file)
@@ -290,17 +332,30 @@ class AppController(QObject):
         vm = VaultManager(self.backend)
         vault_root = self._vault_root
 
+        # 进度提示：不自动关闭（duration=-1），完成/失败时手动关；
+        # 阶段文案经 recoveryProgress 信号从工作线程投递到本条更新
+        self._recovery_bar = InfoBar.info(
+            title="正在生成恢复码",
+            content="密钥派生约需数秒，请稍候…",
+            parent=self.window, position=InfoBarPosition.TOP_RIGHT, duration=-1,
+        )
+
         def op():
-            # 3 次数秒级派生，后台执行避免冻结界面
-            return vm.generate_recovery_code(password, vault_root)
+            # 3 次数秒级派生，后台执行避免冻结界面；阶段文案回传进度条
+            return vm.generate_recovery_code(
+                password, vault_root,
+                progress_cb=self.recoveryProgress.emit,
+            )
 
         def on_done(result):
+            self._close_recovery_bar()
             code, meta = result
             self.metadata = meta
             self.window.settings_page.update_recovery_state(True)
             RecoveryCodeDialog(code, parent=self.window).exec()
 
         def on_error(msg: str):
+            self._close_recovery_bar()
             box = FluentMessageBox("生成恢复码失败", msg, self.window)
             box.exec()
 
@@ -309,6 +364,17 @@ class AppController(QObject):
             op, on_done, on_error,
             parent=self.window, sync=self._sync_vault_ops,
         )
+
+    def _on_recovery_progress(self, msg: str) -> None:
+        """恢复码生成阶段文案 -> 进度提示条（主线程投递）。"""
+        if self._recovery_bar is not None:
+            self._recovery_bar.setContent(msg)
+
+    def _close_recovery_bar(self) -> None:
+        """关闭恢复码生成进度提示条（幂等）。"""
+        if self._recovery_bar is not None:
+            self._recovery_bar.close()
+            self._recovery_bar = None
 
     def _on_sync_folder(self, local_dir: str) -> None:
         """文件夹同步：对比索引生成计划，新增/变更文件走统一队列。"""
@@ -396,6 +462,8 @@ class AppController(QObject):
         self.metadata = metadata
         # 子目录密库的根前缀（文件树与路径拼接统一经目录树模型处理）
         self._vault_root = (vault_path or "").strip("/")
+        # 连接时刻与定时刷新：切换密库时重置统计运行标记，
+        # 旧统计结果经 _stats_seq 失效，新连接立即重新统计
 
         # 绑定传输队列（任务入队后即可调度）
         self._queue.bind(session, backend)
@@ -441,8 +509,12 @@ class AppController(QObject):
         )
         self.window.settings_page._refresh_cache_usage()
 
-        # 更新密库信息页
+        # 更新密库信息页并启动定时刷新（整体 5 秒 + 连接时间每秒）
+        self._connected_at = datetime.now()
+        self._stats_running = False
         self._update_vault_info_page()
+        self._info_timer.start()
+        self._clock_timer.start()
 
         # 检测上次未完成的传输，提供续传入口（横幅）
         self._maybe_offer_resume()
@@ -522,7 +594,11 @@ class AppController(QObject):
             self._remember_current_vault()
 
     def _on_connect_other_vault(self, vault_path: str) -> None:
-        """连接本后端的其他密库：复用当前后端，仅需目标密库主密码。"""
+        """连接本后端的其他密库：复用当前后端，仅需目标密库主密码。
+
+        开库含数秒级派生，后台执行避免冻结界面；失败文案区分
+        “位置无密库”与“密码错误”（与快速连接一致）。
+        """
         if self.backend is None:
             return
         show_name = vault_path or "根目录"
@@ -534,22 +610,39 @@ class AppController(QObject):
         )
         if not ok or not password:
             return
-        try:
-            meta = VaultManager(self.backend).open_vault(password, vault_path)
-        except Exception as exc:  # noqa: BLE001
-            box = FluentMessageBox("连接失败", str(exc), self.window)
-            box.exec()
-            return
-        if meta is None:
-            box = FluentMessageBox(
-                "连接失败", "主密码不正确。", self.window
-            )
-            box.exec()
-            return
-        self._apply_connection(
-            self.backend, meta, Session(password), vault_path=vault_path
+
+        vm = VaultManager(self.backend)
+        backend = self.backend
+        InfoBar.info(
+            title="正在连接密库",
+            content=f"“{show_name}”密码校验约需数秒，请稍候…",
+            parent=self.window, position=InfoBarPosition.TOP_RIGHT, duration=4000,
         )
-        self._remember_current_vault()
+
+        def op():
+            # 后台重操作：开库校验（含数秒级 PBKDF2 派生）
+            meta = vm.open_vault(password, vault_path)
+            if meta is None:
+                if not vm.has_vault(vault_path):
+                    raise RuntimeError("该位置不存在Mi库，请检查密库位置")
+                raise RuntimeError("主密码错误，请重试")
+            return meta
+
+        def on_done(meta):
+            self._apply_connection(
+                backend, meta, Session(password), vault_path=vault_path
+            )
+            self._remember_current_vault()
+
+        def on_error(msg: str):
+            box = FluentMessageBox("连接失败", msg or "未知错误", self.window)
+            box.exec()
+
+        # 持有线程引用防 GC；测试可置 _sync_vault_ops 走同步路径
+        self._other_vault_thread = run_busy(
+            op, on_done, on_error,
+            parent=self.window, sync=self._sync_vault_ops,
+        )
 
     def _on_remove_vault(self, record: dict) -> None:
         """移除最近密库记录（仅删记录，不影响云端数据）。"""
@@ -1166,6 +1259,14 @@ class AppController(QObject):
         """刷新密库信息页。"""
         self._update_vault_info_page()
 
+    def _tick_connect_time(self) -> None:
+        """每秒刷新连接时间行（时刻 + 已连接时长）。"""
+        if self._connected_at is None:
+            return
+        self.window.vault_info_page.update_connect_time(
+            _format_connect_time(self._connected_at)
+        )
+
     def _lock_vault(self) -> None:
         """锁定密库：清除会话与后端引用，重置界面。"""
         if self.session:
@@ -1174,6 +1275,10 @@ class AppController(QObject):
         self.backend = None
         self.metadata = None
         self._tree_model = None
+        # 停止信息页定时刷新并清空连接时刻（避免引导态下连接时间行跳动）
+        self._info_timer.stop()
+        self._clock_timer.stop()
+        self._connected_at = None
         # 重置传输队列（进行中的任务因会话失效而停止；续传记录保留供重连后恢复）
         self._queue.clear()
         self._task_cards.clear()
@@ -1226,6 +1331,7 @@ class AppController(QObject):
             backend_type=backend_type,
             backend_path=backend_path,
             filename_enc=self.metadata.filename_enc if self.metadata else False,
+            connect_time=_format_connect_time(self._connected_at),
             cloud_size="计算中…",
             cache_size=cache_size,
             file_count="计算中…",
@@ -1254,6 +1360,9 @@ class AppController(QObject):
         backend = self.backend
         if backend is None:
             return
+        if self._stats_running:
+            # 上一轮全库遍历未结束：跳过本轮，避免重复遍历压后端与 UI 回填抖动
+            return
         self._stats_seq += 1
         seq = self._stats_seq
 
@@ -1263,7 +1372,9 @@ class AppController(QObject):
         emitter = _StatsEmitter()
 
         def _on_done(total_size: int, count: int) -> None:
-            # 仅最新一次统计的结果才回填（避免旧结果覆盖）
+            self._stats_running = False
+            # 仅最新一次统计的结果才回填（避免旧结果覆盖）；
+            # update_info 为部分更新语义，其余字段保持原值
             if seq == self._stats_seq and self.session is not None:
                 self.window.vault_info_page.update_info(
                     cloud_size=_human_size(total_size),
@@ -1271,6 +1382,8 @@ class AppController(QObject):
                 )
 
         emitter.done.connect(_on_done)
+
+        self._stats_running = True
 
         def _bg() -> None:
             total_size = 0

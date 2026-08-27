@@ -146,6 +146,30 @@ class TestVaultManager:
         with pytest.raises(VaultError):
             vm.create_vault_with_recovery("pw2", filename_enc=False)
 
+    def test_create_with_recovery_progress_stages(self, tmp_path):
+        """progress_cb：建库阶段按序回调，派生阶段带耗时提示。"""
+        root = tmp_path / "b"; root.mkdir()
+        vm = VaultManager(LocalFolderBackend(root))
+        stages: list[str] = []
+        meta, code = vm.create_vault_with_recovery(
+            "pw", filename_enc=False, progress_cb=stages.append,
+        )
+        assert meta is not None and code
+        assert stages[0] == "正在检查存储位置…"
+        assert stages[-1] == "正在上传密库文件…"
+        assert any("约需数秒" in s for s in stages)
+
+    def test_open_vault_progress_stages(self, tmp_path):
+        """progress_cb：开库固定两阶段；不传回调行为不变（默认 None）。"""
+        root = tmp_path / "b"; root.mkdir()
+        vm = VaultManager(LocalFolderBackend(root))
+        vm.create_vault("pw", filename_enc=False)
+        stages: list[str] = []
+        assert vm.open_vault("pw", progress_cb=stages.append) is not None
+        assert stages == ["正在载入密库文件…", "校验主密码（密钥派生，约需数秒）…"]
+        # 不传 progress_cb：既有语义不受影响
+        assert vm.open_vault("pw") is not None
+
 
 class TestRecoveryCode:
     """恢复码（v3）：生成 / 凭码开库 / 编解码。"""
@@ -353,6 +377,59 @@ class TestInitWizardNewVault:
         reopened = VaultManager(LocalFolderBackend(root)).open_vault("pw")
         assert reopened is not None
         assert reopened.has_recovery is True
+
+
+# ---------------------------------------------------------------------------
+# 新增：建库/开库分阶段进度提示（不定进度条 + 阶段文案）
+# ---------------------------------------------------------------------------
+
+
+class TestWizardProgress:
+    """后台建库/开库期间不再空白等待：进度条与阶段文案。"""
+
+    def test_busy_bar_visibility_follows_set_busy(self, qtbot):
+        """不定进度条默认隐藏，_set_busy 切换显隐。"""
+        w = _make_wizard(qtbot)
+        assert w.page_password.busy_bar.isHidden()
+        w._set_busy(True)
+        assert not w.page_password.busy_bar.isHidden()
+        w._set_busy(False)
+        assert w.page_password.busy_bar.isHidden()
+
+    def test_new_vault_emits_progress_stages(self, qtbot, tmp_path):
+        """新建（同步路径）：progressed 收到完整阶段序列。"""
+        w = _make_wizard(qtbot)
+        _setup_local_backend(w, tmp_path)
+        w.page_password.pw_edit.setText("pw")
+        w.page_password.confirm_edit.setText("pw")
+        w.page_enc.radio_off.setChecked(True)
+        stages: list[str] = []
+        w.progressed.connect(stages.append)
+        w.accept()
+        assert w.metadata is not None
+        assert len(stages) >= 4
+        assert stages[0] == "正在检查存储位置…"
+        assert stages[-1] == "正在上传密库文件…"
+        assert any("约需数秒" in s for s in stages)
+        # 结束后进度条已隐藏（_set_busy(False)）
+        assert w.page_password.busy_bar.isHidden()
+
+    def test_connect_emits_progress_stages(self, qtbot, tmp_path):
+        """连接（同步路径）：progressed 收到开库两阶段文案。"""
+        root = tmp_path / "vault_root"
+        root.mkdir()
+        VaultManager(LocalFolderBackend(root)).create_vault("cpw", filename_enc=False)
+        w = _make_wizard(qtbot)
+        w.page_mode.radio_connect.setChecked(True)
+        _setup_local_backend(w, tmp_path)
+        w.page_password.pw_edit.setText("cpw")
+        stages: list[str] = []
+        w.progressed.connect(stages.append)
+        w.accept()
+        assert w.metadata is not None
+        assert stages == ["正在载入密库文件…", "校验主密码（密钥派生，约需数秒）…"]
+        # 阶段文案实时写入副标题（最终停留在末条）
+        assert w.page_password.subTitle() == stages[-1]
 
 
 class TestInitWizardConnect:

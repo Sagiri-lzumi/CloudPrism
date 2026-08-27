@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import dataclasses
 import os
+from typing import Callable
 
 from cloudprism import constants
 from cloudprism.crypto.vault import VaultMarker, VaultMetadata
@@ -22,6 +23,16 @@ from cloudprism.storage.backend import StorageBackend
 
 class VaultError(Exception):
     """Mi库操作异常。"""
+
+
+def _report(progress_cb: Callable[[str], None] | None, msg: str) -> None:
+    """阶段进度回调（可为 None）；异常不阻断主流程，进度仅展示用。"""
+    if progress_cb is None:
+        return
+    try:
+        progress_cb(msg)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 class VaultManager:
@@ -129,6 +140,7 @@ class VaultManager:
         filename_enc: bool,
         name: str = "",
         vault_path: str = "",
+        progress_cb: Callable[[str], None] | None = None,
     ) -> tuple[VaultMetadata, str]:
         """新建Mi库并同步生成恢复码（一次性写入，推荐的新建入口）。
 
@@ -145,6 +157,7 @@ class VaultManager:
         """
         from Crypto.Random import get_random_bytes
 
+        _report(progress_cb, "正在检查存储位置…")
         if self.has_vault(vault_path):
             raise VaultError("该位置已存在Mi库，请选择「连接」或更换位置")
 
@@ -155,12 +168,16 @@ class VaultManager:
             except Exception:  # noqa: BLE001
                 pass
 
+        _report(progress_cb, "正在生成密库元数据…")
         meta = VaultMarker.generate_metadata(filename_enc=filename_enc, name=name)
         secret = get_random_bytes(constants.RECOVERY_SECRET_LEN)
         code = self.encode_recovery_code(secret)
+        _report(progress_cb, "生成恢复码保护块（密钥派生，约需数秒）…")
         blob = VaultMarker.build_recovery_blob(secret, master_password)
         # 一次写入：Marker 加密与恢复块同时落盘，无需事后复核重传
+        _report(progress_cb, "主密钥派生与加密（约需数秒）…")
         data = VaultMarker.create(meta, master_password, recovery_blob=blob)
+        _report(progress_cb, "正在上传密库文件…")
         self._upload_marker(data, vault_path)
         return dataclasses.replace(meta, has_recovery=True), code
 
@@ -170,15 +187,18 @@ class VaultManager:
 
     def open_vault(
         self, master_password: str, vault_path: str = "",
+        progress_cb: Callable[[str], None] | None = None,
     ) -> VaultMetadata | None:
         """连接Mi库：下载并校验 Vault Marker（签名兼容，默认根目录）。
 
         返回:
             校验通过返回 VaultMetadata；密码错误或无Mi库返回 None
         """
+        _report(progress_cb, "正在载入密库文件…")
         data = self._download_marker(vault_path)
         if data is None:
             return None
+        _report(progress_cb, "校验主密码（密钥派生，约需数秒）…")
         return VaultMarker.verify(data, master_password)
 
     # ------------------------------------------------------------------
@@ -219,6 +239,7 @@ class VaultManager:
 
     def generate_recovery_code(
         self, master_password: str, vault_path: str = "",
+        progress_cb: Callable[[str], None] | None = None,
     ) -> tuple[str, VaultMetadata]:
         """生成（或更换）恢复码：重加密 Marker 并追加恢复块后覆盖上传。
 
@@ -234,20 +255,26 @@ class VaultManager:
         """
         from Crypto.Random import get_random_bytes
 
-        meta = self.open_vault(master_password, vault_path)
+        meta = self.open_vault(
+            master_password, vault_path, progress_cb=progress_cb,
+        )
         if meta is None:
             raise VaultError("密码错误或后端无Mi库，无法生成恢复码")
 
+        _report(progress_cb, "正在生成新恢复码…")
         secret = get_random_bytes(constants.RECOVERY_SECRET_LEN)
         code = self.encode_recovery_code(secret)
+        _report(progress_cb, "派生保护密钥（约需数秒）…")
         blob = VaultMarker.build_recovery_blob(secret, master_password)
 
+        _report(progress_cb, "加密回写密库文件…")
         data = VaultMarker.create(meta, master_password, recovery_blob=blob)
         self._upload_marker(data, vault_path)
         return code, dataclasses.replace(meta, has_recovery=True)
 
     def open_vault_with_recovery(
         self, recovery_code: str, vault_path: str = "",
+        progress_cb: Callable[[str], None] | None = None,
     ) -> VaultMetadata | None:
         """凭恢复码开库：解密恢复块还原主密码，再走正常校验。
 
@@ -257,9 +284,11 @@ class VaultManager:
         返回:
             校验通过返回 VaultMetadata；恢复码无效/错误返回 None
         """
+        _report(progress_cb, "正在解析恢复码…")
         secret = self.decode_recovery_code(recovery_code)
         if secret is None:
             return None
+        _report(progress_cb, "正在载入密库文件…")
         data = self._download_marker(vault_path)
         if data is None:
             return None
@@ -270,9 +299,11 @@ class VaultManager:
         blob = tail[2: 2 + blob_len]
         if len(blob) != blob_len:
             return None
+        _report(progress_cb, "正在还原主密码…")
         master_password = VaultMarker.decrypt_recovery_blob(blob, secret)
         if master_password is None:
             return None
+        _report(progress_cb, "校验密库（密钥派生，约需数秒）…")
         meta = VaultMarker.verify(data, master_password)
         if meta is not None:
             self.recovered_password = master_password

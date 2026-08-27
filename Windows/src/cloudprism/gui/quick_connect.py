@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFormLayout,
@@ -15,7 +16,13 @@ from PySide6.QtWidgets import (
 )
 
 # Fluent 组件（均继承自对应 Qt 原生控件，标准 API 全兼容）
-from qfluentwidgets import CheckBox, LineEdit, PrimaryPushButton, PushButton
+from qfluentwidgets import (
+    CheckBox,
+    IndeterminateProgressBar,
+    LineEdit,
+    PrimaryPushButton,
+    PushButton,
+)
 
 from cloudprism.core.backend_factory import build_backend_from_params
 from cloudprism.core.session import Session
@@ -38,6 +45,10 @@ class QuickConnectDialog(QDialog):
     # 开库含数秒级 PBKDF2 派生，默认后台线程执行避免冻结界面；
     # 测试置 True 走同步路径（无需事件循环）
     sync_ops = False
+
+    # 后台开库阶段进度（文案来自 vault_manager 的 progress_cb，
+    # 跨线程 emit 自动排队投递主线程）
+    progressed = Signal(str)
 
     def __init__(
         self,
@@ -125,12 +136,20 @@ class QuickConnectDialog(QDialog):
         btn_row.addWidget(cancel_btn)
         lay.addLayout(btn_row)
 
+        # ---- 不定进度条（后台开库期间显示；默认隐藏） ----
+        self._busy_bar = IndeterminateProgressBar(self)
+        self._busy_bar.setVisible(False)
+        lay.addWidget(self._busy_bar)
+
         self._status = QLabel("", self)
         self._status.setWordWrap(True)
         self._status.setStyleSheet(f"color: {semantic_color('err')};")
         lay.addWidget(self._status)
 
         lay.addStretch()
+
+        # 阶段进度 -> 状态栏实时展示（避免数秒空白等待误以为卡死）
+        self.progressed.connect(self._on_progress)
 
     # ------------------------------------------------------------------
     # 连接动作
@@ -141,6 +160,11 @@ class QuickConnectDialog(QDialog):
         self._recovery_edit.setVisible(checked)
         if checked:
             self._status.setText("")
+
+    def _on_progress(self, msg: str) -> None:
+        """阶段进度文案实时写入状态栏（进度用中性色，区别于错误红）。"""
+        self._status.setStyleSheet(f"color: {semantic_color('muted')};")
+        self._status.setText(msg)
 
     def _connect(self) -> None:
         """构造后端并打开密库（主密码或恢复码）；失败在对话框内提示。"""
@@ -164,6 +188,8 @@ class QuickConnectDialog(QDialog):
         btype = self._record.get("backend_type", "")
         path = self._record.get("path", "")
         self._connect_btn.setEnabled(False)
+        self._busy_bar.setVisible(True)
+        self._status.setStyleSheet(f"color: {semantic_color('muted')};")
         self._status.setText("正在校验主密码，约需数秒…")
         try:
             backend = self._factory(
@@ -175,6 +201,8 @@ class QuickConnectDialog(QDialog):
             )
         except Exception as e:  # noqa: BLE001
             self._connect_btn.setEnabled(True)
+            self._busy_bar.setVisible(False)
+            self._status.setStyleSheet(f"color: {semantic_color('err')};")
             self._status.setText(f"连接失败：{e}")
             return
 
@@ -183,13 +211,19 @@ class QuickConnectDialog(QDialog):
             try:
                 vm = VaultManager(backend)
                 if use_recovery:
-                    meta = vm.open_vault_with_recovery(recovery, self.vault_path)
+                    meta = vm.open_vault_with_recovery(
+                        recovery, self.vault_path,
+                        progress_cb=self.progressed.emit,
+                    )
                     if meta is None:
                         raise _ConnectError(
                             "恢复码无效，或该位置不存在带恢复码的密库"
                         )
                     return meta, vm.recovered_password or ""
-                meta = vm.open_vault(pw, self.vault_path)
+                meta = vm.open_vault(
+                    pw, self.vault_path,
+                    progress_cb=self.progressed.emit,
+                )
                 if meta is None:
                     # 区分"位置无密库"与"密码错误"，避免误导性报错
                     if not vm.has_vault(self.vault_path):
@@ -204,6 +238,7 @@ class QuickConnectDialog(QDialog):
         def on_done(result):
             meta, final_pw = result
             self._connect_btn.setEnabled(True)
+            self._busy_bar.setVisible(False)
             self.backend = backend
             self.metadata = meta
             self.session = Session(final_pw)
@@ -211,6 +246,8 @@ class QuickConnectDialog(QDialog):
 
         def on_error(msg: str):
             self._connect_btn.setEnabled(True)
+            self._busy_bar.setVisible(False)
+            self._status.setStyleSheet(f"color: {semantic_color('err')};")
             self._status.setText(msg or "未知错误")
 
         # 同步模式（测试）原地执行；异步模式持有线程引用防 GC

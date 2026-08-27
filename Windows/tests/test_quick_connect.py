@@ -31,6 +31,7 @@ class FakeVaultManager:
     vault_exists = True     # has_vault 返回值（错误文案区分用）
     last_recovery_code: str | None = None
     last_vault_path: str | None = None  # 最近一次开库收到的位置参数
+    progress_stages: list[str] = []     # 最近一次开库的阶段文案记录
 
     def __init__(self, backend) -> None:
         self.backend = backend
@@ -39,13 +40,24 @@ class FakeVaultManager:
     def has_vault(self, vault_path: str = "") -> bool:
         return type(self).vault_exists
 
-    def open_vault(self, pw: str, vault_path: str = ""):
+    def open_vault(self, pw: str, vault_path: str = "", progress_cb=None):
         type(self).last_vault_path = vault_path
+        type(self).progress_stages = []
+        if progress_cb is not None:
+            msg = "校验主密码（密钥派生，约需数秒）…"
+            progress_cb(msg)
+            type(self).progress_stages.append(msg)
         return type(self).result
 
-    def open_vault_with_recovery(self, code: str, vault_path: str = ""):
+    def open_vault_with_recovery(self, code: str, vault_path: str = "",
+                                 progress_cb=None):
         type(self).last_recovery_code = code
         type(self).last_vault_path = vault_path
+        type(self).progress_stages = []
+        if progress_cb is not None:
+            msg = "校验密库（密钥派生，约需数秒）…"
+            progress_cb(msg)
+            type(self).progress_stages.append(msg)
         if type(self).recovery_result is None:
             return None
         self.recovered_password = "recovered-pw"
@@ -61,6 +73,7 @@ def fake_vm(monkeypatch):
     FakeVaultManager.vault_exists = True
     FakeVaultManager.last_recovery_code = None
     FakeVaultManager.last_vault_path = None
+    FakeVaultManager.progress_stages = []
     return FakeVaultManager
 
 
@@ -111,6 +124,21 @@ def test_connect_success(qtbot, fake_vm):
     # 工厂收到 local 参数
     btype, kw = factory.calls[0]
     assert btype == "local" and kw["local_dir"] == "D:/v"
+
+
+def test_connect_reports_progress_stages(qtbot, fake_vm):
+    """后台开库进度提示：阶段文案写入状态栏，完成后进度条隐藏。"""
+    dlg = QuickConnectDialog(LOCAL_RECORD, backend_factory=RecordingFactory())
+    qtbot.addWidget(dlg)
+    assert dlg._busy_bar.isHidden()  # 默认隐藏
+    dlg._pw_edit.setText("pw")
+    dlg._connect()
+    assert dlg.result() == QDialog.DialogCode.Accepted
+    # 开库方法收到 progress_cb 且阶段文案写入状态栏（同步直连槽）
+    assert FakeVaultManager.progress_stages
+    assert "校验主密码" in dlg._status.text()
+    # 完成后不定进度条隐藏（on_done 中 _busy_bar.setVisible(False)）
+    assert dlg._busy_bar.isHidden()
 
 
 def test_wrong_password_stays_open(qtbot, fake_vm):

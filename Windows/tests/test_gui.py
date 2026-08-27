@@ -270,6 +270,57 @@ class TestMainWindow:
         vip.update_info(vault_name="自定义名")
         assert vip._vault_name_label.text() == "自定义名"
 
+    def test_vault_info_partial_update_keeps_basic_fields(self, qtbot):
+        """部分更新语义：统计回调只写云端占用时基础信息保持原值。
+
+        回归防护：旧实现默认值全量覆盖会把库名/后端/路径冲成横杠。
+        """
+        win = MainWindow()
+        qtbot.addWidget(win)
+        vip = win.vault_info_page
+        vip.update_info(
+            vault_name="工作库", backend_type="本地文件夹",
+            backend_path="D:/v", filename_enc=True,
+            connect_time="2026-08-27 10:00:00 · 已连接 0秒",
+        )
+        # 模拟后台统计回调回填（仅两个字段）
+        vip.update_info(cloud_size="12.3 MB", file_count="42")
+        assert vip._vault_name_label.text() == "工作库"
+        assert vip._backend_type_label.text() == "本地文件夹"
+        assert vip._backend_path_label.text() == "D:/v"
+        assert vip._filename_enc_label.text() == "开"
+        assert vip._cloud_size_label.text() == "12.3 MB"
+        assert vip._file_count_label.text() == "42"
+        # 未传 connect_time 不覆盖旧值（不再回退当前时刻）
+        assert vip._connect_time_label.text().startswith("2026-08-27 10:00:00")
+
+    def test_update_connect_time_only_touches_time_row(self, qtbot):
+        """每秒级轻量刷新：只改连接时间行，不触碰其他字段。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        vip = win.vault_info_page
+        vip.update_info(vault_name="工作库", cloud_size="1 MB")
+        vip.update_connect_time("2026-08-27 10:00:05 · 已连接 5秒")
+        assert vip._connect_time_label.text() == "2026-08-27 10:00:05 · 已连接 5秒"
+        assert vip._vault_name_label.text() == "工作库"
+        assert vip._cloud_size_label.text() == "1 MB"
+
+
+def test_format_connect_time_formats():
+    """连接时间格式化：秒/分秒/时分秒与未连接回退。"""
+    from datetime import datetime, timedelta
+
+    from cloudprism.app import _format_connect_time
+
+    base = datetime(2026, 8, 27, 10, 0, 0)
+    assert _format_connect_time(None) == "-"
+    assert _format_connect_time(base, base).endswith("已连接 0秒")
+    t = _format_connect_time(base, base + timedelta(seconds=90))
+    assert t.startswith("2026-08-27 10:00:00")
+    assert "已连接 1分30秒" in t
+    t2 = _format_connect_time(base, base + timedelta(hours=1, minutes=2, seconds=3))
+    assert "已连接 1小时2分3秒" in t2
+
 
 # ---------------------------------------------------------------------------
 # 三期新特性：并发设置 / 网格视图 / 传输页 / 多密库 / 同步卡 / 续传横幅

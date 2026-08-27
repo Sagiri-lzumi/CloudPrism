@@ -17,8 +17,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from PySide6.QtCore import (
     QAbstractAnimation,
     QEasingCurve,
@@ -392,26 +390,40 @@ class VaultInfoPage(QWidget):
 
     def update_info(
         self,
-        vault_name: str = "-",
-        backend_type: str = "-",
-        backend_path: str = "-",
-        filename_enc: bool = False,
+        vault_name: str | None = None,
+        backend_type: str | None = None,
+        backend_path: str | None = None,
+        filename_enc: bool | None = None,
         connect_time: str | None = None,
-        cloud_size: str = "-",
-        cache_size: str = "-",
-        file_count: str = "-",
+        cloud_size: str | None = None,
+        cache_size: str | None = None,
+        file_count: str | None = None,
     ) -> None:
-        """更新密库信息显示。"""
-        self._vault_name_label.setText(vault_name)
-        self._backend_type_label.setText(backend_type)
-        self._backend_path_label.setText(backend_path)
-        self._filename_enc_label.setText("开" if filename_enc else "关")
-        self._connect_time_label.setText(
-            connect_time or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        )
-        self._cloud_size_label.setText(cloud_size)
-        self._cache_size_label.setText(cache_size)
-        self._file_count_label.setText(file_count)
+        """更新密库信息显示（部分更新语义：仅传入非 None 的字段生效）。
+
+        后台统计回调只回填云端占用/文件数时，其余字段保持原值，
+        不会被默认值覆盖成横杠。
+        """
+        if vault_name is not None:
+            self._vault_name_label.setText(vault_name)
+        if backend_type is not None:
+            self._backend_type_label.setText(backend_type)
+        if backend_path is not None:
+            self._backend_path_label.setText(backend_path)
+        if filename_enc is not None:
+            self._filename_enc_label.setText("开" if filename_enc else "关")
+        if connect_time is not None:
+            self._connect_time_label.setText(connect_time)
+        if cloud_size is not None:
+            self._cloud_size_label.setText(cloud_size)
+        if cache_size is not None:
+            self._cache_size_label.setText(cache_size)
+        if file_count is not None:
+            self._file_count_label.setText(file_count)
+
+    def update_connect_time(self, text: str) -> None:
+        """仅刷新连接时间行（每秒级轻量更新，不触碰其他字段）。"""
+        self._connect_time_label.setText(text)
 
     def set_other_vaults(self, vaults: list[dict]) -> None:
         """填充本后端的其他密库列表（调用方应已排除当前连接的密库）。
