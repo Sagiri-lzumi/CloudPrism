@@ -11,6 +11,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QModelIndex, Qt
 
+from cloudprism import __version__
 from cloudprism.core.session import Session
 from cloudprism.crypto.filename import FilenameCipher
 from cloudprism.gui.dir_tree_model import DirTreeModel
@@ -125,14 +126,14 @@ class TestMainWindow:
     """主窗口骨架（IDE 风格）。"""
 
     def test_construct_menus(self, qtbot):
-        """无后端构造：菜单齐备（Mi库/文件/播放）。
+        """无后端构造：菜单齐备（密库/文件/播放）。
 
         FluentWindow 无真实菜单栏，经 menuBar() 兼容层查询菜单结构。
         """
         win = MainWindow()
         qtbot.addWidget(win)
         titles = [m.title() for m in win.menuBar().actions()]
-        assert any("Mi库" in t for t in titles)
+        assert any("密库" in t for t in titles)
         assert any("文件" in t for t in titles)
         assert any("播放" in t for t in titles)
 
@@ -260,6 +261,14 @@ class TestMainWindow:
         for w in (sp._cache_limit_spin, sp._concurrent_spin, sp._max_cores_spin,
                   sp._cache_path_edit, sp._baidu_appid_edit):
             assert w.font().pixelSize() == 14, f"{type(w).__name__} 字体未统一"
+
+    def test_settings_page_version_label(self, qtbot):
+        """设置页底部展示当前版本号（与包版本一致）。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        sp = win.settings_page
+        assert sp._version_label is not None
+        assert __version__ in sp._version_label.text()
 
     def test_vault_info_page_rename_entry(self, qtbot):
         """密库信息页库名称行含编辑按钮，update_info 更新名称显示。"""

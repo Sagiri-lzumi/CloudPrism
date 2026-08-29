@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cloudprism"
-version = "0.1.0"
+version = "1.0.0"
 description = "CloudPrism 端到端加密云盘客户端（Windows 端）"
 requires-python = ">=3.12"
 # 运行时依赖：pycryptodome 提供 AES-CTR/GCM 与 PBKDF2

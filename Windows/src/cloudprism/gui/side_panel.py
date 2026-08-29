@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 # Fluent 组件（均继承自对应 Qt 原生控件，标准 API 全兼容）
 from qfluentwidgets import (
+    CaptionLabel,
     ComboBox,
     ComboBoxSettingCard,
     ExpandGroupSettingCard,
@@ -49,6 +50,7 @@ from qfluentwidgets import (
     ToolButton,
 )
 
+from cloudprism import __version__
 from cloudprism.gui.baidu_auth import BaiduAuthDialog
 from cloudprism.gui.baidu_guide import BaiduGuideDialog
 from cloudprism.gui.dir_tree_model import DirTreeModel
@@ -838,6 +840,11 @@ class SettingsPage(QWidget):
         perf_group.addSettingCard(cores_card)
 
         lay.addWidget(perf_group)
+
+        # 版本号展示（设置页底部，muted 色小字）
+        self._version_label = CaptionLabel(f"CloudPrism v{__version__}", content)
+        self._version_label.setStyleSheet(f"color: {semantic_color('muted')};")
+        lay.addWidget(self._version_label, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         lay.addStretch()
 
