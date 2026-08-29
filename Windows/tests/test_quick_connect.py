@@ -223,7 +223,7 @@ def test_connect_passes_vault_path(qtbot, fake_vm):
 
 
 def test_no_vault_at_location_message(qtbot, fake_vm):
-    """该位置无 Marker：报"不存在Mi库"而非误导性的密码错误。"""
+    """该位置无 Marker：报"不存在密库"而非误导性的密码错误。"""
     FakeVaultManager.result = None
     FakeVaultManager.vault_exists = False
     dlg = QuickConnectDialog(LOCAL_RECORD, backend_factory=RecordingFactory())

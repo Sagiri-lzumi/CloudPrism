@@ -227,7 +227,7 @@ class QuickConnectDialog(QDialog):
                 if meta is None:
                     # 区分"位置无密库"与"密码错误"，避免误导性报错
                     if not vm.has_vault(self.vault_path):
-                        raise _ConnectError("该位置不存在Mi库，请检查密库位置记录")
+                        raise _ConnectError("该位置不存在密库，请检查密库位置记录")
                     raise _ConnectError("主密码错误，请重试")
                 return meta, pw
             except _ConnectError:

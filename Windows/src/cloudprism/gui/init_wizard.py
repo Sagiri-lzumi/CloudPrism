@@ -1,8 +1,8 @@
 """初始化向导。
 
 五步向导：
-  1. 模式：新建Mi库 / 连接已有Mi库
-  2. 后端类型：本地文件夹 / WebDAV / 更多（预留）
+  1. 模式：新建密库 / 连接已有密库
+  2. 后端类型：本地文件夹 / WebDAV / 百度网盘
   3. 后端配置：填写连接信息 + 测试连接
   4. 主密码：新建时输入+二次确认；连接时单次输入
   5. 文件名加密开关：仅新建模式（不可逆提示）；连接模式自动跳过
@@ -67,11 +67,11 @@ class ModePage(QWizardPage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setTitle("初始化 CloudPrism")
-        self.setSubTitle("选择新建Mi库，或连接已有加密云盘")
+        self.setSubTitle("选择新建密库，或连接已有加密云盘")
 
         lay = QVBoxLayout(self)
-        self.radio_new = QRadioButton("新建Mi库（首次使用，设置主密码）", self)
-        self.radio_connect = QRadioButton("连接已有Mi库（输入主密码验证）", self)
+        self.radio_new = QRadioButton("新建密库（首次使用，设置主密码）", self)
+        self.radio_connect = QRadioButton("连接已有密库（输入主密码验证）", self)
         self.radio_new.setChecked(True)
         group = QButtonGroup(self)
         group.addButton(self.radio_new)
@@ -491,7 +491,7 @@ class FilenameEncPage(QWizardPage):
         # 不可逆警告
         warn = QLabel(
             "⚠ 此选择初始化后【无法中途修改】！\n"
-            "如需变更必须新建Mi库并重新加密上传所有文件。",
+            "如需变更必须新建密库并重新加密上传所有文件。",
             self,
         )
         warn.setStyleSheet(f"color: {semantic_color('err')}; font-weight: bold;")
@@ -723,7 +723,7 @@ class InitWizard(QWizard):
                         progress_cb=self.progressed.emit,
                     )
                     if meta is None:
-                        raise _OpError("恢复码无效，或该位置不存在带恢复码的Mi库")
+                        raise _OpError("恢复码无效，或该位置不存在带恢复码的密库")
                     return meta, vm.recovered_password or pw, ""
                 meta = vm.open_vault(
                     pw, self.vault_path,
@@ -732,14 +732,14 @@ class InitWizard(QWizard):
                 if meta is None:
                     # 区分"位置无密库"与"密码错误"，避免误导性报错
                     if not vm.has_vault(self.vault_path):
-                        raise _OpError("该位置不存在Mi库，请检查密库位置")
+                        raise _OpError("该位置不存在密库，请检查密库位置")
                     raise _OpError("主密码错误，请重试")
                 return meta, pw, ""
             except _OpError:
                 raise
             except Exception as e:  # noqa: BLE001
                 raise _OpError(
-                    f"新建Mi库失败：{e}" if is_new else f"连接失败：{e}"
+                    f"新建密库失败：{e}" if is_new else f"连接失败：{e}"
                 )
 
         def on_done(result):

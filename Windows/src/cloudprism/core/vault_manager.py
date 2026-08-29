@@ -1,4 +1,4 @@
-"""Mi库管理器：新建 / 连接 / 重命名Mi库的核心流程（非 GUI）。
+"""密库管理器：新建 / 连接 / 重命名密库的核心流程（非 GUI）。
 
 - 新建：生成 VaultMetadata（随机 vault_id/salt/iv）-> 创建 Vault Marker ->
   上传到后端根目录（可同时携带用户自定义名称）
@@ -22,7 +22,7 @@ from cloudprism.storage.backend import StorageBackend
 
 
 class VaultError(Exception):
-    """Mi库操作异常。"""
+    """密库操作异常。"""
 
 
 def _report(progress_cb: Callable[[str], None] | None, msg: str) -> None:
@@ -36,7 +36,7 @@ def _report(progress_cb: Callable[[str], None] | None, msg: str) -> None:
 
 
 class VaultManager:
-    """Mi库生命周期管理。"""
+    """密库生命周期管理。"""
 
     def __init__(self, backend: StorageBackend) -> None:
         self.backend = backend
@@ -105,7 +105,7 @@ class VaultManager:
         name: str = "",
         vault_path: str = "",
     ) -> VaultMetadata:
-        """新建Mi库：生成并上传 Vault Marker。
+        """新建密库：生成并上传 Vault Marker。
 
         参数:
             master_password: 用户主密码
@@ -117,10 +117,10 @@ class VaultManager:
             VaultMetadata
 
         异常:
-            VaultError: 目标位置已存在Mi库（防止覆盖）
+            VaultError: 目标位置已存在密库（防止覆盖）
         """
         if self.has_vault(vault_path):
-            raise VaultError("该位置已存在Mi库，请选择「连接」或更换位置")
+            raise VaultError("该位置已存在密库，请选择「连接」或更换位置")
 
         if vault_path.strip("/"):
             # 子目录密库：确保目录存在（已存在时容错）
@@ -142,7 +142,7 @@ class VaultManager:
         vault_path: str = "",
         progress_cb: Callable[[str], None] | None = None,
     ) -> tuple[VaultMetadata, str]:
-        """新建Mi库并同步生成恢复码（一次性写入，推荐的新建入口）。
+        """新建密库并同步生成恢复码（一次性写入，推荐的新建入口）。
 
         相比 create_vault + generate_recovery_code 两步流程，省去开库复核与
         二次重写 Marker，PBKDF2 派生从 4 次降到 2 次（每次约数秒，
@@ -153,13 +153,13 @@ class VaultManager:
             元信息 has_recovery=True
 
         异常:
-            VaultError: 目标位置已存在Mi库（防止覆盖）
+            VaultError: 目标位置已存在密库（防止覆盖）
         """
         from Crypto.Random import get_random_bytes
 
         _report(progress_cb, "正在检查存储位置…")
         if self.has_vault(vault_path):
-            raise VaultError("该位置已存在Mi库，请选择「连接」或更换位置")
+            raise VaultError("该位置已存在密库，请选择「连接」或更换位置")
 
         if vault_path.strip("/"):
             # 子目录密库：确保目录存在（已存在时容错）
@@ -189,10 +189,10 @@ class VaultManager:
         self, master_password: str, vault_path: str = "",
         progress_cb: Callable[[str], None] | None = None,
     ) -> VaultMetadata | None:
-        """连接Mi库：下载并校验 Vault Marker（签名兼容，默认根目录）。
+        """连接密库：下载并校验 Vault Marker（签名兼容，默认根目录）。
 
         返回:
-            校验通过返回 VaultMetadata；密码错误或无Mi库返回 None
+            校验通过返回 VaultMetadata；密码错误或无密库返回 None
         """
         _report(progress_cb, "正在载入密库文件…")
         data = self._download_marker(vault_path)
@@ -217,11 +217,11 @@ class VaultManager:
         已加密文件不受影响；既有恢复码块（v3 尾部）原样保留。
 
         异常:
-            VaultError: 无Mi库 / 密码错误 / 上传失败时抛出，界面状态不变更
+            VaultError: 无密库 / 密码错误 / 上传失败时抛出，界面状态不变更
         """
         meta = self.open_vault(master_password, vault_path)
         if meta is None:
-            raise VaultError("密码错误或后端无Mi库，无法修改名称")
+            raise VaultError("密码错误或后端无密库，无法修改名称")
 
         # 保留既有恢复码块（重命名不使恢复码失效）
         old_data = self._download_marker(vault_path) or b""
@@ -251,7 +251,7 @@ class VaultManager:
             (恢复码, VaultMetadata)；元信息 has_recovery=True
 
         异常:
-            VaultError: 无Mi库或密码错误时抛出
+            VaultError: 无密库或密码错误时抛出
         """
         from Crypto.Random import get_random_bytes
 
@@ -259,7 +259,7 @@ class VaultManager:
             master_password, vault_path, progress_cb=progress_cb,
         )
         if meta is None:
-            raise VaultError("密码错误或后端无Mi库，无法生成恢复码")
+            raise VaultError("密码错误或后端无密库，无法生成恢复码")
 
         _report(progress_cb, "正在生成新恢复码…")
         secret = get_random_bytes(constants.RECOVERY_SECRET_LEN)

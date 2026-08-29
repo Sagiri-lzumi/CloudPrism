@@ -104,7 +104,7 @@ class AppController(QObject):
     def __init__(self, window: MainWindow) -> None:
         super().__init__(window)  # QObject 父级：随窗口销毁，支持事件过滤
         self.window = window
-        # 向导产出（连接Mi库后填充）
+        # 向导产出（连接密库后填充）
         self.session: Session | None = None
         self.backend: StorageBackend | None = None
         self.metadata = None
@@ -624,7 +624,7 @@ class AppController(QObject):
             meta = vm.open_vault(password, vault_path)
             if meta is None:
                 if not vm.has_vault(vault_path):
-                    raise RuntimeError("该位置不存在Mi库，请检查密库位置")
+                    raise RuntimeError("该位置不存在密库，请检查密库位置")
                 raise RuntimeError("主密码错误，请重试")
             return meta
 
@@ -840,11 +840,11 @@ class AppController(QObject):
     # ------------------------------------------------------------------
 
     def _require_vault(self) -> bool:
-        """未连接Mi库时提示并返回 False。"""
+        """未连接密库时提示并返回 False。"""
         if self.session is None or self.backend is None:
             # 保留 QMessageBox.information：测试（test_player_view）经 app_mod.QMessageBox patch 拦截
             QMessageBox.information(
-                self.window, "提示", "请先通过「Mi库 - 初始化/连接」连接云盘"
+                self.window, "提示", "请先连接密库：「密库」页 →「新建连接 / 初始化」"
             )
             return False
         return True

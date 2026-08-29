@@ -288,8 +288,8 @@ class MainWindow(FluentWindow):
         FluentWindow 无菜单栏：动作收纳进导航栏底部的圆菜单，
         快捷键改为窗口级 QShortcut（F5 / Ctrl+L / Ctrl+U / Ctrl+D）。
         """
-        # ---- Mi库菜单 ----
-        self._vault_menu = QMenu("Mi库(&M)", self)
+        # ---- 密库菜单 ----
+        self._vault_menu = QMenu("密库(&M)", self)
         init_action = self._vault_menu.addAction("初始化/连接(&I)...")
         init_action.triggered.connect(self.initRequested.emit)
         self._vault_menu.addSeparator()

@@ -149,7 +149,7 @@ class DirTreeModel(QAbstractItemModel):
         if node is None or node.loaded:
             return
         entries = self.backend.list_dir(self._remote_path(node))
-        # 过滤系统内部文件（Mi库标识与同步索引，不在界面展示）
+        # 过滤系统内部文件（密库标识与同步索引，不在界面展示）
         entries = [
             e for e in entries
             if e.name not in (

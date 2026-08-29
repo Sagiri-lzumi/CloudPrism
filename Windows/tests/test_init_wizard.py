@@ -1,4 +1,4 @@
-"""初始化向导与Mi库管理器测试。"""
+"""初始化向导与密库管理器测试。"""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import QLabel, QRadioButton, QWizard
 
 
 class TestVaultManager:
-    """Mi库新建/连接核心流程。"""
+    """密库新建/连接核心流程。"""
 
     def test_has_vault_false_initially(self, tmp_path):
         root = tmp_path / "b"; root.mkdir()
@@ -61,7 +61,7 @@ class TestVaultManager:
         assert vm.open_vault("wrong") is None
 
     def test_open_vault_no_vault(self, tmp_path):
-        """连接：无Mi库返回 None。"""
+        """连接：无密库返回 None。"""
         root = tmp_path / "b"; root.mkdir()
         vm = VaultManager(LocalFolderBackend(root))
         assert vm.open_vault("pw") is None
@@ -102,7 +102,7 @@ class TestVaultManager:
         assert vm.open_vault("pw123").name == "原名"
 
     def test_rename_vault_no_vault(self, tmp_path):
-        """重命名：后端无Mi库抛 VaultError。"""
+        """重命名：后端无密库抛 VaultError。"""
         root = tmp_path / "b"; root.mkdir()
         vm = VaultManager(LocalFolderBackend(root))
         with pytest.raises(VaultError):
@@ -282,7 +282,7 @@ def _setup_local_backend(wizard, tmp_path):
 
 
 class TestInitWizardNewVault:
-    """新建Mi库向导流程。"""
+    """新建密库向导流程。"""
 
     def test_new_vault_flow(self, qtbot, tmp_path):
         """新建：选类型 -> 配置目录 -> 密码确认 -> 文件名加密关闭 -> 完成。"""
@@ -347,7 +347,7 @@ class TestInitWizardNewVault:
         assert w.page_password.isComplete() is True
 
     def test_create_on_existing_shows_error(self, qtbot, tmp_path):
-        """新建到已有Mi库：报错且不关闭产物。"""
+        """新建到已有密库：报错且不关闭产物。"""
         root = tmp_path / "vault_root"
         root.mkdir()
         VaultManager(LocalFolderBackend(root)).create_vault("old", filename_enc=False)
@@ -433,7 +433,7 @@ class TestWizardProgress:
 
 
 class TestInitWizardConnect:
-    """连接已有Mi库向导流程。"""
+    """连接已有密库向导流程。"""
 
     def _prepare_vault(self, tmp_path, pw="connect-pw"):
         root = tmp_path / "vault_root"
