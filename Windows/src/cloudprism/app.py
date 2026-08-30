@@ -1416,35 +1416,76 @@ def _migrate_registry_settings() -> None:
 
     幂等：仅当注册表有数据且便携 ini 尚未生成时执行；已有 ini 不覆盖。
     任何环节失败都只记日志不阻塞启动（老用户最多需重新设置偏好）。
+    注意：无需迁移时不得构造 NativeFormat QSettings 实例——Qt 注册表
+    后端打开即预创建键路径，空转一次也会留下空壳键。
     """
     import logging
     import os
 
-    from PySide6.QtCore import QSettings
-
     from cloudprism.core.paths import config_file
 
     try:
-        # NativeFormat：Windows 下即 HKCU\Software\CloudPrism\CloudPrism
-        reg = QSettings(SettingsStore.ORGANIZATION, SettingsStore.APPLICATION)
-        keys = reg.allKeys()
-        ini_path = config_file()
-        if not keys or os.path.exists(ini_path):
-            return
-        ini = QSettings(ini_path, QSettings.Format.IniFormat)
-        for k in keys:
-            ini.setValue(k, reg.value(k))
-        ini.sync()
-        # 迁移成功后清理注册表：remove("") 删除本作用域全部键值与子键
-        reg.remove("")
-        reg.sync()
-        # 再尝试删除可能残留的空父键（DeleteKey 仅对空键生效，安全）
-        try:
-            import winreg
+        import winreg
+    except ImportError:  # 非 Windows 无注册表可迁
+        return
 
-            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, r"Software\CloudPrism")
+    def _tree_has_values(path: str) -> bool:
+        """键树中是否存在任何值（只读探测，不创建键）。"""
+        try:
+            hk = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_READ)
+        except OSError:
+            return False
+        try:
+            winreg.EnumValue(hk, 0)
+            found = True
+        except OSError:
+            found = False
+        subs, i = [], 0
+        try:
+            while True:
+                subs.append(winreg.EnumKey(hk, i))
+                i += 1
         except OSError:
             pass
+        winreg.CloseKey(hk)
+        return found or any(_tree_has_values(path + "\\" + s) for s in subs)
+
+    def _delete_tree(path: str) -> None:
+        """递归删除键树（仅对已存在的键生效）。"""
+        try:
+            hk = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_READ)
+        except OSError:
+            return
+        subs, i = [], 0
+        try:
+            while True:
+                subs.append(winreg.EnumKey(hk, i))
+                i += 1
+        except OSError:
+            pass
+        winreg.CloseKey(hk)
+        for s in subs:
+            _delete_tree(path + "\\" + s)
+        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, path)
+
+    try:
+        ini_path = config_file()
+        # winreg 只读预检：无旧数据或已有 ini → 直接返回，不碰 QSettings
+        if os.path.exists(ini_path) or not _tree_has_values(
+            r"Software\CloudPrism\CloudPrism"
+        ):
+            return
+        # 确有旧数据：构造 NativeFormat 实例逐键拷入便携 ini
+        from PySide6.QtCore import QSettings
+
+        reg = QSettings(SettingsStore.ORGANIZATION, SettingsStore.APPLICATION)
+        ini = QSettings(ini_path, QSettings.Format.IniFormat)
+        for k in reg.allKeys():
+            ini.setValue(k, reg.value(k))
+        ini.sync()
+        del ini, reg
+        # 迁移成功后递归删除整棵键树（Qt 后端会留下空壳键，必须连壳带树清掉）
+        _delete_tree(r"Software\CloudPrism")
     except Exception:  # noqa: BLE001
         logging.getLogger(__name__).warning(
             "注册表设置迁移失败，本次使用便携设置", exc_info=True
