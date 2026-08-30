@@ -11,8 +11,8 @@ import os
 import shutil
 import tempfile
 
-from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, Signal
-from PySide6.QtGui import QFont, QImage, QPixmap
+from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QFont, QImage, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFormLayout,
@@ -33,6 +33,8 @@ from qfluentwidgets import (
     ComboBoxSettingCard,
     ExpandGroupSettingCard,
     FluentIcon,
+    InfoBar,
+    InfoBarPosition,
     LineEdit,
     ListWidget,
     OptionsConfigItem,
@@ -51,6 +53,7 @@ from qfluentwidgets import (
 )
 
 from cloudprism import __version__
+from cloudprism.core import update_checker
 from cloudprism.gui.baidu_auth import BaiduAuthDialog
 from cloudprism.gui.baidu_guide import BaiduGuideDialog
 from cloudprism.gui.dir_tree_model import DirTreeModel
@@ -473,6 +476,7 @@ class SettingsPage(QWidget):
     concurrencyChanged = Signal(int)  # 并发传输数变更（供控制器调整队列并发）
     recoveryCodeRequested = Signal()  # 生成/更换恢复码（需先输入主密码确认）
     syncRequested = Signal(str)       # 文件夹同步（参数为本地目录）
+    updateChecked = Signal(object)    # 检查更新结果（后台线程 emit，排队投递回主线程）
 
     # 默认缓存配置
     DEFAULT_CACHE_LIMIT_MB = 512
@@ -483,6 +487,12 @@ class SettingsPage(QWidget):
 
         # 百度凭证存储（DPAPI 加密落盘）；测试可注入假存储
         self._baidu_store = baidu_store or BaiduCredentialStore()
+
+        # 检查更新：默认走真实 GitHub 请求，测试可注入假函数；
+        # 后台线程引用防 GC，结果经 updateChecked 信号回主线程展示
+        self._fetch_release = update_checker.fetch_latest_release
+        self._update_thread = None
+        self.updateChecked.connect(self._on_update_checked)
 
         # 可滚动区域（Fluent 风格，透明无边框）
         scroll = ScrollArea(self)
@@ -841,6 +851,20 @@ class SettingsPage(QWidget):
 
         lay.addWidget(perf_group)
 
+        # ---- 关于 ----
+        about_group = SettingCardGroup("关于", content)
+        # 检查更新：对比 GitHub 最新 release 与当前版本，无需账号（公开仓库匿名可查）
+        self._check_update_card = PushSettingCard(
+            "检查更新",
+            FluentIcon.UPDATE,
+            "检查更新",
+            f"当前版本 v{__version__}",
+            parent=about_group,
+        )
+        self._check_update_card.clicked.connect(self._on_check_update)
+        about_group.addSettingCard(self._check_update_card)
+        lay.addWidget(about_group)
+
         # 版本号展示（设置页底部，muted 色小字）
         self._version_label = CaptionLabel(f"CloudPrism v{__version__}", content)
         self._version_label.setStyleSheet(f"color: {semantic_color('muted')};")
@@ -1028,6 +1052,76 @@ class SettingsPage(QWidget):
         """展示凭证申请教程（按需查看，不主动弹出）。"""
         dlg = BaiduGuideDialog(parent=self)
         dlg.exec()
+
+    # ------------------------------------------------------------------
+    # 检查更新（后台请求 GitHub，结果经信号回主线程展示）
+    # ------------------------------------------------------------------
+
+    def _on_check_update(self) -> None:
+        """发起检查：禁用按钮防重复点击，后台线程请求，避免阻塞 UI。"""
+        import threading
+
+        def _bg():
+            try:
+                info = self._fetch_release()
+                # 有有效版本号且大于当前版本才算“发现新版”
+                if info.get("tag") and update_checker.compare_versions(
+                    __version__, info["tag"]
+                ) < 0:
+                    self.updateChecked.emit({"status": "new", **info})
+                else:
+                    self.updateChecked.emit({"status": "latest", **info})
+            except LookupError as e:
+                self.updateChecked.emit({"status": "no_release", "err": str(e)})
+            except Exception as e:  # noqa: BLE001
+                self.updateChecked.emit({"status": "error", "err": str(e)})
+
+        self._check_update_card.setEnabled(False)
+        self._check_update_card.button.setText("正在检查…")
+        self._update_thread = threading.Thread(target=_bg, daemon=True)
+        self._update_thread.start()
+
+    def _on_update_checked(self, result: dict) -> None:
+        """主线程展示检查结果并恢复按钮状态。"""
+        self._check_update_card.setEnabled(True)
+        self._check_update_card.button.setText("检查更新")
+        status = result.get("status")
+        if status == "new":
+            tag = result.get("tag", "")
+            InfoBar.info(
+                title="发现新版本", content=f"最新版本 v{tag}",
+                parent=self, position=InfoBarPosition.TOP_RIGHT, duration=4000,
+            )
+            # 模态确认是否跳转下载页（无 html_url 时用 releases 页兜底）
+            msg = QMessageBox(self)
+            msg.setWindowTitle("发现新版本")
+            msg.setText(
+                f"发现新版本 {result.get('name') or 'v' + tag}"
+                f"（当前 v{__version__}），是否前往 GitHub 下载？"
+            )
+            go = msg.addButton("前往下载", QMessageBox.ButtonRole.AcceptRole)
+            msg.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+            msg.exec()
+            if msg.clickedButton() is go:
+                QDesktopServices.openUrl(QUrl(result.get("url") or update_checker.RELEASES_PAGE))
+        elif status == "latest":
+            InfoBar.success(
+                title="已是最新版本",
+                content=f"当前版本 v{__version__} 已是最新",
+                parent=self, position=InfoBarPosition.TOP_RIGHT, duration=4000,
+            )
+        elif status == "no_release":
+            InfoBar.warning(
+                title="暂无发布版本",
+                content="仓库尚未发布 release，可前往 Releases 页关注",
+                parent=self, position=InfoBarPosition.TOP_RIGHT, duration=4000,
+            )
+        else:
+            InfoBar.warning(
+                title="检查失败",
+                content="网络不可用或无法访问 GitHub，请稍后重试",
+                parent=self, position=InfoBarPosition.TOP_RIGHT, duration=4000,
+            )
 
     # ------------------------------------------------------------------
     # 公开方法

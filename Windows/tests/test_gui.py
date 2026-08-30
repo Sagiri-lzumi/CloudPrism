@@ -270,6 +270,48 @@ class TestMainWindow:
         assert sp._version_label is not None
         assert __version__ in sp._version_label.text()
 
+    def test_settings_page_check_update_card(self, qtbot):
+        """设置页「关于」分组含检查更新卡，内容展示当前版本。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        sp = win.settings_page
+        assert sp._check_update_card is not None
+        assert __version__ in sp._check_update_card.contentLabel.text()
+        assert sp._check_update_card.button.text() == "检查更新"
+        assert sp._check_update_card.isEnabled()
+
+    def test_check_update_latest_dispatch(self, qtbot):
+        """注入同版本假 fetch：结果为 latest，派发后按钮恢复可用。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        sp = win.settings_page
+        sp._fetch_release = lambda: {
+            "tag": __version__, "name": "", "url": "",
+        }
+        with qtbot.waitSignal(sp.updateChecked, timeout=3000) as blocker:
+            sp._on_check_update()
+        assert blocker.args[0]["status"] == "latest"
+        # 手动派发（与排队槽幂等）：按钮状态与文案恢复
+        sp._on_update_checked(blocker.args[0])
+        assert sp._check_update_card.isEnabled()
+        assert sp._check_update_card.button.text() == "检查更新"
+
+    def test_check_update_error_dispatch(self, qtbot):
+        """注入抛异常假 fetch：结果为 error，不崩溃且按钮恢复。"""
+        win = MainWindow()
+        qtbot.addWidget(win)
+        sp = win.settings_page
+
+        def _boom():
+            raise ConnectionError("网络请求失败")
+
+        sp._fetch_release = _boom
+        with qtbot.waitSignal(sp.updateChecked, timeout=3000) as blocker:
+            sp._on_check_update()
+        assert blocker.args[0]["status"] == "error"
+        sp._on_update_checked(blocker.args[0])
+        assert sp._check_update_card.isEnabled()
+
     def test_vault_info_page_rename_entry(self, qtbot):
         """密库信息页库名称行含编辑按钮，update_info 更新名称显示。"""
         win = MainWindow()
