@@ -1,6 +1,7 @@
 """应用设置持久化存储（QSettings 封装）。
 
-持久化以下设置（Windows 下存于注册表，其他平台为用户配置目录）：
+持久化以下设置（存于程序目录旁 ``data/cloudprism.ini``，便携化，
+不写注册表；单文件/绿色版拷走即整体迁移）：
   - 外观：主题索引、字体大小
   - 缓存：大小上限、缓存路径
   - 传输：分块大小索引
@@ -16,6 +17,8 @@ from datetime import datetime
 
 from PySide6.QtCore import QSettings
 
+from cloudprism.core.paths import config_file
+
 
 class SettingsStore:
     """QSettings 的类型化读写封装。"""
@@ -24,8 +27,11 @@ class SettingsStore:
     APPLICATION = "CloudPrism"
 
     def __init__(self, settings: QSettings | None = None) -> None:
-        # 允许注入 settings 实例（测试用内存 QSettings）
-        self._s = settings or QSettings(self.ORGANIZATION, self.APPLICATION)
+        # 允许注入 settings 实例（测试用内存 QSettings）；
+        # 默认写入程序目录 data/cloudprism.ini（便携化，不污染注册表）
+        self._s = settings or QSettings(
+            config_file(create=True), QSettings.Format.IniFormat
+        )
 
     # ------------------------------------------------------------------
     # 通用读写

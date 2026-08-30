@@ -110,16 +110,16 @@ def _dpapi_unprotect(data: bytes) -> bytes:
 class BaiduCredentialStore:
     """凭证与 token 的加密落盘存储。
 
-    Windows：DPAPI（当前用户）加密后写 %APPDATA%/CloudPrism/baidu.json；
-    其他平台（测试/移植）：Base64 明文兜底。
+    Windows：DPAPI（当前用户）加密后写程序目录旁 ``data/baidu.json``
+    （便携化，跟随程序目录迁移）；其他平台（测试/移植）：Base64 明文兜底。
     """
 
     def __init__(self, path: str | None = None) -> None:
         if path is None:
-            appdata = os.environ.get(
-                "APPDATA", os.path.join(os.path.expanduser("~"), ".config")
-            )
-            path = os.path.join(appdata, "CloudPrism", "baidu.json")
+            # 便携化：默认随程序目录，不再写 %APPDATA%
+            from cloudprism.core.paths import baidu_credential_file
+
+            path = baidu_credential_file()
         self.path = path
 
     def save(self, data: dict) -> None:

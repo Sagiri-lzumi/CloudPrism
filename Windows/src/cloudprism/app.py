@@ -1411,21 +1411,59 @@ class AppController(QObject):
         th.start()
 
 
+def _migrate_registry_settings() -> None:
+    """一次性迁移：把旧版注册表设置拷入便携 ini 并清理注册表。
+
+    幂等：仅当注册表有数据且便携 ini 尚未生成时执行；已有 ini 不覆盖。
+    任何环节失败都只记日志不阻塞启动（老用户最多需重新设置偏好）。
+    """
+    import logging
+    import os
+
+    from PySide6.QtCore import QSettings
+
+    from cloudprism.core.paths import config_file
+
+    try:
+        # NativeFormat：Windows 下即 HKCU\Software\CloudPrism\CloudPrism
+        reg = QSettings(SettingsStore.ORGANIZATION, SettingsStore.APPLICATION)
+        keys = reg.allKeys()
+        ini_path = config_file()
+        if not keys or os.path.exists(ini_path):
+            return
+        ini = QSettings(ini_path, QSettings.Format.IniFormat)
+        for k in keys:
+            ini.setValue(k, reg.value(k))
+        ini.sync()
+        # 迁移成功后清理注册表：remove("") 删除本作用域全部键值与子键
+        reg.remove("")
+        reg.sync()
+        # 再尝试删除可能残留的空父键（DeleteKey 仅对空键生效，安全）
+        try:
+            import winreg
+
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, r"Software\CloudPrism")
+        except OSError:
+            pass
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).warning(
+            "注册表设置迁移失败，本次使用便携设置", exc_info=True
+        )
+
+
 def main() -> int:
     """程序入口。"""
-    import os
-    import tempfile
-
-    # 重定向 qfluentwidgets 的 qconfig 落盘路径：库设置卡片默认把配置写到
-    # 工作目录的 config/config.json，会污染源码目录/打包目录；本应用自有
-    # 持久化（SettingsStore），此处仅把库配置引到临时目录
+    # 便携化落盘：qfluentwidgets 库设置卡片默认把配置写到工作目录的
+    # config/config.json，会污染源码目录/打包目录；重定向到程序目录 data/
     from qfluentwidgets import qconfig
 
-    qconfig.load(
-        os.path.join(tempfile.gettempdir(), "cloudprism_qfluent_config.json")
-    )
+    from cloudprism.core.paths import qfluent_config_file
+
+    qconfig.load(qfluent_config_file(create=True))
 
     app = QApplication(sys.argv)
+    # 老版本注册表设置 -> 便携 ini 的一次性迁移（幂等，失败不阻塞）
+    _migrate_registry_settings()
     store = SettingsStore()
     # 应用 Fluent 主题（浅色 / 深色 / 跟随系统，沿用持久化选择）
     modes = ["system", "dark", "light"]

@@ -30,3 +30,20 @@ def _sync_vault_ops(monkeypatch):
 
     monkeypatch.setattr(InitWizard, "sync_ops", True)
     monkeypatch.setattr(QuickConnectDialog, "sync_ops", True)
+
+
+@pytest.fixture(autouse=True)
+def _portable_paths_tmp(tmp_path, monkeypatch):
+    """测试环境把便携数据文件重定向到临时目录。
+
+    避免 AppController 等构造默认 SettingsStore / 百度凭证存储时，
+    向项目目录的 data/ 或注册表写入测试数据。
+    """
+    monkeypatch.setattr(
+        "cloudprism.core.settings_store.config_file",
+        lambda create=False: str(tmp_path / "cloudprism.ini"),
+    )
+    monkeypatch.setattr(
+        "cloudprism.core.paths.baidu_credential_file",
+        lambda create=False: str(tmp_path / "baidu.json"),
+    )
