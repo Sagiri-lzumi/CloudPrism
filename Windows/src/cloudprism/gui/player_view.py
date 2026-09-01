@@ -79,18 +79,28 @@ class PlayerWidget(QWidget):
         controls.addWidget(self._slider, stretch=1)
         controls.addWidget(self._time_label)
 
+        # 错误提示行（加载/拉流失败不再无声）
+        self._error_label = QLabel("", self)
+        self._error_label.setWordWrap(True)
+        self._error_label.setStyleSheet("color: #d13438;")
+        self._error_label.hide()
+
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.video_widget, stretch=1)
         lay.addLayout(controls)
+        lay.addWidget(self._error_label)
 
-        # ---- 信号接线：进度/时长/状态 ----
+        # ---- 信号接线：进度/时长/状态/错误 ----
         self.player.positionChanged.connect(self._on_position)
         self.player.durationChanged.connect(self._on_duration)
         self.player.playbackStateChanged.connect(self._on_state)
+        self.player.errorOccurred.connect(self._on_error)
 
-        # 指定媒体源（不自动播放，由用户点播放）
+        # 指定媒体源后自动播放（选中视频即开播；
+        # 加载完成后状态信号自动同步按钮文字）
         self.player.setSource(QUrl(self._media_url))
+        self.player.play()
 
     # ------------------------------------------------------------------
     # 属性
@@ -128,11 +138,18 @@ class PlayerWidget(QWidget):
         self._slider.setRange(0, ms)
 
     def _on_state(self, state) -> None:
-        """播放状态切换：更新按钮文字。"""
+        """播放状态切换：更新按钮文字；开播后清除错误提示。"""
         if state == QMediaPlayer.PlayingState:
             self._play_btn.setText("暂停")
+            self._error_label.hide()
         else:
             self._play_btn.setText("播放")
+
+    def _on_error(self, error, error_string: str) -> None:
+        """播放器错误（编解码不支持/代理拉流失败等）上屏提示。"""
+        text = error_string or str(error)
+        self._error_label.setText(f"播放失败：{text}")
+        self._error_label.show()
 
     # ------------------------------------------------------------------
     # 代理管理（供外部调用）
@@ -156,9 +173,12 @@ class PlayerView(QDialog):
         backend: StorageBackend,
         remote_path: str,
         parent=None,
+        display_name: str | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(f"播放 - {remote_path.rsplit('/', 1)[-1]}")
+        # 窗口标题优先用解密后的展示名（避免显示密文叶子名）
+        title = display_name or remote_path.rsplit("/", 1)[-1]
+        self.setWindowTitle(f"播放 - {title}")
         self.resize(720, 480)
 
         self._remote_path = remote_path

@@ -168,6 +168,52 @@ class TestPlayerWidget:
         assert data == plaintext
         widget.stop_proxy()
 
+    def test_widget_autoplay_after_set_source(
+        self, qtbot, session, backend_with_media, monkeypatch
+    ):
+        """选中媒体即自动开播（setSource 后调用 play）。"""
+        from PySide6.QtMultimedia import QMediaPlayer
+
+        backend, _ = backend_with_media
+        calls: list[int] = []
+        monkeypatch.setattr(
+            QMediaPlayer, "play", lambda self: calls.append(1)
+        )
+        widget = PlayerWidget(session, backend, "videos/sample.cpenc")
+        qtbot.addWidget(widget)
+        assert calls                       # play() 已在构造中被调用
+        widget.stop_proxy()
+
+    def test_widget_error_signal_wired(self, qtbot, session, backend_with_media):
+        """错误信号已接线：播放失败上屏提示而非静默。"""
+        from PySide6.QtMultimedia import QMediaPlayer
+
+        backend, _ = backend_with_media
+        widget = PlayerWidget(session, backend, "videos/sample.cpenc")
+        qtbot.addWidget(widget)
+        widget.show()
+        assert not widget._error_label.isVisible()
+        # 触发错误信号：提示行应上屏（接线有效的行为验证）
+        widget.player.errorOccurred.emit(
+            QMediaPlayer.ResourceError, "模拟拉流失败"
+        )
+        assert widget._error_label.isVisible()
+        assert "播放失败" in widget._error_label.text()
+        widget.stop_proxy()
+
+    def test_view_title_prefers_display_name(
+        self, qtbot, session, backend_with_media
+    ):
+        """窗口标题优先用展示名（不显示密文叶子名）。"""
+        backend, _ = backend_with_media
+        view = PlayerView(
+            session, backend, "videos/sample.cpenc",
+            display_name="演示视频.mp4",
+        )
+        qtbot.addWidget(view)
+        assert "演示视频.mp4" in view.windowTitle()
+        view._widget.stop_proxy()
+
 
 class TestAppController:
     """应用组装。"""
