@@ -398,7 +398,11 @@ class MainWindow(FluentWindow):
         node = indexes[0].internalPointer()
         if node is None:
             return ""
-        # 沿父链拼接后端原始名（文件名加密时为密文名）
+        # 委托目录树模型构建（含子目录密库根前缀），
+        # 模型不可用时兜底沿父链拼接后端原始名。
+        model = self.file_tree.model()
+        if model is not None and hasattr(model, "remote_path"):
+            return model.remote_path(node)
         parts: list[str] = []
         cur = node
         while cur is not None and cur.name:
@@ -419,6 +423,10 @@ class MainWindow(FluentWindow):
             node = node.parent
         if node is None:
             return ""
+        # 委托目录树模型构建（含子目录密库根前缀）
+        model = self.file_tree.model()
+        if model is not None and hasattr(model, "remote_path"):
+            return model.remote_path(node)
         parts: list[str] = []
         cur = node
         while cur is not None and cur.name:

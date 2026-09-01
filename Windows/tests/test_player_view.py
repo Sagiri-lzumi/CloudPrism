@@ -337,3 +337,49 @@ class TestAppController:
         assert win.preview_panel.currentIndex() == win.preview_panel.PAGE_MEDIA
         # 清理播放器与代理，避免端口残留影响后续用例
         win.preview_panel._stop_current_player()
+
+    def test_selection_subdir_vault_path_has_prefix(
+        self, qtbot, fetch_wait, tmp_path, monkeypatch
+    ):
+        """子目录密库：选中路径经模型构建含密库根前缀（代理取头依赖）。"""
+        import cloudprism.app as app_mod
+        monkeypatch.setattr(
+            app_mod.QMessageBox, "information", lambda *a, **k: None
+        )
+
+        from PySide6.QtCore import QItemSelectionModel
+        from cloudprism.core.vault_manager import VaultManager
+        from cloudprism.gui.init_wizard import InitWizard
+
+        host_root = tmp_path / "host"
+        (host_root / "vaults" / "mini").mkdir(parents=True)
+        backend = LocalFolderBackend(host_root)
+        # 在子目录建库（子目录密库场景）
+        vm = VaultManager(backend)
+        meta = vm.create_vault("pw4", filename_enc=False, vault_path="vaults/mini")
+
+        (host_root / "vaults" / "mini" / "样本.txt.cpenc").write_bytes(b"d")
+
+        win = MainWindow()
+        qtbot.addWidget(win)
+        ctrl = AppController(win)
+        wizard = InitWizard()
+        qtbot.addWidget(wizard)
+        wizard.backend = backend
+        wizard.metadata = meta
+        wizard.session = Session("pw4")
+        wizard.vault_path = "vaults/mini"
+        ctrl._apply_setup(wizard)
+
+        model = win.file_tree.model()
+        fetch_wait(model)
+        assert model.rowCount() == 1
+        node = model.node_for_index(model.index(0, 0))
+        # 路径必须含密库根前缀，否则代理取头 404 播放失败
+        assert model.remote_path(node) == "vaults/mini/样本.txt.cpenc"
+        # 主窗口选中路径同源委托，同样带前缀
+        win.file_tree.selectionModel().select(
+            model.index(0, 0),
+            QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows,
+        )
+        assert win._selected_path() == "vaults/mini/样本.txt.cpenc"

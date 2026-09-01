@@ -743,24 +743,15 @@ class AppController(QObject):
             self.window.preview_panel.show_welcome()
             return
 
+        # 路径经目录树模型构建（含子目录密库根前缀），
         # 分类用解密后的展示名（后端名一律以 .cpenc 结尾，认不出媒体扩展名）
-        remote_path = self._build_remote_path(node)
+        remote_path = self._tree_model.remote_path(node)
         display = self._tree_model.display_name(node)
         self.window.preview_panel.show_file(
             self.session, self.backend, remote_path, display_name=display
         )
         # 网格视图下选中变更同步刷新当前目录（选中文件则显示其所在目录）
         self._refresh_grid()
-
-    def _build_remote_path(self, node) -> str:
-        """从树节点构建远端路径。"""
-        parts = []
-        current = node
-        while current is not None and current.name:
-            parts.append(current.name)
-            current = current.parent
-        parts.reverse()
-        return "/".join(parts)
 
     # ------------------------------------------------------------------
     # 上传 / 下载

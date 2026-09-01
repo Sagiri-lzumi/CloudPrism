@@ -130,7 +130,11 @@ class FileTreeView(QTreeView):
         menu.exec(event.globalPos())
 
     def _remote_path(self, node) -> str:
-        """沿父链拼接后端原始名，得到远端路径。"""
+        """节点远端路径：委托目录树模型（含子目录密库根前缀）。"""
+        model = self.model()
+        if model is not None and hasattr(model, "remote_path"):
+            return model.remote_path(node)
+        # 兜底：沿父链拼接后端原始名（模型未装载阶段）
         parts: list[str] = []
         cur = node
         while cur is not None and cur.name:
