@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cloudprism import constants
 from cloudprism.gui.theme import semantic_color
 
 if TYPE_CHECKING:
@@ -175,14 +176,27 @@ class PreviewPanel(QStackedWidget):
         session: "Session",
         backend: "StorageBackend",
         remote_path: str,
+        display_name: str | None = None,
     ) -> None:
         """根据文件类型自动选择预览方式。
 
         对于媒体文件直接启动播放器；
         对于图片/文本，从后端下载内容后展示；
         其他类型显示文件信息。
+
+        参数:
+            remote_path: 后端原始路径（密文名），供代理与解密使用；
+            display_name: 解密后的展示名（可选），用于类型分类与展示；
+                未提供时兜底为叶子名去 .cpenc（密库文件后端名一律以
+                .cpenc 结尾，直接按叶子名分类会把媒体误判为信息页）。
         """
-        filename = remote_path.rsplit("/", 1)[-1]
+        leaf = remote_path.rsplit("/", 1)[-1]
+        if display_name:
+            filename = display_name
+        elif leaf.endswith(constants.FILE_EXTENSION):
+            filename = leaf[: -len(constants.FILE_EXTENSION)]
+        else:
+            filename = leaf
         file_type = classify_file(filename)
 
         if file_type == "media":

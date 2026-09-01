@@ -288,3 +288,52 @@ class TestAppController:
         assert t.local_path.endswith(os.path.join("项目资料", "秘密.txt"))
         # 本地目录树按明文结构预先创建
         assert (save_root / "项目资料").is_dir()
+
+    def test_selection_video_enters_media_page(
+        self, qtbot, fetch_wait, tmp_path, monkeypatch
+    ):
+        """文件名加密库选中视频：按展示名分类直达播放界面。
+
+        后端叶子名为 Base32 密文 + .cpenc，旧分类逻辑会误判为信息页。
+        """
+        import cloudprism.app as app_mod
+        monkeypatch.setattr(
+            app_mod.QMessageBox, "information", lambda *a, **k: None
+        )
+
+        from PySide6.QtCore import QItemSelectionModel
+        from cloudprism.core.vault_manager import VaultManager
+        from cloudprism.gui.init_wizard import InitWizard
+
+        root = tmp_path / "vault_media"
+        root.mkdir()
+        backend = LocalFolderBackend(root)
+        vm = VaultManager(backend)
+        meta = vm.create_vault("pw3", filename_enc=True)
+
+        session = Session("pw3")
+        key = session.derive_key(meta.salt)
+        stored = FilenameCipher.encrypt("电影.mp4", key) + ".cpenc"
+        (root / stored).write_bytes(b"data")
+
+        win = MainWindow()
+        qtbot.addWidget(win)
+        ctrl = AppController(win)
+        wizard = InitWizard()
+        qtbot.addWidget(wizard)
+        wizard.backend = backend
+        wizard.metadata = meta
+        wizard.session = session
+        ctrl._apply_setup(wizard)
+
+        model = win.file_tree.model()
+        fetch_wait(model)
+        assert model.rowCount() == 1
+        # 选中文件节点 -> 预览分发应落入媒体页（播放器）
+        win.file_tree.selectionModel().select(
+            model.index(0, 0),
+            QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows,
+        )
+        assert win.preview_panel.currentIndex() == win.preview_panel.PAGE_MEDIA
+        # 清理播放器与代理，避免端口残留影响后续用例
+        win.preview_panel._stop_current_player()

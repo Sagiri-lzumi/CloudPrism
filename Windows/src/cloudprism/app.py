@@ -743,8 +743,12 @@ class AppController(QObject):
             self.window.preview_panel.show_welcome()
             return
 
+        # 分类用解密后的展示名（后端名一律以 .cpenc 结尾，认不出媒体扩展名）
         remote_path = self._build_remote_path(node)
-        self.window.preview_panel.show_file(self.session, self.backend, remote_path)
+        display = self._tree_model.display_name(node)
+        self.window.preview_panel.show_file(
+            self.session, self.backend, remote_path, display_name=display
+        )
         # 网格视图下选中变更同步刷新当前目录（选中文件则显示其所在目录）
         self._refresh_grid()
 
