@@ -127,17 +127,38 @@ def test_connect_success(qtbot, fake_vm):
 
 
 def test_connect_reports_progress_stages(qtbot, fake_vm):
-    """后台开库进度提示：阶段文案写入状态栏，完成后进度条隐藏。"""
+    """后台开库进度提示：阶段文案写入状态栏与日志框，完成后进度条隐藏。"""
     dlg = QuickConnectDialog(LOCAL_RECORD, backend_factory=RecordingFactory())
     qtbot.addWidget(dlg)
     assert dlg._busy_bar.isHidden()  # 默认隐藏
+    assert dlg._progress_log.isHidden()  # 日志框默认隐藏
     dlg._pw_edit.setText("pw")
     dlg._connect()
     assert dlg.result() == QDialog.DialogCode.Accepted
     # 开库方法收到 progress_cb 且阶段文案写入状态栏（同步直连槽）
     assert FakeVaultManager.progress_stages
     assert "校验主密码" in dlg._status.text()
+    # 日志框连接期间出现，记录首条与阶段文案、成功收尾文案（带时间戳）
+    assert not dlg._progress_log.isHidden()
+    log = dlg._progress_log.log_text()
+    assert "开始连接密库…" in log
+    assert "校验主密码" in log
+    assert "连接成功" in log
+    import re
+
+    assert re.search(r"\[\d{2}:\d{2}:\d{2}\]", log)
     # 完成后不定进度条隐藏（on_done 中 _busy_bar.setVisible(False)）
+    assert dlg._busy_bar.isHidden()
+
+
+def test_factory_error_hides_progress_log(qtbot, fake_vm):
+    """后端构造同步失败：日志框隐藏，不残留忙碌观感。"""
+    factory = RecordingFactory(raise_exc=FileNotFoundError("目录不存在"))
+    dlg = QuickConnectDialog(LOCAL_RECORD, backend_factory=factory)
+    qtbot.addWidget(dlg)
+    dlg._pw_edit.setText("pw")
+    dlg._connect()
+    assert dlg._progress_log.isHidden()
     assert dlg._busy_bar.isHidden()
 
 

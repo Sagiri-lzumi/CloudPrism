@@ -44,6 +44,7 @@ from cloudprism.core.session import Session
 from cloudprism.core.vault_manager import VaultManager
 from cloudprism.gui.baidu_auth import BaiduAuthDialog
 from cloudprism.gui.busy_op import run_busy
+from cloudprism.gui.progress_log import ProgressLogBox
 from cloudprism.gui.theme import semantic_color
 from cloudprism.storage.backend import StorageBackend
 from cloudprism.storage.baidu_backend import (
@@ -155,6 +156,10 @@ class BackendTypePage(QWizardPage):
 
 class BackendConfigPage(QWizardPage):
     """页 3：根据后端类型显示对应配置表单 + 测试连接按钮。"""
+
+    # 测试连接默认后台线程执行（远端后端需数秒）；
+    # 测试置 True 走同步路径（无需事件循环）
+    sync_test = False
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -311,21 +316,44 @@ class BackendConfigPage(QWizardPage):
         self.completeChanged.emit()
 
     def _test_connection(self) -> None:
-        """测试后端连接是否可用。"""
-        try:
+        """测试后端连接是否可用。
+
+        远端后端（WebDAV/百度）的 list_dir 需数秒，默认后台线程执行，
+        避免向导界面冻结；测试置 sync_test=True 走同步路径。
+        """
+        self._test_passed = False
+        self.test_btn.setEnabled(False)
+        self.test_status.setText("正在测试连接…")
+        self.test_status.setStyleSheet(f"color: {semantic_color('muted')};")
+
+        def op():
             backend = self.build_backend()
             # 本地后端：构造成功即通过（目录存在且可访问）
             # WebDAV / 百度网盘：尝试列出根目录验证连通性
             if isinstance(backend, (WebDavBackend, BaiduNetdiskBackend)):
                 backend.list_dir("")
+            return True
+
+        def on_done(_result):
             self._test_passed = True
+            self.test_btn.setEnabled(True)
             self.test_status.setText("连接成功")
-            self.test_status.setStyleSheet(f"color: {semantic_color('ok')}; font-weight: bold;")
-        except Exception as e:
+            self.test_status.setStyleSheet(
+                f"color: {semantic_color('ok')}; font-weight: bold;"
+            )
+            self.completeChanged.emit()
+
+        def on_error(msg: str):
             self._test_passed = False
-            self.test_status.setText(f"连接失败：{e}")
+            self.test_btn.setEnabled(True)
+            self.test_status.setText(f"连接失败：{msg}")
             self.test_status.setStyleSheet(f"color: {semantic_color('err')};")
-        self.completeChanged.emit()
+            self.completeChanged.emit()
+
+        # 持有线程引用防 GC；同步模式（测试）原地执行无需事件循环
+        self._test_thread = run_busy(
+            op, on_done, on_error, parent=self, sync=self.sync_test,
+        )
 
     # ------------------------------------------------------------------
     # QWizardPage 接口
@@ -452,6 +480,11 @@ class PasswordPage(QWizardPage):
         self.busy_bar = IndeterminateProgressBar(self)
         self.busy_bar.setVisible(False)
         lay.addWidget(self.busy_bar)
+        # 实时日志框（默认隐藏）：逐条展示阶段文案与时间戳，
+        # 让数秒级派生等待清晰可见，避免误以为程序卡死
+        self.progress_log = ProgressLogBox(self)
+        self.progress_log.setVisible(False)
+        lay.addWidget(self.progress_log)
         lay.addStretch()
 
     def initializePage(self) -> None:
@@ -668,21 +701,25 @@ class InitWizard(QWizard):
         self.page_password.setSubTitle(msg)
 
     def _on_progress(self, msg: str) -> None:
-        """阶段进度文案实时写入密码页副标题。"""
+        """阶段进度文案实时写入密码页副标题与日志框。"""
         self.page_password.setSubTitle(msg)
+        self.page_password.progress_log.append_log(msg)
 
     def _set_busy(self, busy: bool) -> None:
-        """后台建库/开库期间锁定导航按钮并展示不定进度条。
+        """后台建库/开库期间锁定导航按钮并展示不定进度条与日志框。
 
-        阶段文案经 progressed 信号逐条更新副标题；结束/出错时
-        隐藏进度条，副标题留给错误文案或恢复默认。
+        阶段文案经 progressed 信号逐条更新副标题与日志框；结束/出错时
+        隐藏进度条与日志框，副标题留给错误文案或恢复默认。
         """
         for role in (QWizard.WizardButton.NextButton, QWizard.WizardButton.FinishButton):
             btn = self.button(role)
             if btn is not None:
                 btn.setEnabled(not busy)
         self.page_password.busy_bar.setVisible(busy)
+        self.page_password.progress_log.setVisible(busy)
         if busy:
+            self.page_password.progress_log.clear_log()
+            self.page_password.progress_log.append_log("正在处理，请稍候…")
             self.page_password.setSubTitle(
                 "正在处理，密码校验约需数秒，请稍候…"
             )

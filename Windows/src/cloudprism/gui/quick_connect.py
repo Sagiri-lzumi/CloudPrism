@@ -28,6 +28,7 @@ from cloudprism.core.backend_factory import build_backend_from_params
 from cloudprism.core.session import Session
 from cloudprism.core.vault_manager import VaultManager
 from cloudprism.gui.busy_op import run_busy
+from cloudprism.gui.progress_log import ProgressLogBox
 from cloudprism.gui.theme import semantic_color
 
 
@@ -146,6 +147,12 @@ class QuickConnectDialog(QDialog):
         self._status.setStyleSheet(f"color: {semantic_color('err')};")
         lay.addWidget(self._status)
 
+        # 实时日志框（默认隐藏）：连接期间逐条展示阶段文案与时间戳，
+        # 让数秒级派生等待清晰可见，避免误以为程序卡死
+        self._progress_log = ProgressLogBox(self)
+        self._progress_log.setVisible(False)
+        lay.addWidget(self._progress_log)
+
         lay.addStretch()
 
         # 阶段进度 -> 状态栏实时展示（避免数秒空白等待误以为卡死）
@@ -162,9 +169,10 @@ class QuickConnectDialog(QDialog):
             self._status.setText("")
 
     def _on_progress(self, msg: str) -> None:
-        """阶段进度文案实时写入状态栏（进度用中性色，区别于错误红）。"""
+        """阶段进度文案实时写入状态栏与日志框（进度用中性色，区别于错误红）。"""
         self._status.setStyleSheet(f"color: {semantic_color('muted')};")
         self._status.setText(msg)
+        self._progress_log.append_log(msg)
 
     def _connect(self) -> None:
         """构造后端并打开密库（主密码或恢复码）；失败在对话框内提示。"""
@@ -189,6 +197,10 @@ class QuickConnectDialog(QDialog):
         path = self._record.get("path", "")
         self._connect_btn.setEnabled(False)
         self._busy_bar.setVisible(True)
+        # 日志框清空并展示首条，后续阶段文案经 progressed 信号逐条追加
+        self._progress_log.clear_log()
+        self._progress_log.setVisible(True)
+        self._progress_log.append_log("开始连接密库…")
         self._status.setStyleSheet(f"color: {semantic_color('muted')};")
         self._status.setText("正在校验主密码，约需数秒…")
         try:
@@ -202,6 +214,7 @@ class QuickConnectDialog(QDialog):
         except Exception as e:  # noqa: BLE001
             self._connect_btn.setEnabled(True)
             self._busy_bar.setVisible(False)
+            self._progress_log.setVisible(False)
             self._status.setStyleSheet(f"color: {semantic_color('err')};")
             self._status.setText(f"连接失败：{e}")
             return
@@ -239,6 +252,7 @@ class QuickConnectDialog(QDialog):
             meta, final_pw = result
             self._connect_btn.setEnabled(True)
             self._busy_bar.setVisible(False)
+            self._progress_log.append_log("连接成功，正在进入密库…")
             self.backend = backend
             self.metadata = meta
             self.session = Session(final_pw)
@@ -247,6 +261,7 @@ class QuickConnectDialog(QDialog):
         def on_error(msg: str):
             self._connect_btn.setEnabled(True)
             self._busy_bar.setVisible(False)
+            self._progress_log.setVisible(False)
             self._status.setStyleSheet(f"color: {semantic_color('err')};")
             self._status.setText(msg or "未知错误")
 

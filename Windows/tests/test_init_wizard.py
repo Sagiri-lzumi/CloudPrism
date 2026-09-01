@@ -396,6 +396,23 @@ class TestWizardProgress:
         w._set_busy(False)
         assert w.page_password.busy_bar.isHidden()
 
+    def test_progress_log_visibility_follows_set_busy(self, qtbot):
+        """日志框默认隐藏，随 _set_busy 显隐；忙态写入首条提示。"""
+        w = _make_wizard(qtbot)
+        assert w.page_password.progress_log.isHidden()
+        w._set_busy(True)
+        assert not w.page_password.progress_log.isHidden()
+        assert "正在处理" in w.page_password.progress_log.log_text()
+        w._set_busy(False)
+        assert w.page_password.progress_log.isHidden()
+
+    def test_on_progress_writes_log_box(self, qtbot):
+        """阶段文案同步写入副标题与日志框。"""
+        w = _make_wizard(qtbot)
+        w._on_progress("正在载入密库文件…")
+        assert w.page_password.subTitle() == "正在载入密库文件…"
+        assert "正在载入密库文件…" in w.page_password.progress_log.log_text()
+
     def test_new_vault_emits_progress_stages(self, qtbot, tmp_path):
         """新建（同步路径）：progressed 收到完整阶段序列。"""
         w = _make_wizard(qtbot)
@@ -430,6 +447,11 @@ class TestWizardProgress:
         assert stages == ["正在载入密库文件…", "校验主密码（密钥派生，约需数秒）…"]
         # 阶段文案实时写入副标题（最终停留在末条）
         assert w.page_password.subTitle() == stages[-1]
+        # 阶段文案逐条进入日志框（含首条忙态提示）
+        log = w.page_password.progress_log.log_text()
+        assert "正在处理" in log
+        for s in stages:
+            assert s in log
 
 
 class TestInitWizardConnect:
@@ -563,23 +585,28 @@ class TestBackendTypePage:
 class TestBackendConfigPage:
     """后端配置页 & 测试连接测试。"""
 
-    def test_backend_config_test_connection_local(self, qtbot, tmp_path):
-        """本地后端：目录存在时测试连接成功。"""
+    def test_backend_config_test_connection_local(self, qtbot, tmp_path, monkeypatch):
+        """本地后端：目录存在时测试连接成功（同步路径）。"""
         root = tmp_path / "vault_root"
         root.mkdir()
         w = _make_wizard(qtbot)
         w.backend_type = "local"
         w.page_backend_cfg.local_dir_edit.setText(str(root))
+        # 同步路径：无需事件循环，便于直接断言（生产默认为后台异步）
+        monkeypatch.setattr(type(w.page_backend_cfg), "sync_test", True)
         # 点击测试连接
         w.page_backend_cfg._test_connection()
         assert w.page_backend_cfg._test_passed is True
         assert "成功" in w.page_backend_cfg.test_status.text()
+        # 测试期间禁用按钮，完成后恢复可用
+        assert w.page_backend_cfg.test_btn.isEnabled()
 
-    def test_backend_config_test_connection_local_invalid(self, qtbot):
-        """本地后端：目录不存在时测试连接失败。"""
+    def test_backend_config_test_connection_local_invalid(self, qtbot, monkeypatch):
+        """本地后端：目录不存在时测试连接失败（同步路径）。"""
         w = _make_wizard(qtbot)
         w.backend_type = "local"
         w.page_backend_cfg.local_dir_edit.setText("/nonexistent/path/abc123")
+        monkeypatch.setattr(type(w.page_backend_cfg), "sync_test", True)
         w.page_backend_cfg._test_connection()
         assert w.page_backend_cfg._test_passed is False
         assert "失败" in w.page_backend_cfg.test_status.text()

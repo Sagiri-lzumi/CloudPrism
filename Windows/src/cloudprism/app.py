@@ -112,6 +112,8 @@ class AppController(QObject):
 
     # 恢复码生成阶段进度（工作线程 emit，跨线程排队投递主线程更新 InfoBar）
     recoveryProgress = Signal(str)
+    # 连接其他密库阶段进度（同上，跨线程排队投递主线程更新 InfoBar）
+    otherVaultProgress = Signal(str)
 
     def __init__(self, window: MainWindow) -> None:
         super().__init__(window)  # QObject 父级：随窗口销毁，支持事件过滤
@@ -130,9 +132,11 @@ class AppController(QObject):
         self._connected_at: datetime | None = None
         # 恢复码生成后台线程引用（防 GC）；测试可置 _sync_vault_ops 同步执行
         self._recovery_thread = None
-        # 其他密库连接后台线程引用（防 GC）；恢复码生成进度提示条
+        # 其他密库连接后台线程引用（防 GC）；恢复码生成进度提示条；
+        # 连接其他密库进度提示条（均为持久条，完成/失败手动关闭）
         self._other_vault_thread = None
         self._recovery_bar = None
+        self._other_vault_bar = None
         self._sync_vault_ops = False
 
         # 接入设置持久化存储（须在自动锁定定时器同步前完成载入）
@@ -186,6 +190,8 @@ class AppController(QObject):
         window.initRequested.connect(self.show_init_wizard)
         # 恢复码生成阶段进度（工作线程 -> 主线程提示条）
         self.recoveryProgress.connect(self._on_recovery_progress)
+        # 连接其他密库阶段进度（工作线程 -> 主线程提示条）
+        self.otherVaultProgress.connect(self._on_other_vault_progress)
         window.uploadRequested.connect(self.upload_file)
         window.downloadRequested.connect(self.download_file)
         window.playRequested.connect(self.play_file)
@@ -387,6 +393,17 @@ class AppController(QObject):
         if self._recovery_bar is not None:
             self._recovery_bar.close()
             self._recovery_bar = None
+
+    def _on_other_vault_progress(self, msg: str) -> None:
+        """连接其他密库阶段文案 -> 进度提示条（主线程投递）。"""
+        if self._other_vault_bar is not None:
+            self._other_vault_bar.setContent(msg)
+
+    def _close_other_vault_bar(self) -> None:
+        """关闭连接其他密库进度提示条（幂等）。"""
+        if self._other_vault_bar is not None:
+            self._other_vault_bar.close()
+            self._other_vault_bar = None
 
     def _on_sync_folder(self, local_dir: str) -> None:
         """文件夹同步：对比索引生成计划，新增/变更文件走统一队列。"""
@@ -625,15 +642,21 @@ class AppController(QObject):
 
         vm = VaultManager(self.backend)
         backend = self.backend
-        InfoBar.info(
+        # 进度提示：不自动关闭（duration=-1），完成/失败时手动关；
+        # 阶段文案经 otherVaultProgress 信号从工作线程投递到本条更新，
+        # 避免旧版 4 秒自消失条在派生未结束时提前消失造成的"失联"观感
+        self._close_other_vault_bar()
+        self._other_vault_bar = InfoBar.info(
             title="正在连接密库",
-            content=f"“{show_name}”密码校验约需数秒，请稍候…",
-            parent=self.window, position=InfoBarPosition.TOP_RIGHT, duration=4000,
+            content=f"正在连接“{show_name}”，密码校验约需数秒…",
+            parent=self.window, position=InfoBarPosition.TOP_RIGHT, duration=-1,
         )
 
         def op():
-            # 后台重操作：开库校验（含数秒级 PBKDF2 派生）
-            meta = vm.open_vault(password, vault_path)
+            # 后台重操作：开库校验（含数秒级 PBKDF2 派生），阶段文案回传进度条
+            meta = vm.open_vault(
+                password, vault_path, progress_cb=self.otherVaultProgress.emit,
+            )
             if meta is None:
                 if not vm.has_vault(vault_path):
                     raise RuntimeError("该位置不存在密库，请检查密库位置")
@@ -641,12 +664,14 @@ class AppController(QObject):
             return meta
 
         def on_done(meta):
+            self._close_other_vault_bar()
             self._apply_connection(
                 backend, meta, Session(password), vault_path=vault_path
             )
             self._remember_current_vault()
 
         def on_error(msg: str):
+            self._close_other_vault_bar()
             box = FluentMessageBox("连接失败", msg or "未知错误", self.window)
             box.exec()
 
@@ -1580,6 +1605,7 @@ def main() -> int:
     window = MainWindow()
     controller = AppController(window)  # noqa: F841  控制器需保持引用
     window.show()
+
     exit_code = app.exec()
     # 停止性能监控
     controller._perf.stop()
