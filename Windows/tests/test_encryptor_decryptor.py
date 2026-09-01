@@ -119,6 +119,71 @@ class TestEncryptDecryptRoundtrip:
         assert len(data) == 51 + len(plaintext)
 
 
+class TestParallelEncrypt:
+    """多核并行加密（ProcessPoolExecutor 路径）。"""
+
+    def test_parallel_roundtrip_and_progress(self, session, tmp_path):
+        """≥8MB 文件 max_workers=2：加密上传 -> 下载解密还原明文；
+        并行路径进度序列单调不减且终值 1.0。"""
+        root = tmp_path / "backend"
+        root.mkdir()
+        backend = _local_backend(root)
+        plaintext = os.urandom(8 * 1024 * 1024)  # 8MB：触发并行分段（每段至少 4MB）
+        src = tmp_path / "big.bin"
+        src.write_bytes(plaintext)
+
+        # 加密上传（多进程路径）
+        enc = Encryptor(session, backend)
+        progress = list(
+            enc.encrypt_and_upload(str(src), "big.cpenc", max_workers=2)
+        )
+        assert backend.exists("big.cpenc")
+        # 进度单调不减、终值 1.0（各值均在 0~1 区间）
+        assert all(0.0 <= p <= 1.0 for p in progress)
+        assert progress == sorted(progress)
+        assert progress[-1] == pytest.approx(1.0)
+
+        # 下载解密还原明文（分段拼接密文与流式密文格式等价）
+        dec = Decryptor(session, backend)
+        out = tmp_path / "out.bin"
+        list(dec.download_and_decrypt("big.cpenc", str(out)))
+        assert out.read_bytes() == plaintext
+
+    def test_parallel_unavailable_falls_back_to_sequential(
+        self, session, tmp_path, monkeypatch
+    ):
+        """并行机制不可用（Pipe 被环境拒绝，WinError 5）时降级单核流式：
+        加密上传仍成功且解密还原明文（打包态受管环境实测根因的回归）。
+        """
+        import concurrent.futures
+
+        class _BrokenPool:
+            def __init__(self, *args, **kwargs):
+                # 复刻实测异常：创建进程间管道被拒绝访问
+                raise PermissionError(5, "拒绝访问")
+
+        monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", _BrokenPool)
+
+        root = tmp_path / "backend"
+        root.mkdir()
+        backend = _local_backend(root)
+        plaintext = os.urandom(8 * 1024 * 1024)  # ≥8MB：本应走并行路径
+        src = tmp_path / "big.bin"
+        src.write_bytes(plaintext)
+
+        enc = Encryptor(session, backend)
+        progress = list(
+            enc.encrypt_and_upload(str(src), "big.cpenc", max_workers=2)
+        )
+        assert backend.exists("big.cpenc")
+        assert progress[-1] == pytest.approx(1.0)
+
+        dec = Decryptor(session, backend)
+        out = tmp_path / "out.bin"
+        list(dec.download_and_decrypt("big.cpenc", str(out)))
+        assert out.read_bytes() == plaintext
+
+
 class TestDecryptorRangeAccess:
     """Decryptor 的随机范围解密（流式代理基础）。"""
 

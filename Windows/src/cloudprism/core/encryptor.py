@@ -69,7 +69,6 @@ class Encryptor:
             密文流式写入临时文件（不在内存中累积），上传后安全删除。
         """
         import tempfile
-        from Crypto.Util import Counter
 
         # 1. 生成随机 salt + iv
         salt = get_random_bytes(constants.SALT_LEN)
@@ -84,37 +83,42 @@ class Encryptor:
         total = os.path.getsize(local_path)
         tmp_path = None
         try:
-            fd, tmp_path = tempfile.mkstemp(suffix=".cpenc")
+            # 临时密文落产品自管的 data/tmp/（部分环境 %TEMP% ACL 不完整）
+            from cloudprism.core.paths import temp_dir
+
+            fd, tmp_path = tempfile.mkstemp(
+                suffix=".cpenc", dir=temp_dir(create=True)
+            )
 
             if max_workers <= 1 or total < 4 * 1024 * 1024:
                 # 单核流式加密（小文件或用户限制）
                 with os.fdopen(fd, "wb") as tmp:
+                    fd = -1  # fd 所有权移交给 fdopen，finally 不再重复关闭
                     tmp.write(header)
-                    initial_value = int.from_bytes(iv, "big")
-                    ctr = Counter.new(
-                        128, initial_value=initial_value, allow_wraparound=True
+                    yield from self._encrypt_sequential(
+                        tmp, local_path, key, iv, total
                     )
-                    cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
-                    with open(local_path, "rb") as f:
-                        written = 0
-                        while True:
-                            plain = f.read(self.chunk)
-                            if not plain:
-                                break
-                            tmp.write(cipher.encrypt(plain))
-                            written += len(plain)
-                            yield 0.5 * (written / total) if total else 0.5
-                    del cipher
-
+            
                 for p in self.backend.upload_chunked(tmp_path, remote_path, chunk=self.chunk):
                     yield 0.5 + 0.5 * p
             else:
-                # 多核并行加密
+                # 多核并行加密：逐段完成即回报进度（映射到 0~0.5 区间，
+                # 与单核路径语义一致），避免大文件加密阶段长时间零进度观感。
+                # 并行不可用时（部分受管/沙箱环境拒绝创建进程间管道，
+                # Pipe 抛 WinError 5）降级单核流式：慢但保证功能可用。
                 os.close(fd)
                 fd = -1
-                self._parallel_encrypt(
-                    local_path, tmp_path, key, iv, total, max_workers, header
-                )
+                try:
+                    for p in self._parallel_encrypt(
+                        local_path, tmp_path, key, iv, total, max_workers, header
+                    ):
+                        yield 0.5 * p
+                except (PermissionError, OSError):
+                    with open(tmp_path, "wb") as tmp:
+                        tmp.write(header)  # 降级路径同样先落文件头
+                        yield from self._encrypt_sequential(
+                            tmp, local_path, key, iv, total
+                        )
                 for p in self.backend.upload_chunked(tmp_path, remote_path, chunk=self.chunk):
                     yield 0.5 + 0.5 * p
 
@@ -133,6 +137,37 @@ class Encryptor:
         if total == 0:
             yield 1.0
 
+    def _encrypt_sequential(
+        self,
+        tmp,
+        local_path: str,
+        key: bytes,
+        iv: bytes,
+        total: int,
+    ) -> Iterator[float]:
+        """单核流式加密主体：分块读明文 -> AES-CTR 加密 -> 写临时文件。
+
+        调用方负责打开/关闭 ``tmp`` 并在之前写入文件头。
+        yield 加密阶段进度 0.0~0.5（与上层进度映射语义一致）。
+        """
+        from Crypto.Util import Counter
+
+        initial_value = int.from_bytes(iv, "big")
+        ctr = Counter.new(
+            128, initial_value=initial_value, allow_wraparound=True
+        )
+        cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
+        with open(local_path, "rb") as f:
+            written = 0
+            while True:
+                plain = f.read(self.chunk)
+                if not plain:
+                    break
+                tmp.write(cipher.encrypt(plain))
+                written += len(plain)
+                yield 0.5 * (written / total) if total else 0.5
+        del cipher
+
     def _parallel_encrypt(
         self,
         local_path: str,
@@ -142,23 +177,27 @@ class Encryptor:
         total: int,
         max_workers: int,
         header: bytes,
-    ) -> None:
+    ) -> Iterator[float]:
         """多核并行加密：将文件分段，每段独立加密后按序拼接。
 
         AES-CTR 支持随机访问：segment i 的 counter 初值 =
         int.from_bytes(iv, 'big') + i * (segment_size // 16)
-        """
-        from concurrent.futures import ProcessPoolExecutor
-        from Crypto.Util import Counter
 
-        # 分段：每段至少 4MB，段数不超过 max_workers
+        yield:
+            加密阶段进度 0.0~1.0（按已完成段数计，非字节级）
+        """
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+
+        # 分段：每段至少 4MB，段数不超过 max_workers；上限 4 段——
+        # 打包态下每个子进程是完整的 exe（启动需数秒），段数过多只会
+        # 增加进程开销，收益递减（单文件上传带宽通常才是瓶颈）
         min_segment = 4 * 1024 * 1024
-        num_segments = min(max_workers, max(1, total // min_segment))
+        num_segments = min(max_workers, max(1, total // min_segment), 4)
         segment_size = (total + num_segments - 1) // num_segments
 
         iv_int = int.from_bytes(iv, "big")
 
-        # 构建段参数列表
+        # 构建段参数列表；段数可能小于 num_segments（尾段长度归零提前终止）
         segments = []
         for i in range(num_segments):
             offset = i * segment_size
@@ -168,19 +207,27 @@ class Encryptor:
             ctr_initial = iv_int + (offset // 16)
             segments.append((local_path, offset, length, key, ctr_initial))
 
-        # 并行加密各段
+        # 并行加密各段：乱序完成时按段序号回填，逐段完成即回报进度。
+        # 子进程启动期间（打包态数秒）无进度产出，属正常现象，
+        # 由上层进度文案提示用户。
+        results: list[bytes | None] = [None] * len(segments)
         with ProcessPoolExecutor(max_workers=len(segments)) as executor:
-            futures = [
-                executor.submit(_encrypt_segment, seg_args)
-                for seg_args in segments
-            ]
-            results = [f.result() for f in futures]
+            futures = {
+                executor.submit(_encrypt_segment, seg_args): idx
+                for idx, seg_args in enumerate(segments)
+            }
+            done_count = 0
+            for fut in as_completed(futures):
+                results[futures[fut]] = fut.result()
+                done_count += 1
+                yield done_count / len(segments)
 
         # 按序写入临时文件：先写文件头，再写各段密文
         with open(tmp_path, "wb") as tmp:
             tmp.write(header)
             for encrypted_data in results:
-                tmp.write(encrypted_data)
+                tmp.write(encrypted_data)  # type: ignore[arg-type]
+        yield 1.0
 
     def encrypt_to_bytes(
         self,
