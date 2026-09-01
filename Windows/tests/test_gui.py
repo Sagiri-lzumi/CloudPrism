@@ -162,6 +162,18 @@ class TestDirTreeModel:
         ]
         assert names == ["a.txt", "b.txt"]
 
+    def test_loading_placeholder_then_loaded(self, qtbot, local_backend):
+        """异步加载期间展示占位行，完成后替换并置 loaded。"""
+        model = DirTreeModel(local_backend)
+        model.fetchMore(QModelIndex())
+        # 请求刚发出：占位行在，且标记加载中（本地后端很快，可能已完成，
+        # 故只断言两种合法状态之一）
+        assert model.rowCount() >= 1
+        # 最终一定加载完成（占位行消失、恢复真实条目）
+        qtbot.waitUntil(lambda: not model.canFetchMore(QModelIndex()))
+        assert model.rowCount() == 3
+        assert model.data(model.index(0, 0), Qt.DisplayRole) == "docs"
+
     def test_reload_resets(self, qtbot, fetch_wait, local_backend):
         """reload() 清空后重新懒加载。"""
         model = DirTreeModel(local_backend)

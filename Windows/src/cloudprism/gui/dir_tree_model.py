@@ -1,7 +1,9 @@
 """目录树模型。
 
 基于 StorageBackend 的 QAbstractItemModel，支持懒加载（canFetchMore /
-fetchMore）：目录节点首次展开时才调用后端 list_dir。
+fetchMore）：目录节点首次展开时才调用后端 list_dir；列表请求在后台线程
+执行（QThreadPool），避免网盘后端的网络往返阻塞 UI 线程，请求期间展示
+「加载中…」占位行。
 
 显示名规则：
   - 名称以 .cpenc 结尾 -> 去掉扩展名后展示原始名；
@@ -13,18 +15,35 @@ fetchMore）：目录节点首次展开时才调用后端 list_dir。
 
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
-from PySide6.QtCore import QAbstractItemModel, QModelIndex, Qt
+from PySide6.QtCore import (
+    QAbstractItemModel,
+    QModelIndex,
+    QObject,
+    QRunnable,
+    Qt,
+    QThreadPool,
+    Signal,
+)
 
 from cloudprism import constants
 from cloudprism.storage.backend import StorageBackend
+
+logger = logging.getLogger(__name__)
+
+# 异步加载期间占位行的展示文案（不代表真实条目）
+LOADING_TEXT = "加载中…"
 
 
 class DirNode:
     """目录树节点（纯 Python，不依赖 Qt）。"""
 
-    __slots__ = ("name", "is_dir", "size", "parent", "children", "loaded", "display")
+    __slots__ = (
+        "name", "is_dir", "size", "parent", "children", "loaded",
+        "display", "loading", "placeholder",
+    )
 
     def __init__(
         self,
@@ -40,12 +59,43 @@ class DirNode:
         self.children: list[DirNode] | None = None   # None = 未加载
         self.loaded = False
         self.display: str | None = None  # 展示名缓存（None = 未计算）
+        self.loading = False             # 异步加载中（防重复请求）
+        self.placeholder = False         # 是否「加载中…」占位节点
 
     def row(self) -> int:
         """本节点在父节点中的行号。"""
         if self.parent is None:
             return 0
         return self.parent.children.index(self)  # type: ignore[union-attr]
+
+
+class _ListSignals(QObject):
+    """后台列表任务的跨线程信号（排队投递回主线程）。"""
+
+    # 成功：(节点, 后端条目列表, 代际)
+    done = Signal(object, list, int)
+    # 失败：(节点, 错误信息, 代际)
+    failed = Signal(object, str, int)
+
+
+class _ListJob(QRunnable):
+    """后台执行 backend.list_dir，避免网络往返阻塞 UI 线程。"""
+
+    def __init__(self, backend: StorageBackend, path: str, node: DirNode, gen: int) -> None:
+        super().__init__()
+        self.backend = backend
+        self.path = path
+        self.node = node
+        self.gen = gen
+        self.signals = _ListSignals()
+
+    def run(self) -> None:
+        try:
+            entries = self.backend.list_dir(self.path)
+        except Exception as exc:  # noqa: BLE001
+            self.signals.failed.emit(self.node, str(exc), self.gen)
+            return
+        self.signals.done.emit(self.node, list(entries), self.gen)
 
 
 class DirTreeModel(QAbstractItemModel):
@@ -56,6 +106,9 @@ class DirTreeModel(QAbstractItemModel):
 
     # 列标题
     COLUMNS = ["名称", "类型", "大小"]
+
+    # 目录异步加载完成（参数：加载完成的 DirNode，含根节点）
+    directoryLoaded = Signal(object)
 
     def __init__(
         self,
@@ -72,6 +125,8 @@ class DirTreeModel(QAbstractItemModel):
         self._root_path = root.strip("/")
         # 根节点（不可见），对应密库根目录
         self._root = DirNode("", is_dir=True)
+        # 代际计数：reload() 递增，后台回调校验代际丢弃过期结果（防刷新竞态）
+        self._gen = 0
 
     # ------------------------------------------------------------------
     # 只读模型接口
@@ -143,12 +198,45 @@ class DirTreeModel(QAbstractItemModel):
         node = parent.internalPointer() if parent.isValid() else self._root
         return bool(node and node.is_dir and not node.loaded)
 
-    def fetchMore(self, parent: QModelIndex) -> None:  # noqa: N802
-        """加载目录子项（首次展开时调用）。"""
+    def is_loading(self, parent: QModelIndex = QModelIndex()) -> bool:  # noqa: N802
+        """目标目录是否正在后台加载中（当前展示占位行）。"""
         node = parent.internalPointer() if parent.isValid() else self._root
-        if node is None or node.loaded:
+        return bool(node and node.loading)
+
+    def fetchMore(self, parent: QModelIndex) -> None:  # noqa: N802
+        """加载目录子项（首次展开时调用）：后台线程执行，不阻塞 UI。"""
+        node = parent.internalPointer() if parent.isValid() else self._root
+        if node is None or node.loaded or node.loading:
             return
-        entries = self.backend.list_dir(self._remote_path(node))
+        node.loading = True
+
+        # 请求期间插入「加载中…」占位行（预设展示名，避免进入解密分支）
+        placeholder = DirNode("", parent=node)
+        placeholder.placeholder = True
+        placeholder.display = LOADING_TEXT
+        self.beginInsertRows(parent, 0, 0)
+        node.children = [placeholder]
+        self.endInsertRows()
+
+        job = _ListJob(self.backend, self._remote_path(node), node, self._gen)
+        job.signals.done.connect(self._on_list_done)
+        job.signals.failed.connect(self._on_list_failed)
+        QThreadPool.globalInstance().start(job)
+
+    def _on_list_done(self, node: DirNode, entries: list, gen: int) -> None:
+        """后台列表成功：替换占位行为真实子项（主线程）。"""
+        node.loading = False
+        if gen != self._gen:
+            return  # 树已重载（如刷新/切库），丢弃过期结果
+        parent_idx = (
+            QModelIndex() if node is self._root
+            else self.createIndex(node.row(), 0, node)
+        )
+        # 移除占位行（若仍在）
+        if node.children and node.children[0].placeholder:
+            self.beginRemoveRows(parent_idx, 0, 0)
+            node.children = []
+            self.endRemoveRows()
         # 过滤系统内部文件（密库标识与同步索引，不在界面展示）
         entries = [
             e for e in entries
@@ -164,10 +252,30 @@ class DirTreeModel(QAbstractItemModel):
         for child in children:
             self.display_name(child)
         children.sort(key=lambda n: (not n.is_dir, n.display or n.name))
-        self.beginInsertRows(parent, 0, max(len(children) - 1, 0))
         node.children = children
         node.loaded = True
-        self.endInsertRows()
+        if children:
+            self.beginInsertRows(parent_idx, 0, len(children) - 1)
+            self.endInsertRows()
+        self.directoryLoaded.emit(node)
+
+    def _on_list_failed(self, node: DirNode, msg: str, gen: int) -> None:
+        """后台列表失败：移除占位行并记录日志（不弹窗）。
+
+        不置 loaded，用户折叠再展开可重试。
+        """
+        node.loading = False
+        logger.warning("目录列表加载失败 %s: %s", self._remote_path(node), msg)
+        if gen != self._gen:
+            return
+        parent_idx = (
+            QModelIndex() if node is self._root
+            else self.createIndex(node.row(), 0, node)
+        )
+        if node.children and node.children[0].placeholder:
+            self.beginRemoveRows(parent_idx, 0, 0)
+            node.children = []
+            self.endRemoveRows()
 
     # ------------------------------------------------------------------
     # 辅助方法
@@ -234,6 +342,7 @@ class DirTreeModel(QAbstractItemModel):
 
     def reload(self) -> None:
         """整树重载（刷新）。"""
+        self._gen += 1  # 代际递增：在飞后台结果回来时自动作废
         self.beginResetModel()
         self._root = DirNode("", is_dir=True)
         self.endResetModel()

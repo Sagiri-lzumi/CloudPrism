@@ -513,6 +513,10 @@ class AppController(QObject):
             self.backend, name_decryptor=name_decryptor,
             root=self._vault_root,
         )
+        # 目录异步加载完成后重填网格（列表视图下为空操作）
+        self._tree_model.directoryLoaded.connect(
+            lambda _node: self._refresh_grid()
+        )
         self.window.side_panel.files_page.set_model(self._tree_model)
 
         # 连接文件树选中信号
@@ -922,7 +926,11 @@ class AppController(QObject):
 
         model = self._tree_model
         if model.canFetchMore(index):
+            # 触发后台异步加载；完成时经 directoryLoaded 回调重跑本方法
             model.fetchMore(index)
+        # 异步加载中只能枚举到占位行，等加载完成回调后再填充
+        if model.is_loading(index):
+            return
 
         from cloudprism.gui.preview_panel import classify_file
 
