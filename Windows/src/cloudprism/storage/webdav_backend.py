@@ -138,12 +138,25 @@ class WebDavBackend:
         url = self._url(path)
         headers = {"Range": f"bytes={start}-{end}"}
         r = self.session.get(url, headers=headers)
-        # 206 Partial Content 或 200（部分服务器不支持 Range 时返回整文件）
-        if r.status_code not in (206, 200):
-            raise ConnectionError(
-                f"GET Range 失败：{r.status_code} {r.reason}"
-            )
-        return r.content
+        # 服务器明确回 404：文件不存在（与网络故障区分，供上层回真 404）
+        if r.status_code == 404:
+            raise FileNotFoundError(f"文件不存在：{path}")
+        # 206 Partial Content：直接返回请求段
+        if r.status_code == 206:
+            return r.content
+        # 200：部分服务器不支持 Range 返回整文件，本地切出 [start, end]；
+        # 不能原样返回，否则调用方按请求偏移取密文会错位解密。
+        if r.status_code == 200:
+            data = r.content[start : end + 1]
+            if len(data) != end - start + 1:
+                raise ConnectionError(
+                    f"200 整文件回退切片不足：需 {end - start + 1} 字节，"
+                    f"实际 {len(data)} 字节"
+                )
+            return data
+        raise ConnectionError(
+            f"GET Range 失败：{r.status_code} {r.reason}"
+        )
 
     def upload_chunked(
         self,

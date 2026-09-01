@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,18 +29,27 @@ from cloudprism.crypto.stream_cipher import AesCtrStreamCipher
 from cloudprism.storage.backend import StorageBackend
 from cloudprism.streaming.range_mapper import RangeMapper
 
+logger = logging.getLogger(__name__)
+
 
 # Range 头解析正则：bytes=start-end（end 可省略）
 _RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
 
+# 单次 GET 响应字节上限：开口区间（如播放器首请求 bytes=0-）按此截断为
+# 多个有界 206，避免代理一次性拉取并全量解密整个密文文件（大视频 +
+# 网盘后端下会造分钟级首字节延迟与等量内存）。播放器按 RFC 自动续请。
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+
 
 def parse_range_header(
     range_header: str | None, total: int
-) -> tuple[int, int]:
+) -> tuple[int, int] | None:
     """解析 Range 请求头为 [start, end]（含两端，明文偏移）。
 
     无 Range 头或解析失败时返回整个文件 [0, total-1]；
-    end 省略（bytes=N-）时取到文件末尾。
+    end 省略（bytes=N-）时取到文件末尾；
+    start 越界（>= total）时返回 None（调用方应回 416，
+    不能回退整文件，否则尾部探测也会触发全量下载）。
     """
     if not range_header or total <= 0:
         return (0, max(total - 1, 0))
@@ -52,7 +62,7 @@ def parse_range_header(
     # 限制在文件范围内
     end = min(end, total - 1)
     if start > end or start >= total:
-        return (0, max(total - 1, 0))
+        return None
     return (start, end)
 
 
@@ -66,10 +76,15 @@ class ProxyState:
         self.session = session
         self.backend = backend
         self._header_cache: dict[str, FileHeader] = {}
+        self._size_cache: dict[str, int] = {}
         self._lock = threading.Lock()
 
     def get_header(self, remote_path: str) -> FileHeader | None:
-        """取（或拉取并缓存）文件头。"""
+        """取（或拉取并缓存）文件头。
+
+        文件不存在或非合法密文 -> None（真 404）；
+        网络等后端异常向上抛出，由处理器回 502（不能把瞬时故障伪装成文件不存在）。
+        """
         with self._lock:
             if remote_path in self._header_cache:
                 return self._header_cache[remote_path]
@@ -77,11 +92,21 @@ class ProxyState:
             # 前 64 字节足够覆盖 51B 头
             head = self.backend.download_range(remote_path, 0, 63)
             header = FileHeader.parse(BytesIO(head))
-        except (HeaderError, Exception):
+        except (HeaderError, FileNotFoundError, ValueError):
             return None
         with self._lock:
             self._header_cache[remote_path] = header
         return header
+
+    def get_size(self, remote_path: str) -> int:
+        """取（或缓存）密文文件大小，避免每请求一次 HEAD/list 往返。"""
+        with self._lock:
+            if remote_path in self._size_cache:
+                return self._size_cache[remote_path]
+        size = self.backend.get_size(remote_path)
+        with self._lock:
+            self._size_cache[remote_path] = size
+        return size
 
 
 class DecryptingProxyHandler(BaseHTTPRequestHandler):
@@ -133,11 +158,18 @@ class DecryptingProxyHandler(BaseHTTPRequestHandler):
     def do_HEAD(self) -> None:
         """HEAD：返回明文总大小（播放器探明时长用）。"""
         remote = self._remote_path()
-        header = self.state.get_header(remote)
-        if header is None:
-            self._send_bytes(404, b"not found")
+        try:
+            header = self.state.get_header(remote)
+            if header is None:
+                self._send_bytes(404, b"not found")
+                return
+            cipher_size = self.state.get_size(remote)
+        except (BrokenPipeError, ConnectionResetError):
             return
-        cipher_size = self.state.backend.get_size(remote)
+        except Exception:
+            logger.warning("HEAD 后端异常 %s", remote, exc_info=True)
+            self._send_bytes(502, b"backend error")
+            return
         total = RangeMapper.plaintext_total(header, cipher_size)
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
@@ -146,46 +178,71 @@ class DecryptingProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
-        """GET：拦截 Range，按需拉密文块、内存解密、回明文流。"""
+        """GET：拦截 Range，按需拉密文块、内存解密、回明文流。
+
+        单次响应受 MAX_RESPONSE_BYTES 上限：超限区间截断后回 206，
+        播放器自动续请下一段（避免一次性拉取并全量解密整文件）。
+        """
         remote = self._remote_path()
-        header = self.state.get_header(remote)
-        if header is None:
-            self._send_bytes(404, b"not found")
-            return
+        try:
+            header = self.state.get_header(remote)
+            if header is None:
+                self._send_bytes(404, b"not found")
+                return
 
-        # 明文总量
-        cipher_size = self.state.backend.get_size(remote)
-        total = RangeMapper.plaintext_total(header, cipher_size)
+            # 明文总量（大小经缓存，不再每请求一次后端往返）
+            cipher_size = self.state.get_size(remote)
+            total = RangeMapper.plaintext_total(header, cipher_size)
 
-        # 解析 Range（明文偏移，含两端）
-        start, end = parse_range_header(self.headers.get("Range"), total)
+            # 空文件
+            if total <= 0:
+                self._send_bytes(
+                    206, b"", extra_headers={"Content-Range": f"bytes 0-0/0"}
+                )
+                return
 
-        # 空文件
-        if total <= 0:
+            # 解析 Range（明文偏移，含两端）；越界回 416 而非整文件
+            rng = parse_range_header(self.headers.get("Range"), total)
+            if rng is None:
+                self._send_bytes(
+                    416, b"",
+                    extra_headers={"Content-Range": f"bytes */{total}"},
+                )
+                return
+            start, end = rng
+
+            # 上限截断：播放器的开口区间（如 bytes=0-）变为多次有界请求，
+            # Content-Range 反映实际发送段，总长不变，播放器按续请拼接。
+            end = min(end, start + MAX_RESPONSE_BYTES - 1)
+
+            # 换算密文区间并拉取
+            cr = RangeMapper.plaintext_to_cipher(header, start, end + 1)
+            # ct_end 上限为密文文件末尾
+            ct_end_incl = min(cr.ct_end, cipher_size) - 1
+            ct = self.state.backend.download_range(remote, cr.ct_start, ct_end_incl)
+
+            # 内存解密并切片到 [start, end]
+            key = self.state.session.derive_key(header.salt)
+            cipher = AesCtrStreamCipher(key, header.iv)
+            pt = cipher.decrypt_range(ct, cr.first_block, start, end + 1)
+
+            # 206 响应
             self._send_bytes(
-                206, b"", extra_headers={"Content-Range": f"bytes 0-0/0"}
+                206,
+                pt,
+                extra_headers={
+                    "Content-Range": f"bytes {start}-{end}/{total}",
+                },
             )
+        except (BrokenPipeError, ConnectionResetError):
+            # 播放器中止/断开连接（切换文件、seek 属常态），安静退出
             return
-
-        # 换算密文区间并拉取
-        cr = RangeMapper.plaintext_to_cipher(header, start, end + 1)
-        # ct_end 上限为密文文件末尾
-        ct_end_incl = min(cr.ct_end, cipher_size) - 1
-        ct = self.state.backend.download_range(remote, cr.ct_start, ct_end_incl)
-
-        # 内存解密并切片到 [start, end]
-        key = self.state.session.derive_key(header.salt)
-        cipher = AesCtrStreamCipher(key, header.iv)
-        pt = cipher.decrypt_range(ct, cr.first_block, start, end + 1)
-
-        # 206 响应
-        self._send_bytes(
-            206,
-            pt,
-            extra_headers={
-                "Content-Range": f"bytes {start}-{end}/{total}",
-            },
-        )
+        except Exception:
+            logger.warning("GET 处理失败 %s", remote, exc_info=True)
+            try:
+                self._send_bytes(502, b"backend error")
+            except Exception:
+                pass
 
     def log_message(self, format: str, *args: Any) -> None:
         """静默默认访问日志（避免刷屏；需要时再开）。"""

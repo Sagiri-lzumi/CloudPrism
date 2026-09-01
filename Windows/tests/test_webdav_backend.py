@@ -289,6 +289,46 @@ class TestWebDavBackendDownload:
         with pytest.raises(ValueError):
             backend.download_range("f.bin", 5, 3)
 
+    def test_download_range_200_fallback_sliced(self):
+        """服务器不支持 Range 回 200 整文件：后端本地切出请求段。
+
+        若原样返回整文件，代理按请求偏移取密文会错位解密。
+        """
+
+        class NoRangeAdapter(MockWebDavAdapter):
+            """忽略 Range 头（模拟不支持 Range 的服务器）。"""
+
+            def send(self, request, **kwargs):
+                request.headers.pop("Range", None)
+                return super().send(request, **kwargs)
+
+        adapter = NoRangeAdapter()
+        session = requests.Session()
+        session.mount(MockWebDavAdapter.BASE, adapter)
+        backend = WebDavBackend(
+            MockWebDavAdapter.BASE, auth=("u", "p"), session=session
+        )
+        adapter.files["/f.bin"] = bytes(range(256))
+        assert backend.download_range("f.bin", 10, 20) == bytes(range(10, 21))
+
+    def test_download_range_200_fallback_short_raises(self):
+        """200 整文件回退但文件比请求区间短：报错而非静默返回短段。"""
+
+        class NoRangeAdapter(MockWebDavAdapter):
+            def send(self, request, **kwargs):
+                request.headers.pop("Range", None)
+                return super().send(request, **kwargs)
+
+        adapter = NoRangeAdapter()
+        session = requests.Session()
+        session.mount(MockWebDavAdapter.BASE, adapter)
+        backend = WebDavBackend(
+            MockWebDavAdapter.BASE, auth=("u", "p"), session=session
+        )
+        adapter.files["/f.bin"] = bytes(range(64))
+        with pytest.raises(ConnectionError):
+            backend.download_range("f.bin", 50, 100)
+
 
 class TestWebDavBackendUpload:
     """PUT 分块上传。"""

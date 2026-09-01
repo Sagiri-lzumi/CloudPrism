@@ -115,8 +115,12 @@ class TestParseRangeHeader:
         assert parse_range_header("bytes=900-5000", 1000) == (900, 999)
 
     def test_start_beyond_total(self):
-        """start 超过总量时回退到全文件（简化处理）。"""
-        assert parse_range_header("bytes=2000-", 1000) == (0, 999)
+        """start 超过总量时返回 None（调用方回 416，不回退整文件）。"""
+        assert parse_range_header("bytes=2000-", 1000) is None
+
+    def test_start_after_end(self):
+        """start > end 的非法区间同样返回 None。"""
+        assert parse_range_header("bytes=500-100", 1000) is None
 
     def test_zero_total(self):
         assert parse_range_header(None, 0) == (0, 0)
@@ -135,7 +139,7 @@ class TestProxyIntegration:
     """本地代理全链路。"""
 
     def test_get_full_file(self, env):
-        """无 Range：整文件 206 且明文一致。"""
+        """无 Range：206 且明文一致（文件小于上限，单响应完整返回）。"""
         url_prefix, plaintext, _ = env
         url = f"{url_prefix}/media/video.cpenc"
         status, data, headers = _http_get(url)
@@ -201,6 +205,16 @@ class TestProxyIntegration:
         status, _data, _ = _http_get(f"{url_prefix}/nope.cpenc")
         assert status == 404
 
+    def test_range_beyond_total_416(self, env):
+        """start 越界的 Range 回 416（带 Content-Range: */total）。"""
+        url_prefix, plaintext, _ = env
+        url = f"{url_prefix}/media/video.cpenc"
+        status, _data, headers = _http_get(
+            url, {"Range": f"bytes={len(plaintext) + 100}-"}
+        )
+        assert status == 416
+        assert headers.get("Content-Range") == f"bytes */{len(plaintext)}"
+
     def test_no_plaintext_files_leaked(self, env):
         """代理工作目录不落明文文件（本地后端根内无明文副本）。
 
@@ -219,3 +233,67 @@ class TestProxyIntegration:
                 assert content != plaintext, f"发现明文泄露：{p}"
                 # 密文不应包含明文前 256 字节的原文
                 assert plaintext[:256] not in content
+
+
+class TestProxyLargeFileCap:
+    """单次响应上限：开口区间被截断为多次有界 206（大视频播放修复）。"""
+
+    @pytest.fixture
+    def big_env(self, tmp_path, monkeypatch):
+        """较大明文 + 调低上限，验证截断与多段拼接。"""
+        import cloudprism.streaming.proxy_server as ps
+
+        monkeypatch.setattr(ps, "MAX_RESPONSE_BYTES", 1024)
+
+        root = tmp_path / "backend_big"
+        root.mkdir()
+        backend = LocalFolderBackend(root)
+        plaintext = bytes(range(256)) * 16        # 4096 字节（> 上限）
+        src = tmp_path / "big.bin"
+        src.write_bytes(plaintext)
+
+        session = Session(MASTER_PW)
+        enc = Encryptor(session, backend, chunk=512)
+        list(enc.encrypt_and_upload(str(src), "media/big.cpenc"))
+
+        server, port = start_proxy(session, backend)
+        yield f"http://127.0.0.1:{port}", plaintext
+        stop_proxy(server)
+
+    def test_open_range_capped(self, big_env):
+        """bytes=0- 不再整文件缓冲：单段不超过上限，Content-Range 反映截断。"""
+        url_prefix, plaintext = big_env
+        url = f"{url_prefix}/media/big.cpenc"
+        status, data, headers = _http_get(url, {"Range": "bytes=0-"})
+        assert status == 206
+        assert len(data) == 1024
+        assert data == plaintext[:1024]
+        assert headers.get("Content-Range") == (
+            f"bytes 0-1023/{len(plaintext)}"
+        )
+
+    def test_no_range_capped(self, big_env):
+        """无 Range GET 同样受上限截断。"""
+        url_prefix, plaintext = big_env
+        status, data, _ = _http_get(f"{url_prefix}/media/big.cpenc")
+        assert status == 206
+        assert len(data) == 1024
+        assert data == plaintext[:1024]
+
+    def test_stitch_all_segments(self, big_env):
+        """按续请逻辑逐段拉取，拼接后与完整明文逐字节一致。"""
+        url_prefix, plaintext = big_env
+        url = f"{url_prefix}/media/big.cpenc"
+        total = len(plaintext)
+        got = bytearray()
+        pos = 0
+        while pos < total:
+            status, data, headers = _http_get(url, {"Range": f"bytes={pos}-"})
+            assert status == 206
+            got.extend(data)
+            # 按 Content-Range 推进（播放器续请依据）
+            cr = headers["Content-Range"]          # bytes s-e/total
+            end = int(cr.split(" ")[1].split("/")[0].split("-")[1])
+            pos = end + 1
+            assert len(got) == pos
+        assert bytes(got) == plaintext

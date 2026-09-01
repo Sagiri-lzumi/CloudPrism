@@ -332,9 +332,21 @@ class BaiduNetdiskBackend:
             params={"access_token": self.access_token},
             headers={"User-Agent": "pan.baidu.com", "Range": f"bytes={start}-{end}"},
         )
-        if r.status_code not in (200, 206):
-            raise ConnectionError(f"dlink 下载失败：{r.status_code} {r.reason}")
-        return r.content
+        if r.status_code == 404:
+            raise FileNotFoundError(f"文件不存在：{path}")
+        if r.status_code == 206:
+            return r.content
+        # 200：dlink 偶尔忽略 Range 返回整文件，本地切出 [start, end]；
+        # 不能原样返回，否则调用方按请求偏移取密文会错位解密。
+        if r.status_code == 200:
+            data = r.content[start : end + 1]
+            if len(data) != end - start + 1:
+                raise ConnectionError(
+                    f"200 整文件回退切片不足：需 {end - start + 1} 字节，"
+                    f"实际 {len(data)} 字节"
+                )
+            return data
+        raise ConnectionError(f"dlink 下载失败：{r.status_code} {r.reason}")
 
     def _get_dlink(self, fsid: int) -> str:
         """取文件直链（带 6 小时缓存）。"""
