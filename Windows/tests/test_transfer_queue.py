@@ -61,10 +61,16 @@ class FakeThread:
     def __init__(self, worker) -> None:
         self._worker = worker
         self.started = False
+        self.wait_count = 0
 
     def start(self) -> None:
         self.started = True
         self._worker.run()
+
+    def wait(self, timeout: int | None = None) -> bool:
+        """假线程同步执行完毕，等待总是立即成功（对齐 QThread.wait 签名）。"""
+        self.wait_count += 1
+        return True
 
 
 def install_factory(monkeypatch, scripts):
@@ -168,6 +174,30 @@ class TestConcurrency:
         assert len(created) == 1
         q.set_max_concurrent(3)
         assert len(created) == 3
+
+
+class TestWorkerRelease:
+    """终态释放回归：先等线程退出再落 worker 引用（防打包态崩溃）。"""
+
+    def test_finish_waits_then_releases(self, qtbot, monkeypatch, tmp_path):
+        """任务完成后：_running 清空、线程 wait 被调用、防回收列表同步移除。"""
+        q, created = make_queue(monkeypatch, [[("finished",)]])
+        q.enqueue(upload_tasks(tmp_path, 1))
+        task = q._tasks[0]
+        assert task.state == tq.STATE_DONE
+        assert q._running == {}
+        assert q._threads == []
+        assert created[0][1].wait_count == 1
+
+    def test_clear_releases_running(self, qtbot, monkeypatch, tmp_path):
+        """锁库清空：运行中任务取消后等线程退出再释放。"""
+        q, created = make_queue(monkeypatch, [[("progress", 0.0)]])
+        q.enqueue(upload_tasks(tmp_path, 1))
+        q.clear()
+        assert q._running == {}
+        assert q._graveyard == []
+        assert created[0][0].cancel_count == 1
+        assert created[0][1].wait_count == 1
 
 
 # ---------------------------------------------------------------------------

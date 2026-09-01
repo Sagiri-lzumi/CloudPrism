@@ -89,8 +89,9 @@ class TransferQueue(QObject):
         self.max_concurrent: int = 2
 
         self._tasks: list[TransferTask] = []          # 本会话全部任务
-        self._running: dict[TransferTask, object] = {}  # task -> worker
+        self._running: dict[TransferTask, tuple] = {}  # task -> (worker, thread)
         self._threads: list = []                      # 防回收引用
+        self._graveyard: list = []  # clear 时未退出线程的延迟释放区
 
     # ------------------------------------------------------------------
     # 连接与参数
@@ -153,14 +154,22 @@ class TransferQueue(QObject):
             if task.state == STATE_WAITING:
                 task.state = STATE_CANCELLED
                 self.taskFinished.emit(task, False)
-        for worker in list(self._running.values()):
+        for worker, _thread in list(self._running.values()):
             worker.cancel()
         self._emit_aggregate()
 
     def clear(self) -> None:
-        """锁库时调用：静默停止全部任务并清空状态（不发信号）。"""
-        for worker in list(self._running.values()):
+        """锁库时调用：静默停止全部任务并清空状态（不发信号）。
+
+        线程此刻可能仍在运行（cancel 仅在分块边界生效）：必须等线程退出后
+        再释放 worker 引用，否则立即析构会触碰存活对象导致原生崩溃；
+        超时未退出的暂存 _graveyard 延迟释放（随队列对象销毁自然回收）。
+        """
+        for worker, _thread in list(self._running.values()):
             worker.cancel()
+        for worker, thread in list(self._running.values()):
+            if not thread.wait(5_000):
+                self._graveyard.append((worker, thread))
         self._tasks.clear()
         self._running.clear()
         self._threads.clear()
@@ -224,7 +233,7 @@ class TransferQueue(QObject):
         worker.cancelled.connect(lambda t=task: self._on_cancelled(t))
         worker.error.connect(lambda msg, t=task: self._on_error(t, msg))
 
-        self._running[task] = worker
+        self._running[task] = (worker, thread)
         self._threads.append(thread)
         thread.start()
 
@@ -282,14 +291,14 @@ class TransferQueue(QObject):
         self._finish_task(task, success=True)
 
     def _on_cancelled(self, task: TransferTask) -> None:
-        self._running.pop(task, None)
+        self._release_worker(task)
         task.state = STATE_CANCELLED
         self.taskFinished.emit(task, False)
         self._emit_aggregate()
         self._pump()
 
     def _on_error(self, task: TransferTask, msg: str) -> None:
-        self._running.pop(task, None)
+        self._release_worker(task)
         if task.retries < AUTO_RETRIES:
             # 自动重试一次（网络抖动容错）
             task.retries += 1
@@ -306,7 +315,7 @@ class TransferQueue(QObject):
         self._pump()
 
     def _finish_task(self, task: TransferTask, success: bool) -> None:
-        self._running.pop(task, None)
+        self._release_worker(task)
         if success:
             task.state = STATE_DONE
             task.progress = 1.0
@@ -314,6 +323,33 @@ class TransferQueue(QObject):
         self.taskFinished.emit(task, success)
         self._emit_aggregate()
         self._pump()
+
+    # ------------------------------------------------------------------
+    # worker 生命周期释放
+    # ------------------------------------------------------------------
+
+    def _release_worker(self, task: TransferTask) -> None:
+        """释放任务的 worker/线程引用（终态收尾统一入口）。
+
+        _running 持有 worker 的最后一个 Python 引用，弹出即立即析构其
+        C++ QObject。若此刻所属线程仍在退出收尾，跨线程立即析构会触发
+        原生层 abort（打包态上传完成即崩溃的实测根因）。因此先 wait()
+        等操作系统线程彻底结束再释放；同时把线程移出防回收列表，
+        避免死引用无限累积。
+        """
+        entry = self._running.pop(task, None)
+        if entry is None:
+            return
+        worker, thread = entry
+        try:
+            thread.wait()
+        except Exception:  # noqa: BLE001
+            pass  # 假线程/异常场景不阻断收尾
+        try:
+            self._threads.remove(thread)
+        except ValueError:
+            pass
+        del worker, thread  # 显式落引用，析构时机至此已安全
 
     # ------------------------------------------------------------------
     # 聚合进度

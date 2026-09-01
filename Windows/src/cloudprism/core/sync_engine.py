@@ -143,7 +143,11 @@ class SyncEngine:
         path = self._index_remote_path()
 
         import tempfile
-        fd, tmp_path = tempfile.mkstemp(suffix=".cpidx")
+
+        from cloudprism.core.paths import temp_dir
+
+        # 临时文件落产品自管的 data/tmp/（部分环境 %TEMP% ACL 不完整）
+        fd, tmp_path = tempfile.mkstemp(suffix=".cpidx", dir=temp_dir(create=True))
         try:
             with os.fdopen(fd, "wb") as tmp:
                 tmp.write(payload)
@@ -157,7 +161,7 @@ class SyncEngine:
                 pass
 
         # 先删后传：规避后端分块上传的断点续传语义（追加而非覆盖）
-        fd2, tmp_enc = tempfile.mkstemp(suffix=".cpenc")
+        fd2, tmp_enc = tempfile.mkstemp(suffix=".cpenc", dir=temp_dir(create=True))
         try:
             with os.fdopen(fd2, "wb") as tmp:
                 tmp.write(encrypted)

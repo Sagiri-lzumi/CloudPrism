@@ -346,11 +346,14 @@ class VaultManager:
         """
         import tempfile as _tf
 
+        from cloudprism.core.paths import temp_dir
+
         path = self._marker_path(vault_path)
         if self.backend.exists(path):
             self.backend.delete(path)
 
-        fd, tmp_path = _tf.mkstemp(suffix=".vault")
+        # 临时文件落产品自管的 data/tmp/（部分环境 %TEMP% ACL 不完整）
+        fd, tmp_path = _tf.mkstemp(suffix=".vault", dir=temp_dir(create=True))
         try:
             with os.fdopen(fd, "wb") as tmp:
                 tmp.write(data)

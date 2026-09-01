@@ -66,3 +66,20 @@ def qfluent_config_file(create: bool = False) -> str:
     if create:
         data_dir(create=True)
     return os.path.join(data_dir(), "qfluent_config.json")
+
+
+def temp_dir(create: bool = False) -> str | None:
+    """加密/索引管线的临时文件目录 ``data/tmp/``（便携自管）。
+
+    不用系统 %TEMP%：部分沙箱/受管环境下 %TEMP% 的 ACL 不完整，
+    mkstemp 会遭拒绝访问；改落产品自己管理的数据目录，
+    跟随程序目录整体迁移，与便携化语义一致。
+    目录创建失败时返回 None，调用方退回系统默认临时目录。
+    """
+    d = os.path.join(data_dir(), "tmp")
+    if create:
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError:
+            return None
+    return d
