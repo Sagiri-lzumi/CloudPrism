@@ -96,6 +96,23 @@ class TestTransferWorkerUpload:
 
         assert errors, "应有 error 信号"
 
+    def test_upload_with_kdf_salt_reuses_salt(self, qtbot, session, backend, tmp_path):
+        """kdf_salt 透传：产物头内盐即传入盐（命中密钥缓存的加速路径）。"""
+        from cloudprism.crypto.header import FileHeader
+
+        vault_salt = b"\x77" * 16
+        src = tmp_path / "salted.bin"
+        src.write_bytes(os.urandom(300))
+        worker = TransferWorker(
+            TransferWorker.KIND_UPLOAD, session, backend,
+            str(src), "salted.cpenc", chunk=128, kdf_salt=vault_salt,
+        )
+
+        _run_worker(qtbot, worker, worker.finished)
+
+        head = backend.download_range("salted.cpenc", 0, 63)
+        assert FileHeader.parse_bytes(head).salt == vault_salt
+
 
 class TestTransferWorkerDownload:
     """下载解密 worker。"""

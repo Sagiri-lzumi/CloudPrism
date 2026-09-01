@@ -494,8 +494,11 @@ class AppController(QObject):
         # 连接时刻与定时刷新：切换密库时重置统计运行标记，
         # 旧统计结果经 _stats_seq 失效，新连接立即重新统计
 
-        # 绑定传输队列（任务入队后即可调度）
-        self._queue.bind(session, backend)
+        # 绑定传输队列（任务入队后即可调度）；注入密库元信息盐，
+        # 上传加密复用以命中密钥缓存，避免每文件重跑 PBKDF2
+        self._queue.bind(
+            session, backend, kdf_salt=getattr(metadata, "salt", None)
+        )
 
         # 缩略图缓存与会话绑定（锁库时丢弃）
         self._thumb_cache = ThumbnailCache(session)

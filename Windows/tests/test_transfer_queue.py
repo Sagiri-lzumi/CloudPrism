@@ -390,3 +390,40 @@ class TestResumeVerify:
         q.enqueue([task])
         assert backend.deleted == []
         assert task.state == tq.STATE_DONE
+
+
+class TestKdfSaltPassthrough:
+    """bind 注入的 KDF 盐透传到 worker 创建（上传密钥派生加速）。"""
+
+    def test_bind_salt_passed_to_worker_factory(self, qtbot, monkeypatch, tmp_path):
+        """绑定盐后入队：create_worker_thread 收到同样的盐。"""
+        captured: dict = {}
+
+        def factory(direction, session, backend, local, remote, **kw):
+            captured.update(kw)
+            worker = FakeWorker([("finished",)])
+            return worker, FakeThread(worker)
+
+        monkeypatch.setattr(tq, "create_worker_thread", factory)
+        q = TransferQueue()
+        vault_salt = b"\x5A" * 16
+        q.bind(object(), FakeBackend(), kdf_salt=vault_salt)
+        assert q.kdf_salt == vault_salt
+
+        q.enqueue(upload_tasks(tmp_path, 1))
+        assert captured.get("kdf_salt") == vault_salt
+
+    def test_bind_without_salt_passes_none(self, qtbot, monkeypatch, tmp_path):
+        """未注入盐时透传 None（Encryptor 回退随机盐，向后兼容）。"""
+        captured: dict = {}
+
+        def factory(direction, session, backend, local, remote, **kw):
+            captured.update(kw)
+            worker = FakeWorker([("finished",)])
+            return worker, FakeThread(worker)
+
+        monkeypatch.setattr(tq, "create_worker_thread", factory)
+        q = TransferQueue()
+        q.bind(object(), FakeBackend())
+        q.enqueue(upload_tasks(tmp_path, 1))
+        assert captured.get("kdf_salt") is None

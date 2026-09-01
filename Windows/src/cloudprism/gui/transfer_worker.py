@@ -53,6 +53,7 @@ class TransferWorker(QObject):
         chunk: int = 1 << 20,
         parent: QObject | None = None,
         max_workers: int = 1,
+        kdf_salt: bytes | None = None,
     ) -> None:
         super().__init__(parent)
         self.kind = kind
@@ -62,6 +63,9 @@ class TransferWorker(QObject):
         self.remote_path = remote_path
         self.chunk = chunk
         self.max_workers = max_workers
+        # 上传加密复用的 KDF 盐（密库元信息盐）：命中 Session 密钥缓存，
+        # 避免每文件重跑 PBKDF2；None 时 Encryptor 回退随机盐。
+        self.kdf_salt = kdf_salt
         self._cancel_requested = False
 
         # 文件名（供进度显示）
@@ -82,6 +86,7 @@ class TransferWorker(QObject):
                 ).encrypt_and_upload(
                     self.local_path, self.remote_path,
                     max_workers=self.max_workers,
+                    salt=self.kdf_salt,
                 )
             else:
                 pipeline = Decryptor(
@@ -162,6 +167,7 @@ def start_transfer(
     chunk: int = 1 << 20,
     parent=None,
     max_workers: int = 1,
+    kdf_salt: bytes | None = None,
 ) -> TransferDialog:
     """一步启动：创建 worker + 线程 + 进度对话框。
 
@@ -169,7 +175,8 @@ def start_transfer(
     注意：新代码应优先使用 start_transfer_bg()。
     """
     worker, thread = create_worker_thread(
-        kind, session, backend, local_path, remote_path, chunk, parent, max_workers
+        kind, session, backend, local_path, remote_path, chunk, parent,
+        max_workers, kdf_salt,
     )
 
     title = "加密上传" if kind == TransferWorker.KIND_UPLOAD else "下载解密"
@@ -189,6 +196,7 @@ def create_worker_thread(
     chunk: int = 1 << 20,
     parent=None,
     max_workers: int = 1,
+    kdf_salt: bytes | None = None,
 ) -> tuple[TransferWorker, QThread]:
     """创建 worker + 线程并接线，但不启动线程。
 
@@ -198,7 +206,7 @@ def create_worker_thread(
     thread = QThread(parent)
     worker = TransferWorker(
         kind, session, backend, local_path, remote_path,
-        chunk=chunk, max_workers=max_workers,
+        chunk=chunk, max_workers=max_workers, kdf_salt=kdf_salt,
     )
     worker.moveToThread(thread)
 
@@ -221,6 +229,7 @@ def start_transfer_bg(
     chunk: int = 1 << 20,
     parent=None,
     max_workers: int = 1,
+    kdf_salt: bytes | None = None,
 ) -> tuple[TransferWorker, QThread]:
     """后台启动传输（不弹窗），返回 (worker, thread)。
 
@@ -228,7 +237,8 @@ def start_transfer_bg(
     线程在传输结束后自动清理。
     """
     worker, thread = create_worker_thread(
-        kind, session, backend, local_path, remote_path, chunk, parent, max_workers
+        kind, session, backend, local_path, remote_path, chunk, parent,
+        max_workers, kdf_salt,
     )
     thread.start()
     return worker, thread

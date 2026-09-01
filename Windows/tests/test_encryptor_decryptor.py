@@ -119,6 +119,53 @@ class TestEncryptDecryptRoundtrip:
         assert len(data) == 51 + len(plaintext)
 
 
+class TestSaltReuse:
+    """上传加密复用 KDF 盐（命中 Session 密钥缓存，消除每文件 PBKDF2）。"""
+
+    def test_reuse_salt_roundtrip(self, session, backend, tmp_path):
+        """指定盐加密：头内记录该盐，解密按头内盐还原明文（格式兼容）。"""
+        vault_salt = b"\xAB" * 16
+        plaintext = os.urandom(2048)
+        src = tmp_path / "plain.bin"
+        src.write_bytes(plaintext)
+
+        enc = Encryptor(session, backend)
+        list(enc.encrypt_and_upload(str(src), "r.cpenc", salt=vault_salt))
+
+        # 头内盐即传入盐：解密端按头内盐派生密钥，双端兼容不变
+        head = backend.download_range("r.cpenc", 0, 63)
+        header = FileHeader.parse_bytes(head)
+        assert header.salt == vault_salt
+
+        dec = Decryptor(session, backend)
+        out = tmp_path / "out.bin"
+        list(dec.download_and_decrypt("r.cpenc", str(out)))
+        assert out.read_bytes() == plaintext
+
+    def test_reuse_salt_hits_key_cache(self, session, backend, tmp_path):
+        """同盐连续上传多文件只派生一次：缓存仅一条且为该盐。"""
+        vault_salt = b"\xCD" * 16
+        enc = Encryptor(session, backend)
+        for i in range(2):
+            src = tmp_path / f"p{i}.bin"
+            src.write_bytes(os.urandom(64))
+            list(enc.encrypt_and_upload(str(src), f"f{i}.cpenc", salt=vault_salt))
+        # 若未复用盐，每文件随机盐会新增缓存条目 -> 必多于一条
+        assert list(session._key_cache.keys()) == [vault_salt]
+
+    def test_no_salt_keeps_random(self, session, backend, tmp_path):
+        """未传盐时保持随机盐行为（向后兼容）：两文件盐不同。"""
+        enc = Encryptor(session, backend)
+        salts = []
+        for i in range(2):
+            src = tmp_path / f"q{i}.bin"
+            src.write_bytes(os.urandom(64))
+            list(enc.encrypt_and_upload(str(src), f"g{i}.cpenc"))
+            head = backend.download_range(f"g{i}.cpenc", 0, 63)
+            salts.append(FileHeader.parse_bytes(head).salt)
+        assert salts[0] != salts[1]
+
+
 class TestParallelEncrypt:
     """多核并行加密（ProcessPoolExecutor 路径）。"""
 

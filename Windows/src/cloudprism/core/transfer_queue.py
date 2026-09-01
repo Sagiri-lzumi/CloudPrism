@@ -85,6 +85,9 @@ class TransferQueue(QObject):
         # 传输参数（由控制器在入队前从设置页同步）
         self.chunk: int = 1 << 20
         self.max_workers: int = 1
+        # 上传加密复用的 KDF 盐（密库元信息盐，连接时注入）：
+        # 命中 Session 密钥缓存，避免每文件重跑 PBKDF2
+        self.kdf_salt: bytes | None = None
 
         self.max_concurrent: int = 2
 
@@ -97,10 +100,19 @@ class TransferQueue(QObject):
     # 连接与参数
     # ------------------------------------------------------------------
 
-    def bind(self, session: Session, backend: StorageBackend) -> None:
-        """绑定一次成功连接（连接密库后调用）。"""
+    def bind(
+        self,
+        session: Session,
+        backend: StorageBackend,
+        kdf_salt: bytes | None = None,
+    ) -> None:
+        """绑定一次成功连接（连接密库后调用）。
+
+        kdf_salt: 密库元信息盐，供上传加密复用（加速密钥派生）。
+        """
         self.session = session
         self.backend = backend
+        self.kdf_salt = kdf_salt
 
     def set_transfer_options(self, chunk: int, max_workers: int) -> None:
         """同步设置页的分块大小与并行加密核数。"""
@@ -227,6 +239,7 @@ class TransferQueue(QObject):
             task.direction, self.session, self.backend,
             task.local_path, task.remote_path,
             chunk=self.chunk, parent=self, max_workers=self.max_workers,
+            kdf_salt=self.kdf_salt,
         )
         worker.progress.connect(lambda p, t=task: self._on_progress(t, p))
         worker.finished.connect(lambda t=task: self._on_done(t))

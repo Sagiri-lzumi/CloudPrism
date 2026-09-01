@@ -52,6 +52,7 @@ class Encryptor:
         flags: int = 0x00,
         version: int = constants.VERSION,
         max_workers: int = 1,
+        salt: bytes | None = None,
     ) -> Iterator[float]:
         """加密本地文件并上传，yield 进度 0.0~1.0。
 
@@ -61,6 +62,11 @@ class Encryptor:
             flags: 文件头保留标志
             version: 文件格式版本
             max_workers: 并行加密内核数（1=单核流式，>1=多核并行）
+            salt: KDF 盐；传入则复用（如密库元信息盐），未传入则随机生成。
+                复用盐可命中 Session 密钥缓存，避免每文件重跑 PBKDF2
+                （20 万迭代，约数百毫秒），大幅提升批量上传速度。
+                安全性：IV 仍每文件随机，CTR 密钥流不碰撞；盐随文件头
+                落盘，解密端按头内盐派生密钥，格式与双端兼容不变。
 
         yield:
             进度 0.0~1.0
@@ -70,8 +76,9 @@ class Encryptor:
         """
         import tempfile
 
-        # 1. 生成随机 salt + iv
-        salt = get_random_bytes(constants.SALT_LEN)
+        # 1. 盐：优先复用传入盐（命中密钥缓存），否则随机生成（向后兼容）
+        if salt is None:
+            salt = get_random_bytes(constants.SALT_LEN)
         iv = get_random_bytes(constants.IV_LEN)
 
         # 2. 派生密钥（Session 内部缓存）
@@ -234,12 +241,14 @@ class Encryptor:
         local_path: str,
         flags: int = 0x00,
         version: int = constants.VERSION,
+        salt: bytes | None = None,
     ) -> bytes:
         """加密本地文件为字节序列（头+密文），不上传。
 
-        供测试与小文件场景使用。
+        供测试与小文件场景使用。salt 语义同 encrypt_and_upload。
         """
-        salt = get_random_bytes(constants.SALT_LEN)
+        if salt is None:
+            salt = get_random_bytes(constants.SALT_LEN)
         iv = get_random_bytes(constants.IV_LEN)
         key = self.session.derive_key(salt)
         header = FileHeader.build(salt, iv, flags=flags, version=version)
