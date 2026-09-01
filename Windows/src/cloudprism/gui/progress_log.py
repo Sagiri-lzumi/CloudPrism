@@ -34,8 +34,11 @@ class ProgressLogBox(QWidget):
 
         self._view = QTextEdit(self)
         self._view.setReadOnly(True)
-        # 等宽字体 + 固定高度：日志观感与布局稳定（明暗主题均用控件默认底色）
-        self._view.setFont(QFont("Consolas", 9))
+        # 等宽字体 + 固定高度：日志观感与布局稳定（明暗主题均用控件默认底色）；
+        # 像素 12px 与应用级字号观感对齐（此前 9pt 偏小）
+        log_font = QFont("Consolas")
+        log_font.setPixelSize(12)
+        self._view.setFont(log_font)
         self._view.setFixedHeight(110)
         self._view.setStyleSheet(
             "QTextEdit { border: 1px solid rgba(128,128,128,90); "

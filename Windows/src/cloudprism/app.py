@@ -301,13 +301,9 @@ class AppController(QObject):
             apply_theme(app, theme)
 
     def _on_font_size_changed(self, size: int) -> None:
-        """字体大小切换：应用到整个应用。"""
+        """字体大小切换：经 apply_theme 统一应用（字体族 + 像素字号）。"""
         app = QApplication.instance()
         if app is not None:
-            font = app.font()
-            font.setPointSize(size)
-            app.setFont(font)
-            # 字号经 apply_theme 统一应用（携带字号避免沿用旧值丢失）
             apply_theme(app, current_mode(), font_size=size)
 
     # ------------------------------------------------------------------
@@ -1587,10 +1583,7 @@ def main() -> int:
     idx = store.theme_index()
     mode = modes[idx] if 0 <= idx < len(modes) else "system"
     apply_theme(app, mode, font_size=store.font_size())
-    # 恢复持久化的字体大小（apply_theme 内部已设置，此处兼顾其他控件）
-    font = app.font()
-    font.setPointSize(store.font_size())
-    app.setFont(font)
+    # 字体族与像素字号已在 apply_theme 内统一设置，无需重复 setFont
 
     # 窗口图标：优先打包内嵌资源，其次源码目录的 assets/
     from PySide6.QtGui import QIcon

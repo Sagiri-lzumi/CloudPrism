@@ -104,7 +104,18 @@ def test_font_size_persists_across_reapply(qtbot):
     app = QApplication.instance()
     apply_theme(app, "light", font_size=18)
     assert theme_mod._current_font_size == 18
-    assert app.font().pointSize() == 18
+    # 字号为像素语义（与设置页 12/14/16/18 一致，避免 pt 放大失真）
+    assert app.font().pixelSize() == 18
     apply_theme(app, "dark")
     assert theme_mod._current_font_size == 18
     assert current_mode() == "dark"
+
+
+def test_font_families_applied(qtbot):
+    """apply_theme 应设置中文友好字体族回退链（而非 Qt 默认字体）。"""
+    app = QApplication.instance()
+    apply_theme(app, "light")
+    families = app.font().families()
+    # 回退链首选项生效，且含中文回退字体
+    assert families == theme_mod.FONT_FAMILIES
+    assert any("YaHei" in f for f in families)

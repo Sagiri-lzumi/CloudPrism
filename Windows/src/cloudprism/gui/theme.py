@@ -36,8 +36,11 @@ logger = logging.getLogger(__name__)
 # 品牌强调色（与原 Fluent 蓝一致）
 THEME_COLOR = "#0067b8"
 
-# 字体族：保留中文友好栈
-FONT_FAMILY = '"Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif'
+# 字体族回退链：首选 Segoe UI Variable，缺失时回退到中文友好字体（与
+# init_wizard / side_panel 的 widget 级字体惯例一致）
+FONT_FAMILIES = [
+    "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei",
+]
 
 # 模块级状态：当前已应用的具体模式与字号（供字号变更时重套样式）
 _current_mode = "light"
@@ -107,9 +110,13 @@ def apply_theme(app: QApplication, mode: str, font_size: int | None = None) -> N
     ) else "light"
     if font_size is not None:
         _current_font_size = font_size
-    # 字号与字体族（库控件同样继承应用级字体）
+    # 字体族与字号（库控件同样继承应用级字体）：
+    # - setFamilies 按回退链选字体，避免 Qt 默认 MS Shell Dlg 观感不佳；
+    # - 用像素字号（设置页 12/14/16/18 即 px 语义）：此前误用 setPointSize，
+    #   96DPI 下 pt 比 px 放大约 33%，导致字号观感失真。
     font = app.font()
-    font.setPointSize(_current_font_size)
+    font.setFamilies(FONT_FAMILIES)
+    font.setPixelSize(_current_font_size)
     app.setFont(font)
     if not _QFW_AVAILABLE:
         logger.warning("qfluentwidgets 未安装，回退系统默认样式")
