@@ -10,9 +10,21 @@
 
 from __future__ import annotations
 
+import multiprocessing
+import os
 import sys
 import time
 from datetime import datetime
+
+# 打包态子进程重入守卫（必须置于任何 PySide6/GUI 导入之前）：
+# 并行加密的 ProcessPoolExecutor 以 spawn 方式拉起子进程，子进程会重新执行
+# 本入口；若不在此拦截，子进程会先加载整套 Qt 栈，随后经 freeze_support()
+# 转入 worker 协议并在未创建事件循环的情况下退出，退出时 C 扩展析构引发
+# 崩溃（0xc0000409）。在此早退使子进程完全不接触 GUI 栈。
+# 源码态下子进程由父进程的 if __name__ == "__main__" 守卫，不受影响。
+if getattr(sys, "frozen", False) and multiprocessing.spawn.is_forking(sys.argv):
+    multiprocessing.freeze_support()
+    sys.exit()
 
 from PySide6.QtCore import QEvent, QModelIndex, QObject, Signal, Qt, QTimer
 from PySide6.QtWidgets import (
@@ -1494,6 +1506,42 @@ def _migrate_registry_settings() -> None:
 
 def main() -> int:
     """程序入口。"""
+    # 多进程防重入：打包态下并行加密的 ProcessPoolExecutor 以 spawn 方式
+    # 拉起子进程，子进程会重新执行本入口；无此守卫时每个子进程都会启动一
+    # 个完整的 GUI 主窗口（表现为弹出多个重复界面）且无法执行加密任务，
+    # 导致上传卡死。源码态与未冻结环境下为空操作，必须置于本函数首行。
+    multiprocessing.freeze_support()
+
+    # 崩溃诊断落盘：崩溃时把所有线程的 Python 栈写入 data/crash.log，
+    # 供定位打包态偶发的原生层崩溃（窗口消失但无 Python 异常可见）
+    import faulthandler
+
+    from cloudprism.core.paths import data_dir
+
+    try:
+        _crash_log = open(
+            os.path.join(data_dir(create=True), "crash.log"),
+            "a", encoding="utf-8", buffering=1,
+        )
+    except OSError:
+        _crash_log = sys.stderr  # 程序目录不可写时降级（不影响启动）
+    faulthandler.enable(file=_crash_log, all_threads=True)
+
+    # 未捕获异常同样落盘（窗口态无 stderr，异常会静默消失）
+    import traceback as _tb
+
+    def _excepthook(exc_type, exc_value, exc_tb):
+        try:
+            _crash_log.write(
+                "=== unhandled exception ===\n"
+                + "".join(_tb.format_exception(exc_type, exc_value, exc_tb))
+            )
+            _crash_log.flush()
+        except Exception:  # noqa: BLE001
+            pass
+
+    sys.excepthook = _excepthook
+
     # 便携化落盘：qfluentwidgets 库设置卡片默认把配置写到工作目录的
     # config/config.json，会污染源码目录/打包目录；重定向到程序目录 data/
     from qfluentwidgets import qconfig
