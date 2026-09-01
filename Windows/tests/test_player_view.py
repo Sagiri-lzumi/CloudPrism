@@ -206,7 +206,7 @@ class TestAppController:
         # 状态栏已连接
         assert win._status_conn.text() == "已连接"
 
-    def test_apply_setup_with_filename_enc(self, qtbot, tmp_path):
+    def test_apply_setup_with_filename_enc(self, qtbot, fetch_wait, tmp_path):
         """文件名加密开启时目录树注入解密器（显示原始名）。"""
         from cloudprism.core.vault_manager import VaultManager
         from cloudprism.gui.init_wizard import InitWizard
@@ -236,6 +236,55 @@ class TestAppController:
         # 目录树显示解密后的原始名
         model = win.side_panel.files_page.tree.model()
         from PySide6.QtCore import QModelIndex, Qt
-        model.fetchMore(QModelIndex())
+        fetch_wait(model)
         assert model.rowCount() == 1
         assert model.data(model.index(0, 0), Qt.DisplayRole) == "秘密.txt"
+
+    def test_expand_remote_dir_tasks_decrypts_names(self, qtbot, tmp_path, monkeypatch):
+        """文件夹递归下载展开：本地目录树与文件名均还原文名。"""
+        import os
+
+        import cloudprism.app as app_mod
+        monkeypatch.setattr(
+            app_mod.QMessageBox, "information", lambda *a, **k: None
+        )
+
+        from cloudprism.core.vault_manager import VaultManager
+        from cloudprism.gui.init_wizard import InitWizard
+
+        root = tmp_path / "vault_enc"
+        root.mkdir()
+        backend = LocalFolderBackend(root)
+        vm = VaultManager(backend)
+        meta = vm.create_vault("pw", filename_enc=True)
+
+        session = Session("pw")
+        key = session.derive_key(meta.salt)
+        # 后端构造加密目录结构：项目资料 / 秘密.txt（均为密文名）
+        enc_dir = FilenameCipher.encrypt("项目资料", key)
+        enc_file = FilenameCipher.encrypt("秘密.txt", key) + ".cpenc"
+        (root / enc_dir).mkdir()
+        (root / enc_dir / enc_file).write_bytes(b"data")
+
+        win = MainWindow()
+        qtbot.addWidget(win)
+        ctrl = AppController(win)
+        wizard = InitWizard()
+        qtbot.addWidget(wizard)
+        wizard.backend = backend
+        wizard.metadata = meta
+        wizard.session = session
+        ctrl._apply_setup(wizard)
+
+        save_root = tmp_path / "downloads"
+        save_root.mkdir()
+        tasks = ctrl._expand_remote_dir_tasks(enc_dir, str(save_root))
+
+        assert len(tasks) == 1
+        t = tasks[0]
+        assert t.direction == "download"
+        assert t.remote_path == f"{enc_dir}/{enc_file}"
+        # 本地文件名/目录名均为明文（非 Base32 密文）
+        assert t.local_path.endswith(os.path.join("项目资料", "秘密.txt"))
+        # 本地目录树按明文结构预先创建
+        assert (save_root / "项目资料").is_dir()

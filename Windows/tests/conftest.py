@@ -7,6 +7,24 @@ import pytest
 
 
 @pytest.fixture
+def fetch_wait(qtbot):
+    """触发目录树懒加载并等待异步完成。
+
+    fetchMore 已改为后台线程执行（避免网盘网络往返阻塞 UI），
+    测试中需等事件循环把完成信号投递回主线程后再断言。
+    """
+    from PySide6.QtCore import QModelIndex
+
+    def _fetch(model, index=QModelIndex(), timeout=3000):
+        if model.canFetchMore(index):
+            model.fetchMore(index)
+        # 加载完成后 canFetchMore 变假；失败时保持为真 -> 超时暴露问题
+        qtbot.waitUntil(lambda: not model.canFetchMore(index), timeout=timeout)
+
+    return _fetch
+
+
+@pytest.fixture
 def sample_salt() -> bytes:
     """16 字节全零盐，用于 KDF 参考向量。"""
     return b"\x00" * 16

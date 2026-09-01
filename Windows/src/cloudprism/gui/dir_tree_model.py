@@ -5,11 +5,10 @@ fetchMore）：目录节点首次展开时才调用后端 list_dir。
 
 显示名规则：
   - 名称以 .cpenc 结尾 -> 去掉扩展名后展示原始名；
+  - 目录节点（后端名为无扩展名的密文）在提供 name_decryptor 时同样解密展示；
   - 若提供了 name_decryptor（文件名加密开启时），先解密再展示；
   - 解密失败时回退显示原名（可能是未知密钥或未加密名）。
-
-注意：当前骨架 fetchMore 内同步调用后端；本地后端足够快，远程后端
-（WebDAV）的异步加载在传输 worker 步骤引入后优化。
+  - 展示名在节点上缓存（懒计算），避免每次绘制重复 GCM 解密。
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ from cloudprism.storage.backend import StorageBackend
 class DirNode:
     """目录树节点（纯 Python，不依赖 Qt）。"""
 
-    __slots__ = ("name", "is_dir", "size", "parent", "children", "loaded")
+    __slots__ = ("name", "is_dir", "size", "parent", "children", "loaded", "display")
 
     def __init__(
         self,
@@ -40,6 +39,7 @@ class DirNode:
         self.parent = parent
         self.children: list[DirNode] | None = None   # None = 未加载
         self.loaded = False
+        self.display: str | None = None  # 展示名缓存（None = 未计算）
 
     def row(self) -> int:
         """本节点在父节点中的行号。"""
@@ -111,7 +111,7 @@ class DirTreeModel(QAbstractItemModel):
         if role == Qt.DisplayRole:
             col = index.column()
             if col == 0:
-                return self.display_name(node.name)
+                return self.display_name(node)
             if col == 1:
                 return "目录" if node.is_dir else "文件"
             if col == 2:
@@ -159,8 +159,11 @@ class DirTreeModel(QAbstractItemModel):
         children = [
             DirNode(e.name, e.is_dir, e.size, parent=node) for e in entries
         ]
-        # 排序：目录在前，名称升序
-        children.sort(key=lambda n: (not n.is_dir, n.name))
+        # 预计算展示名（解密一次并缓存），排序按展示名：目录在前，名称升序。
+        # 不能按后端密文名排序，否则中文用户看到的是乱序。
+        for child in children:
+            self.display_name(child)
+        children.sort(key=lambda n: (not n.is_dir, n.display or n.name))
         self.beginInsertRows(parent, 0, max(len(children) - 1, 0))
         node.children = children
         node.loaded = True
@@ -182,9 +185,17 @@ class DirTreeModel(QAbstractItemModel):
             parts.insert(0, self._root_path)
         return "/".join(parts)
 
-    def display_name(self, backend_name: str) -> str:
-        """后端名 -> 展示名：去 .cpenc，必要时解密。"""
-        name = backend_name
+    def display_name(self, node: DirNode) -> str:
+        """节点 -> 展示名：去 .cpenc，必要时解密；结果缓存到节点。
+
+        - 文件（.cpenc 结尾）：去扩展名后解密；
+        - 目录（后端名为无扩展名密文）：有解密器时同样尝试解密；
+        - 解密失败（密钥不符或未加密名）回退原名；
+        - 成功与失败均缓存，避免列表绘制期重复 GCM 运算。
+        """
+        if node.display is not None:
+            return node.display
+        name = node.name
         if name.endswith(constants.FILE_EXTENSION):
             base = name[: -len(constants.FILE_EXTENSION)]
             if self._decryptor is not None:
@@ -193,8 +204,17 @@ class DirTreeModel(QAbstractItemModel):
                 except Exception:
                     # 解密失败（密钥不符或未加密名），回退原名
                     pass
-            return base
-        return name
+            node.display = base
+        elif node.is_dir and self._decryptor is not None:
+            # 开启文件名加密时目录后端名也是密文（无扩展名），需解密展示；
+            # 未加密的目录名（旧库/混合场景）解密会失败，回退原名即可。
+            try:
+                node.display = self._decryptor(name)
+            except Exception:
+                node.display = name
+        else:
+            node.display = name
+        return node.display
 
     def node_for_index(self, index: QModelIndex) -> DirNode | None:
         """QModelIndex -> DirNode（供上层操作取路径）。"""

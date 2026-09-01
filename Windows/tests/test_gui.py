@@ -45,12 +45,12 @@ def local_backend(tmp_path):
 class TestDirTreeModel:
     """目录树模型。"""
 
-    def test_root_listing(self, qtbot, local_backend):
+    def test_root_listing(self, qtbot, fetch_wait, local_backend):
         """根目录懒加载出条目（目录在前）。"""
         model = DirTreeModel(local_backend)
         root = QModelIndex()             # 无效索引即模型根
         assert model.canFetchMore(root)
-        model.fetchMore(root)
+        fetch_wait(model, root)
         assert model.rowCount() == 3          # docs + readme + movie
         first = model.index(0, 0)
         # 目录排前
@@ -59,10 +59,10 @@ class TestDirTreeModel:
         assert model.data(model.index(1, 0), Qt.DisplayRole) == "movie.mp4"
         assert model.data(model.index(2, 0), Qt.DisplayRole) == "readme.txt"
 
-    def test_type_and_size_columns(self, qtbot, local_backend):
+    def test_type_and_size_columns(self, qtbot, fetch_wait, local_backend):
         """类型/大小列正确。"""
         model = DirTreeModel(local_backend)
-        model.fetchMore(QModelIndex())
+        fetch_wait(model)
         # docs 目录：类型列「目录」，大小列为空
         assert model.data(model.index(0, 1), Qt.DisplayRole) == "目录"
         assert model.data(model.index(0, 2), Qt.DisplayRole) == ""
@@ -70,23 +70,23 @@ class TestDirTreeModel:
         assert model.data(model.index(2, 1), Qt.DisplayRole) == "文件"
         assert model.data(model.index(2, 2), Qt.DisplayRole) == "100 B"
 
-    def test_subdir_lazy_load(self, qtbot, local_backend):
+    def test_subdir_lazy_load(self, qtbot, fetch_wait, local_backend):
         """子目录懒加载。"""
         model = DirTreeModel(local_backend)
-        model.fetchMore(QModelIndex())
+        fetch_wait(model)
         docs_idx = model.index(0, 0)
         assert model.canFetchMore(docs_idx)
-        model.fetchMore(docs_idx)
+        fetch_wait(model, docs_idx)
         assert model.rowCount(docs_idx) == 1
         assert model.data(model.index(0, 0, docs_idx), Qt.DisplayRole) == "note.md"
 
-    def test_user_role_returns_backend_name(self, qtbot, local_backend):
+    def test_user_role_returns_backend_name(self, qtbot, fetch_wait, local_backend):
         """UserRole 返回后端原始名（含 .cpenc）。"""
         model = DirTreeModel(local_backend)
-        model.fetchMore(QModelIndex())
+        fetch_wait(model)
         assert model.data(model.index(2, 0), Qt.UserRole) == "readme.txt.cpenc"
 
-    def test_name_decryptor_shows_original(self, qtbot, tmp_path):
+    def test_name_decryptor_shows_original(self, qtbot, fetch_wait, tmp_path):
         """文件名加密开启时展示解密后的原始名。"""
         # 准备：用 FilenameCipher 加密文件名存入后端
         session = Session("pw")
@@ -102,18 +102,74 @@ class TestDirTreeModel:
             backend,
             name_decryptor=lambda s: FilenameCipher.decrypt(s, key),
         )
-        model.fetchMore(QModelIndex())
+        fetch_wait(model)
         # 展示名应为解密后的原始名
         assert model.data(model.index(0, 0), Qt.DisplayRole) == "机密文档.pdf"
 
-    def test_reload_resets(self, qtbot, local_backend):
+    def test_dir_name_decrypted(self, qtbot, fetch_wait, tmp_path):
+        """文件夹后端名为无扩展名密文，同样应解密展示。"""
+        session = Session("pw")
+        key = session.derive_key(b"\x01" * 16)
+        enc_dir = FilenameCipher.encrypt("项目资料", key)
+
+        root = tmp_path / "enc_dirs"
+        (root / enc_dir).mkdir(parents=True)
+        backend = LocalFolderBackend(root)
+
+        model = DirTreeModel(
+            backend,
+            name_decryptor=lambda s: FilenameCipher.decrypt(s, key),
+        )
+        fetch_wait(model)
+        assert model.rowCount() == 1
+        assert model.data(model.index(0, 0), Qt.DisplayRole) == "项目资料"
+        # UserRole 仍是后端密文名（下载/展开等操作依赖）
+        assert model.data(model.index(0, 0), Qt.UserRole) == enc_dir
+
+    def test_dir_name_decrypt_fail_fallback(self, qtbot, fetch_wait, tmp_path):
+        """目录名解密失败（未加密名/旧库）时回退原名。"""
+        root = tmp_path / "plain_dirs"
+        (root / "普通目录").mkdir(parents=True)
+        backend = LocalFolderBackend(root)
+
+        def bad_decryptor(s: str) -> str:
+            raise ValueError("标签校验失败")
+
+        model = DirTreeModel(backend, name_decryptor=bad_decryptor)
+        fetch_wait(model)
+        assert model.data(model.index(0, 0), Qt.DisplayRole) == "普通目录"
+
+    def test_sorted_by_display_name(self, qtbot, fetch_wait, tmp_path):
+        """开启文件名加密时按解密后的展示名排序（而非密文名）。"""
+        session = Session("pw")
+        key = session.derive_key(b"\x02" * 16)
+        root = tmp_path / "enc_sort"
+        root.mkdir()
+        # 两个加密文件：明文 b 先于 a 的密文顺序无关紧要，
+        # 断言按明文 a/b 升序即可
+        for plain in ("b.txt", "a.txt"):
+            stored = FilenameCipher.encrypt(plain, key) + ".cpenc"
+            (root / stored).write_bytes(b"x")
+        backend = LocalFolderBackend(root)
+
+        model = DirTreeModel(
+            backend,
+            name_decryptor=lambda s: FilenameCipher.decrypt(s, key),
+        )
+        fetch_wait(model)
+        names = [
+            model.data(model.index(r, 0), Qt.DisplayRole) for r in range(2)
+        ]
+        assert names == ["a.txt", "b.txt"]
+
+    def test_reload_resets(self, qtbot, fetch_wait, local_backend):
         """reload() 清空后重新懒加载。"""
         model = DirTreeModel(local_backend)
-        model.fetchMore(QModelIndex())
+        fetch_wait(model)
         assert model.rowCount() == 3
         model.reload()
         assert model.rowCount() == 0          # 重置后未加载
-        model.fetchMore(QModelIndex())
+        fetch_wait(model)
         assert model.rowCount() == 3
 
 

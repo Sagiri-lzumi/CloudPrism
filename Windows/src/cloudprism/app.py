@@ -781,10 +781,13 @@ class AppController(QObject):
     def download_file(self, remote_path: str = "") -> None:
         """选择保存位置 -> 下载解密选中文件（后台）。"""
         if self._require_vault() and remote_path:
-            # 去掉 .cpenc 作为默认保存名
+            # 去掉 .cpenc 后还原本地名作为默认保存名（文件名加密开启时
+            # 叶子是 Base32 密文，直接用密文命名会得到无扩展名乱码串，
+            # 让用户误以为下载的是加密文件）
             default = remote_path.rsplit("/", 1)[-1]
             if default.endswith(".cpenc"):
                 default = default[: -len(".cpenc")]
+            default = self._decrypt_name(default)
             path, _ = QFileDialog.getSaveFileName(
                 self.window, "保存解密文件", default
             )
@@ -925,7 +928,7 @@ class AppController(QObject):
 
         entries = []
         for child in model.dir_entries(node):
-            display = model.display_name(child.name)
+            display = model.display_name(child)
             rpath = model.remote_path(child)
             is_image = (not child.is_dir) and classify_file(display) == "image"
             entries.append((display, rpath, child.is_dir, is_image))
@@ -937,42 +940,8 @@ class AppController(QObject):
     # 右键菜单操作（新建/重命名/删除/下载）
     # ------------------------------------------------------------------
 
-    def _resolve_remote_path(self, display_path: str) -> str:
-        """把树上传来的路径解析为后端真实路径。
-
-        文件名加密开启时树节点展示的是解密名，需还原为密文段；
-        优先原样尝试（未加密库直接命中），否则对文件段/目录段逐级加密。
-        """
-        if self.backend is None:
-            return display_path
-        if self._exists_safe(display_path):
-            return display_path
-        if not self._is_filename_enc():
-            return display_path
-
-        segments = display_path.split("/")
-
-        def _enc_seg(seg: str) -> str:
-            try:
-                return self._encrypt_filename(seg)
-            except Exception:
-                return seg
-
-        # 文件路径：最后一段为 <原名>.cpenc 形式，加密后加扩展名；目录名直接加密
-        last = segments[-1]
-        if last.endswith(".cpenc"):
-            base = last[: -len(".cpenc")]
-            cand_file = _enc_seg(base) + ".cpenc"
-        else:
-            cand_file = _enc_seg(last)
-        enc_dirs = [_enc_seg(s) for s in segments[:-1]]
-        cand = "/".join(enc_dirs + [cand_file]) if enc_dirs else cand_file
-        if self._exists_safe(cand):
-            return cand
-
-        # 回退：目录段未加密（旧库/混合场景）
-        cand2 = "/".join(segments[:-1] + [cand_file])
-        return cand2
+    # 注：文件树右键/菜单信号传来的路径均为后端原始路径（密文名），
+    # 可直接用于后端操作，无需再做显示名 -> 密文段的解析往返。
 
     def _exists_safe(self, path: str) -> bool:
         """安全判断远端路径是否存在（异常视为不存在）。"""
@@ -998,7 +967,7 @@ class AppController(QObject):
             )
             return
         enc_name = self._encrypt_filename(name) if self._is_filename_enc() else name
-        base = self._resolve_remote_path(display_dir) if display_dir else ""
+        base = display_dir
         remote = f"{base}/{enc_name}" if base else enc_name
         try:
             self.backend.mkdir(remote)
@@ -1017,6 +986,8 @@ class AppController(QObject):
         old_display = display_path.rsplit("/", 1)[-1]
         if old_display.endswith(".cpenc"):
             old_display = old_display[: -len(".cpenc")]
+        # 预填明文名（文件名加密时叶子为 Base32 密文，不应让用户面对密文）
+        old_display = self._decrypt_name(old_display)
         new_name, ok = QInputDialog.getText(
             self.window, "重命名", "新名称：", text=old_display
         )
@@ -1030,7 +1001,7 @@ class AppController(QObject):
             )
             return
 
-        old_remote = self._resolve_remote_path(display_path)
+        old_remote = display_path
         is_file = old_remote.endswith(".cpenc")
         enc_new = (
             self._encrypt_filename(new_name) if self._is_filename_enc() else new_name
@@ -1053,6 +1024,10 @@ class AppController(QObject):
         if not self._require_vault():
             return
         name = display_path.rsplit("/", 1)[-1]
+        if name.endswith(".cpenc"):
+            name = name[: -len(".cpenc")]
+        # 确认框展示明文名，避免用户面对密文无从辨认
+        name = self._decrypt_name(name)
         box = FluentMessageBox(
             "确认删除",
             f"确定删除「{name}」吗？\n此操作不可撤销。",
@@ -1060,7 +1035,7 @@ class AppController(QObject):
         )
         if not box.exec():
             return
-        remote = self._resolve_remote_path(display_path)
+        remote = display_path
         try:
             self.backend.delete(remote)
         except Exception as e:
@@ -1073,7 +1048,7 @@ class AppController(QObject):
 
     def _ctx_download(self, display_path: str) -> None:
         """右键下载：单文件保存解密；文件夹递归展开批量下载。"""
-        remote = self._resolve_remote_path(display_path)
+        remote = display_path
         if remote.endswith(".cpenc"):
             self.download_file(remote)
         else:
