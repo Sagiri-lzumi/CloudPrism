@@ -230,6 +230,78 @@ class TestParallelEncrypt:
         list(dec.download_and_decrypt("big.cpenc", str(out)))
         assert out.read_bytes() == plaintext
 
+    # 非 16 字节对齐的大文件尺寸，覆盖 2 / 3 / 4 段三种分段数。
+    # 历史缺陷：segment_size 用 ceil 计算却未对齐到 16，而各段独立从密钥流
+    # 块首开始异或 -> 该段整体错位 offset%16 字节，密文永久损坏；解密端用的
+    # 是从头部 IV 起始的顺序 CTR，CTR 无完整性校验 -> 不报错、静默输出垃圾。
+    # 旧用例只用恰好 8MiB（ceil(8MiB/2) = 4MiB 正好 16 对齐），完美掩盖了它。
+    UNALIGNED_SIZES = [
+        8 * 1024 * 1024 + 3,      # 2 段，未修复时 segment_size % 16 == 2
+        10_000_003,               # 2 段
+        12_345_678,               # 2 段
+        12 * 1024 * 1024 + 5,     # max_workers=4 时 3 段
+        16 * 1024 * 1024 + 7,     # max_workers=4 时 4 段（受上限 4 段约束）
+    ]
+
+    @pytest.mark.parametrize("max_workers", [2, 4])
+    @pytest.mark.parametrize("size", UNALIGNED_SIZES)
+    def test_parallel_unaligned_matches_sequential(
+        self, session, tmp_path, monkeypatch, size, max_workers
+    ):
+        """非对齐尺寸：并行密文必须与单核顺序密文逐字节相等，且能还原明文。
+
+        并行只是性能优化，产物必须与顺序加密完全一致。这比"解密能还原"更强：
+        逐字节比对能直接报出错位起始偏移，而解密比对只知道"不相等"。
+        """
+        import cloudprism.core.encryptor as enc_mod
+
+        root = tmp_path / "backend"
+        root.mkdir()
+        backend = _local_backend(root)
+        plaintext = os.urandom(size)
+        src = tmp_path / "unaligned.bin"
+        src.write_bytes(plaintext)
+
+        def _encrypt(workers: int, remote: str) -> bytes:
+            """固定 salt/iv 加密一次，返回后端上的完整密文字节。
+
+            iv 每次加密都随机生成且无法从参数注入，故替换模块级
+            get_random_bytes：两次调用依次给出 salt 与 iv，两次加密的
+            密钥流因此完全一致，密文才具备可比性。
+            """
+            draws = iter((b"\x5A" * 16, b"\xA5" * 16))
+            monkeypatch.setattr(
+                enc_mod, "get_random_bytes", lambda n: next(draws, b"\x3C" * n)
+            )
+            enc = Encryptor(session, backend)
+            list(enc.encrypt_and_upload(str(src), remote, max_workers=workers))
+            return backend.download_range(remote, 0, backend.get_size(remote) - 1)
+
+        ct_sequential = _encrypt(1, "seq.cpenc")
+        ct_parallel = _encrypt(max_workers, "par.cpenc")
+
+        if ct_parallel != ct_sequential:
+            diff = next(
+                (
+                    i
+                    for i, (a, b) in enumerate(zip(ct_parallel, ct_sequential))
+                    if a != b
+                ),
+                min(len(ct_parallel), len(ct_sequential)),
+            )
+            pytest.fail(
+                f"size={size} max_workers={max_workers}: 并行密文与顺序密文自偏移 "
+                f"{diff} 起不一致（长度 {len(ct_parallel)} vs {len(ct_sequential)}）"
+            )
+
+        # 流加密无填充：向下对齐分段后末段必须吃满余量，不得截断
+        assert len(ct_parallel) == 51 + size
+
+        dec = Decryptor(session, backend)
+        out = tmp_path / "out.bin"
+        list(dec.download_and_decrypt("par.cpenc", str(out)))
+        assert out.read_bytes() == plaintext
+
 
 class TestDecryptorRangeAccess:
     """Decryptor 的随机范围解密（流式代理基础）。"""

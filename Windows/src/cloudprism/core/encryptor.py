@@ -188,7 +188,9 @@ class Encryptor:
         """多核并行加密：将文件分段，每段独立加密后按序拼接。
 
         AES-CTR 支持随机访问：segment i 的 counter 初值 =
-        int.from_bytes(iv, 'big') + i * (segment_size // 16)
+        int.from_bytes(iv, 'big') + offset // 16。segment_size 恒为 16 的
+        倍数（见下方对齐处理），故 offset // 16 不会丢弃余数，各段都从
+        密钥流块首开始 —— 并行产物与单核顺序加密逐字节一致。
 
         yield:
             加密阶段进度 0.0~1.0（按已完成段数计，非字节级）
@@ -200,7 +202,12 @@ class Encryptor:
         # 增加进程开销，收益递减（单文件上传带宽通常才是瓶颈）
         min_segment = 4 * 1024 * 1024
         num_segments = min(max_workers, max(1, total // min_segment), 4)
-        segment_size = (total + num_segments - 1) // num_segments
+        # 分段长度必须 16 字节对齐：各段独立从块首生成密钥流，未对齐会让
+        # 该段整体错位 offset%16 字节，密文永久损坏且解密不报错（CTR 无
+        # 完整性校验）。向下对齐后可能覆盖不满 total，余量由末段吃掉。
+        segment_size = ((total + num_segments - 1) // num_segments) & ~15
+        if segment_size <= 0:      # 极小文件兜底（total < 4MB 时不会走并行路径）
+            segment_size = total
 
         iv_int = int.from_bytes(iv, "big")
 
@@ -208,7 +215,10 @@ class Encryptor:
         segments = []
         for i in range(num_segments):
             offset = i * segment_size
-            length = min(segment_size, total - offset)
+            if i == num_segments - 1:
+                length = total - offset          # 末段吃满对齐余量，不得截断
+            else:
+                length = min(segment_size, total - offset)
             if length <= 0:
                 break
             ctr_initial = iv_int + (offset // 16)
