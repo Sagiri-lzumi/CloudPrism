@@ -1,0 +1,25 @@
+# 行尾策略
+#
+# 开发机是 Windows 且 core.autocrlf=true：入库统一 LF、检出转 CRLF。
+# 这对 Python 无害，但会让 Go 工具链恒红 —— **gofmt 把 CRLF 判为「未格式化」**
+# （已实测：同一份源码只差行尾，gofmt -l 只标记 CRLF 的那个文件）。
+# 于是 fresh clone、git checkout、git stash pop 之后，每个 .go 文件都会被
+# gofmt -l 标记，「格式门禁」这个信号就彻底失效了 —— 真正没格式化的改动
+# 会淹在几十条行尾噪音里。
+#
+# 因此对行尾敏感的工具链文件显式钉死 eol=lf，覆盖 autocrlf 的检出转换。
+# 入库形态本来就是 LF，故本文件不改变任何已提交内容，只改变检出形态。
+
+# Go：gofmt / goimports 的门禁前提
+*.go   text eol=lf
+*.mod  text eol=lf
+*.sum  text eol=lf
+
+# 前端：Prettier 默认 endOfLine="lf"，ESLint 的 prettier/prettier 规则会把
+# CRLF 判为格式错误，与上面 gofmt 的情形完全同构
+*.ts   text eol=lf
+*.js   text eol=lf
+*.vue  text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.json text eol=lf
