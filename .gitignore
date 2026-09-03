@@ -231,3 +231,22 @@ config/
 
 # dist
 Release/
+
+# 便携化用户数据（含 DPAPI 加密的网盘凭证与最近密库记录，严禁入库）
+data/
+
+# Go / Wails 工程：放行必须入库的资源与前端产物，忽略构建中间物。
+# 上方的 build/、dist/、lib/、*.manifest 均为无锚定通配，会先把整个
+# 目录排除而 git 不再下探——必须先用 ! 反排除目录本身，其内容才能入库；
+# 且反排除规则必须排在最后（git 以「最后匹配的规则」为准）。
+# frontend/dist 必须提交：//go:embed all:frontend/dist 在 fresh clone 下否则编译失败。
+!WindowsGo/build/
+!WindowsGo/build/**
+WindowsGo/build/bin/
+!WindowsGo/frontend/dist/
+!WindowsGo/frontend/dist/**
+!WindowsGo/frontend/src/lib/
+!WindowsGo/frontend/src/lib/**
+WindowsGo/frontend/node_modules/
+*.syso
+*.exe
