@@ -248,5 +248,7 @@ WindowsGo/build/bin/
 !WindowsGo/frontend/src/lib/
 !WindowsGo/frontend/src/lib/**
 WindowsGo/frontend/node_modules/
+# Wails 用它判断 package.json 是否变化以决定是否重跑 npm install，属构建缓存
+WindowsGo/frontend/package.json.md5
 *.syso
 *.exe
