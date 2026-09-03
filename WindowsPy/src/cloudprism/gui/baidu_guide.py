@@ -35,7 +35,7 @@ def _find_guide_path() -> str | None:
     if base:
         candidates.append(os.path.join(base, "assets", "baidu_guide.md"))
     here = os.path.dirname(os.path.abspath(__file__))
-    # gui/ -> 包根 -> src/ -> Windows/
+    # gui/ -> 包根 -> src/ -> WindowsPy/
     candidates.append(
         os.path.join(os.path.dirname(os.path.dirname(here)), "..", "assets", "baidu_guide.md")
     )

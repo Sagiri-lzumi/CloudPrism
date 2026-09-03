@@ -6,7 +6,7 @@
 
 打包态（onefile / onedir）以 exe 所在目录为准（不能用 onefile 的
 ``_MEIPASS`` 临时解压目录，进程退出即销毁）；源码运行以项目
-``Windows/`` 目录为准，开发期同样跟随项目目录。
+``WindowsPy/`` 目录为准，开发期同样跟随项目目录。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ def app_dir() -> str:
     """程序所在目录。
 
     - 打包态：``sys.executable`` 的目录（onefile 与 onedir 均正确）
-    - 源码运行：本文件上溯四级（core/ -> cloudprism/ -> src/ -> Windows/）
+    - 源码运行：本文件上溯四级（core/ -> cloudprism/ -> src/ -> WindowsPy/）
     """
     if getattr(sys, "frozen", False):
         return os.path.dirname(os.path.abspath(sys.executable))

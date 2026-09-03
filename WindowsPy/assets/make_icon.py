@@ -3,7 +3,7 @@
 绘制内容：Fluent 蓝色渐变圆角底 + 白色棱镜三角 + 色散光束。
 产出：icon.png（256x256）与 icon.ico（PNG 压缩条目）。
 
-用法：.venv/Scripts/python.exe Windows/assets/make_icon.py
+用法：.venv/Scripts/python.exe WindowsPy/assets/make_icon.py
 """
 
 from __future__ import annotations

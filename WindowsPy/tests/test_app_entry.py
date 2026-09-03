@@ -11,7 +11,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-# Windows/src/cloudprism/app.py（本文件位于 Windows/tests/）
+# WindowsPy/src/cloudprism/app.py（本文件位于 WindowsPy/tests/）
 APP_PY = Path(__file__).resolve().parents[1] / "src" / "cloudprism" / "app.py"
 
 
