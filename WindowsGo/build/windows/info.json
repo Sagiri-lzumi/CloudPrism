@@ -1,0 +1,19 @@
+{
+	"fixed": {
+		"file_version": "{{.Info.ProductVersion}}",
+		"product_version": "{{.Info.ProductVersion}}"
+	},
+	"info": {
+		"0804": {
+			"CompanyName": "{{.Info.CompanyName}}",
+			"FileDescription": "CloudPrism 端到端加密云盘",
+			"FileVersion": "{{.Info.ProductVersion}}.0",
+			"InternalName": "{{.Name}}",
+			"LegalCopyright": "{{.Info.Copyright}}",
+			"OriginalFilename": "{{.OutputFilename}}",
+			"ProductName": "{{.Info.ProductName}}",
+			"ProductVersion": "{{.Info.ProductVersion}}.0",
+			"Comments": "{{.Info.Comments}}"
+		}
+	}
+}

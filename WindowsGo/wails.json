@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "CloudPrismGo",
+  "outputfilename": "CloudPrismGo",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "Sagiri-lzumi",
+    "email": "75474771+Sagiri-lzumi@users.noreply.github.com"
+  },
+  "info": {
+    "companyName": "CloudPrism",
+    "productName": "CloudPrism",
+    "productVersion": "1.0.0",
+    "copyright": "AGPL-3.0",
+    "comments": "CloudPrism 端到端加密云盘（Go 版）"
+  }
+}

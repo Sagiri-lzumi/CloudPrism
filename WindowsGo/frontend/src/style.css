@@ -1,0 +1,31 @@
+/* 骨架阶段的全局样式。
+ *
+ * 阶段 6 会在此基础上铺开完整的 Fluent 设计 token（明暗双套语义色、
+ * 组件级变量），此处只先固化三条与 WindowsPy 必须一致的基线：
+ *   1. 字体链取自 gui/theme.py:41-43，顺序不可调换 —— Segoe UI Variable
+ *      是 Fluent 的正文字体，缺失时逐级回退到微软雅黑；
+ *   2. 字号一律用 px，绝不用 pt（theme.py:115-119 记录了误用
+ *      setPointSize 导致 96DPI 下整体放大 33% 的历史事故）；
+ *   3. 强调色 #0067b8 取自 theme.py:37。
+ */
+:root {
+    --cp-accent: #0067b8;
+    --cp-font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI",
+    "Microsoft YaHei", sans-serif;
+    --cp-font-size: 14px;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: var(--cp-font-family);
+    font-size: var(--cp-font-size);
+    /* 桌面应用不需要橡皮筋回弹与文本选中光标，逐项关掉以贴近原生观感 */
+    overscroll-behavior: none;
+}
+
+#app {
+    height: 100vh;
+}
