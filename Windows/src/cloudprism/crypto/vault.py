@@ -23,11 +23,13 @@ Vault Marker 文件（.cloudprism_vault）用于识别云盘是否被本系统�
                     凭恢复码可解密出主密码，实现无主密码开库
 
 内部明文（v2/v3；v1 无名称字段，尾部到 VerifyMagic 即结束）：
+    下表偏移以 VaultMarker.create 中 inner 的实际拼装顺序为唯一真源
+    （跨端重写时必须以代码为准，不得以本表为准反推）：
     偏移 长度 字段
     0    1    FilenameEncryptionFlag   0x00/0x01
     1    4    ProtocolVersion          uint32 BE
     5    8    Reserved
-    9    4    VerifyMagic              b"CPV\x00"
+    13   4    VerifyMagic              b"CPV\x00"
     17   2    NameLen                  uint16 BE，名称 UTF-8 字节长（可 0）
     19   N    Name                     UTF-8 编码的用户自定义密库名称
 
