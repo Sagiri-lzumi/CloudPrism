@@ -371,7 +371,7 @@ async function onOtherConfirm(payload: string | boolean) {
                 <div class="ic-name">{{ snap().vaultName }}</div>
                 <div class="ic-sub">{{ snap().backend }} · {{ snap().backendId }}</div>
               </div>
-              <PrimaryButton icon="fingerprint" title="锁定密库（Ctrl+L）" @click="lockVault">
+              <PrimaryButton icon="lock" title="锁定密库（Ctrl+L）" @click="lockVault">
                 锁定
               </PrimaryButton>
             </div>

@@ -113,11 +113,11 @@ async function pickUpload() {
           type="button"
           class="nav-btn"
           :class="{dim: !connected()}"
-          title="锁定密库（Ctrl+L）"
+          :title="connected() ? '锁定密库（Ctrl+L）' : '未连接'"
           :disabled="!connected()"
           @click="lockVault"
         >
-          <Icon name="fingerprint" :size="20" />
+          <Icon :name="connected() ? 'lock' : 'lock_open'" :size="20" />
         </button>
         <button
           type="button"
