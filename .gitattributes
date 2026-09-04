@@ -23,3 +23,23 @@
 *.css  text eol=lf
 *.html text eol=lf
 *.json text eol=lf
+
+# 跨语言互操作夹具：字节精确的密码学产物，禁止任何行尾转换。
+#
+# git 的 text/binary 判定是「前 8000 字节有无 NUL」的启发式。当前 testdata 下
+# 的 .cpenc / .cloudprism_vault / .bin 恰好都含 NUL 而被判为 binary（实测
+# `git ls-files --eol` 显示 i/-text），但这是**内容的巧合而非契约**：
+# 换一批夹具就可能落到文本侧。已经踩到的是 go/filename/*.txt —— 纯 Base32
+# 文本，实测 i/lf w/lf attr/（判定为文本），在 core.autocrlf=true 下检出会
+# 被转成 CRLF。两端测试目前靠 strip("\r\n") 侥幸通过，一旦有人加一条字节级
+# 断言、或在非 Windows 平台克隆，就会以「加密不兼容」的假象失败。
+#
+# 显式 -text 让 git 原样存取，消除这一整类风险。
+WindowsGo/interop/testdata/** -text
+
+# 例外：vectors.json 是 JSON 索引而非二进制产物，行尾不影响解析结果。
+# 保持 text eol=lf 才能让「入库形态」与平台无关 —— 生成器在 Windows 上写
+# CRLF、在 Linux 上写 LF，归一化到 LF 后两端重跑 git diff 均为空；若改成
+# -text，入库内容会随生成平台漂移，可复现性检查反而失效。
+# （gitattributes 后出现的规则优先，故本行必须写在上面那条之后。）
+WindowsGo/interop/testdata/vectors.json text eol=lf
