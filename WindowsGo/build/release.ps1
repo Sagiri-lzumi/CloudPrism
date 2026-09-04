@@ -82,6 +82,16 @@ if (Test-Path $guideSrc) {
     Write-Host "[release] 提示：未找到 WindowsPy\assets\baidu_guide.md，跳过" -ForegroundColor Yellow
 }
 
+# 随包交付文档（源 = WindowsGo\docs；用户自测指南 + 视觉对照表）
+foreach ($doc in @("self_test_guide.md", "ui_polish_v1.md")) {
+    $docSrc = Join-Path $root "docs\$doc"
+    if (Test-Path $docSrc) {
+        Copy-Item $docSrc (Join-Path $assetsDir $doc)
+    } else {
+        Write-Host "[release] 提示：未找到 docs\$doc，跳过" -ForegroundColor Yellow
+    }
+}
+
 # 运行期数据目录占位（UDF/缓存/tmp 均由程序按需 MkdirAll，此处仅留档）
 New-Item -ItemType Directory -Force -Path (Join-Path $dirOut "data\tmp") | Out-Null
 
@@ -118,6 +128,8 @@ CloudPrism 便携版（Go 版）说明
     CloudPrismGo.exe        主程序（单文件，无安装）
     assets\icon.ico         应用图标（随包资源）
     assets\baidu_guide.md   百度网盘开放平台凭证获取教程
+    assets\self_test_guide.md 加密链路自测指南（新建库→上传→验证解密→续传）
+    assets\ui_polish_v1.md  UI 视觉对照表（对照 Python 版，含待确认项）
     data\                   运行期数据（UDF/日志/缓存/临时文件，可整目录删除，
                             不影响云端密库数据）
     WebView2\               可选：WebView2 引导安装器（未装运行时的机器用）
