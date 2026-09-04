@@ -208,7 +208,8 @@ const streamChunk = 1 << 20
 
 // recipeAlgo 是唯一支持的明文配方标识；出现别的值说明夹具由更新版的
 // 生成器产出，本端必须同步升级而不是默默跳过。
-const recipeAlgo = "sha256_counter_v1"
+// 实现与标识的导出版见 recipe.go（pipeline 等跨包用方共用同一份）。
+const recipeAlgo = RecipeAlgo
 
 // loadVectors 读取并反序列化 vectors.json。
 func loadVectors(t *testing.T) *vectors {
@@ -291,30 +292,18 @@ func assertSHA256(t *testing.T, what, got, want string) {
 	}
 }
 
-// recipePlain 按配方重建确定性明文：sha256(seed ‖ uint32be(counter)) 首尾相接后截断。
+// recipePlain 按配方重建确定性明文（委托 recipe.go 的导出实现）。
 //
-// 必须与 gen_vectors.py 的 recipe_plain 逐字节一致 —— 它是两端明文约定的
-// 唯一载体。TestRecipePlainMatchesLiteralFixtures 用已落盘的明文原件
-// 反过来验证本实现，避免「配方写错 → 所有下游用例一起红且无从定位」。
+// 契约源头是 gen_vectors.py 的 recipe_plain —— 它是两端明文约定的唯一
+// 载体。TestRecipePlainMatchesLiteralFixtures 用已落盘的明文原件反过来
+// 验证本实现，避免「配方写错 → 所有下游用例一起红且无从定位」。
 func recipePlain(t *testing.T, r recipe, size int64) []byte {
 	t.Helper()
 
-	if r.Algo != recipeAlgo {
-		t.Fatalf("未知的明文配方 %q（本端只支持 %q），生成器与测试代码版本不匹配", r.Algo, recipeAlgo)
+	if r.Algo != RecipeAlgo {
+		t.Fatalf("未知的明文配方 %q（本端只支持 %q），生成器与测试代码版本不匹配", r.Algo, RecipeAlgo)
 	}
-	seed := mustHex(t, r.Seed, "配方种子")
-
-	out := make([]byte, 0, size+sha256.Size)
-	var counter uint32
-	for int64(len(out)) < size {
-		// seed ‖ uint32be(counter)，与 Python 侧 counter.to_bytes(4, "big") 同构
-		h := sha256.New()
-		h.Write(seed)
-		h.Write([]byte{byte(counter >> 24), byte(counter >> 16), byte(counter >> 8), byte(counter)})
-		out = h.Sum(out)
-		counter++
-	}
-	return out[:size]
+	return RecipePlain(mustHex(t, r.Seed, "配方种子"), size)
 }
 
 // expectedPlain 取得某个夹具应有的明文：优先读落盘原件，否则按配方重建。
