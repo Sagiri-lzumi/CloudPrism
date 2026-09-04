@@ -1,0 +1,656 @@
+{
+ "meta": {
+  "generator": "WindowsGo/interop/gen_vectors.py",
+  "schema": 1,
+  "note": "由 Python 侧一次性生成并提交，Go 侧只读；重跑本脚本产物应逐字节相同",
+  "python": "3.12.10",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "master_password": "CloudPrism-Interop-主密码-pässwörd",
+  "protocol_version": 1,
+  "vault_version": 3,
+  "kdf": {
+   "algo": "PBKDF2-HMAC-SHA256",
+   "iterations": 200000,
+   "key_len": 32
+  }
+ },
+ "filename_key": {
+  "salt": "56259e6539bddbf9e67eea8de6dfed61",
+  "key": "68f54c4583c453f2f89211eae43f6c267230bc399195abb73890036b625b985c"
+ },
+ "files": [
+  {
+   "slug": "lit_0",
+   "kind": "literal",
+   "size": 0,
+   "max_workers": 1,
+   "recipe": {
+    "algo": "sha256_counter_v1",
+    "seed": "21ce45be000a45221fa387f83bd1a888"
+   },
+   "salt": "eac82dfb4b2d6aba94631aa2168f10ef",
+   "iv": "5d7d9c8dcc70d42eae9897ecec656abd",
+   "flags": 0,
+   "version": 1,
+   "header_length": 51,
+   "display_name": "lit_0.bin",
+   "filename_enc": false,
+   "leaf": "lit_0.bin.cpenc",
+   "plain_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "cipher_sha256": "c70317daeea58709a94aa35fe61e96585ce0c0db59930fbe320eb944f62c4a53",
+   "plain_path": "plain/lit_0.bin",
+   "cipher_path": "cpenc/lit_0.cpenc"
+  },
+  {
+   "slug": "lit_1",
+   "kind": "literal",
+   "size": 1,
+   "max_workers": 1,
+   "recipe": {
+    "algo": "sha256_counter_v1",
+    "seed": "61681478186f31f58c13f65bc3bbc0bd"
+   },
+   "salt": "59aac7230af91cc5fee9fd46a522628d",
+   "iv": "da03ccffbbc8580664c8830d50cce0ba",
+   "flags": 0,
+   "version": 1,
+   "header_length": 51,
+   "display_name": "lit_1.bin",
+   "filename_enc": false,
+   "leaf": "lit_1.bin.cpenc",
+   "plain_sha256": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+   "cipher_sha256": "11663a1662ad7f6127e7b026bfd55551b29bf7f50062e1e5e4f03b81b77853bb",
+   "plain_path": "plain/lit_1.bin",
+   "cipher_path": "cpenc/lit_1.cpenc"
+  },
+  {
+   "slug": "lit_15",
+   "kind": "literal",
+   "size": 15,
+   "max_workers": 1,
+   "recipe": {
+    "algo": "sha256_counter_v1",
+    "seed": "a4d5bd1292ebb1c1d2ac9745165147b1"
+   },
+   "salt": "4d1dfe21c1b0e7ed7aa19dbfe6701a4b",
+   "iv": "da108d4244161c4e8451fe8f304d1e5a",
+   "flags": 0,
+   "version": 1,
+   "header_length": 51,
+   "display_name": "lit_15.bin",
+   "filename_enc": false,
+   "leaf": "lit_15.bin.cpenc",
+   "plain_sha256": "b8c4d64bfc4e5c0df437ad29a91eb970813d9a07b1d073c633422cd7033dc0c2",
+   "cipher_sha256": "176b336084ce627227a7bf5741b327cfc19f15c7b6e1e2bc30827568a97af0dc",
+   "plain_path": "plain/lit_15.bin",
+   "cipher_path": "cpenc/lit_15.cpenc"
+  },
+  {
+   "slug": "lit_16",
+   "kind": "literal",
+   "size": 16,
+   "max_workers": 1,
+   "recipe": {
+    "algo": "sha256_counter_v1",
+    "seed": "b7ef5ee477ffc322bf81a0364cc46856"
+   },
+   "salt": "c2ca3309497832670212550596cc4904",
+   "iv": "3e5d38a0806017e6d2459c86ff13169e",
+   "flags": 0,
+   "version": 1,
+   "header_length": 51,
+   "display_name": "lit_16-报告 (1).txt",
+   "filename_enc": true,
+   "leaf": "3PUAJMN43GNRHVM4U3ZEQ2YKTMF4UY4SNP6UG4L5CYYS5EUTHZDNWKZJLGPHAVYKL26YNJE3RCNWHEI.cpenc",
+   "plain_sha256": "cecabf670c6e3bf21f00575033a6cad285f13e111591d32615cf73854c5c3c9b",
+   "cipher_sha256": "5cc4767ec6438ba977b312a4ac87d8c32ce742499e373097a6cb00d8fbc32338",
+   "plain_path": "plain/lit_16.bin",
+   "cipher_path": "cpenc/lit_16.cpenc"
+  },
+  {
+   "slug": "lit_17",
+   "kind": "literal",
+   "size": 17,
+   "max_workers": 1,
+   "recipe": {
+    "algo": "sha256_counter_v1",
+    "seed": "c48fd9670e3ab07a2989aa61f783eeb3"
+   },
+   "salt": "44884ac61f247195f65abed7c30dfe74",
+   "iv": "607af66062f47902659ac3a3e9527074",
+   "flags": 0,
+   "version": 1,
+   "header_length": 51,
+   "display_name": "lit_17.bin",
+   "filename_enc": false,
+   "leaf": "lit_17.bin.cpenc",
+   "plain_sha256": "dc32b90cc24790a4faf7f80429e9d2edd80b4b44d065ffd36ffba6863c4d9ada",
+   "cipher_sha256": "a2ad2485af2ddf414c703998126aef7d293473486fdc33327e668fdadf359118",
+   "plain_path": "plain/lit_17.bin",
+   "cipher_path": "cpenc/lit_17.cpenc"
+  },
+  {
+   "slug": "lit_51",
+   "kind": "literal",
+   "size": 51,
+   "max_workers": 1,
+   "recipe": {
+    "algo": "sha256_counter_v1",
+    "seed": "f340e5bc9c10fa150b42a1da5c66da5c"
+   },
+   "salt": "aa767c7fb2c46d4ea154b419bea61822",
+   "iv": "2bcf98c0ad40b968d1ac80c469b77618",
+   "flags": 0,
+   "version": 1,
+   "header_length": 51,
+   "display_name": "lit_51.bin",
+   "filename_enc": false,
+   "leaf": "lit_51.bin.cpenc",
+   "plain_sha256": "40f59b2e7ef6416ba894c6c181dc4960554d15716b05661fa31fee3f9391618f",
+   "cipher_sha256": "bde0386c87d7379dd838afa286e30844d9df20dc1b310fd3b4cf2019fe3344d3",
+   "plain_path": "plain/lit_51.bin",
+   "cipher_path": "cpenc/lit_51.cpenc"
+  },
+  {
+   "slug": "lit_52",
+   "kind": "literal",
+   "size": 52,
+   "max_workers": 1,
+   "recipe": {
+    "algo": "sha256_counter_v1",
+    "seed": "9b5ec4be5328921342cab41d8392fba7"
+   },
+   "salt": "8a7b19c68adc7d0236406b15a43fb0e5",
+   "iv": "db05fbbec863fca8c0e81092b2953489",
+   "flags": 0,
+   "version": 1,
+   "header_length": 51,
+   "display_name": "lit_52.bin",
+   "filename_enc": false,
+   "leaf": "lit_52.bin.cpenc",
+   "plain_sha256": "520dfaa35987a2e2318ff727a3251dddb9c32da31f199ca2350890880b928345",
+   "cipher_sha256": "7626d2bdb7861c9fd60c0ee9a6fb484fa85af8622e7074eafadd459fa53f3428",
+   "plain_path": "plain/lit_52.bin",
+   "cipher_path": "cpenc/lit_52.cpenc"
+  },
+  {
+   "slug": "rec_4095",
+   "kind": "recipe",
+   "size": 4095,
+   "max_workers": 1,
+   "recipe": {
+    "algo": "sha256_counter_v1",
+    "seed": "99a6eda4e1b61a6200e0e04cda135238"
+   },
+   "salt": "d44c66bb8c2c68f93d33f90c0d098b79",
+   "iv": "0a57216927c5e169d5a33eda82325f56",
+   "flags": 0,
+   "version": 1,
+   "header_length": 51,
+   "display_name": "rec_4095.bin",
+   "filename_enc": false,
+   "leaf": "rec_4095.bin.cpenc",
+   "plain_sha256": "63a3198a70ad81c1bb06f937cdb25533fd8c81dcbb53f67a482e01b455ff18da",
+   "cipher_sha256": "e285ae369205e6865b36e48bac1b73e3fe1e61a1a9f16e4ec4f728ebd0c68af0",
+   "plain_path": null,
+   "cipher_path": "cpenc/rec_4095.cpenc"
+  },
+  {
+   "slug": "rec_4096",
+   "kind": "recipe",
+   "size": 4096,
+   "max_workers": 1,
+   "recipe": {
+    "algo": "sha256_counter_v1",
+    "seed": "dfcca7b3e3c6a36d84ce71d608e0eae4"
+   },
+   "salt": "439633e691da6793faa6b369a2d25847",
+   "iv": "16fb041b21e7f76c9fa8982a03791bb0",
+   "flags": 0,
+   "version": 1,
+   "header_length": 51,
+   "display_name": "rec_4096-报告 (1).txt",
+   "filename_enc": true,
+   "leaf": "X7S25AH75KQTUMFFI5ISGQCMTXFJ5XETFGSAEQW6IIZ25W6LNE265L6CEQE3S3UBDSFU4JI42NZAVZ3KVI.cpenc",
+   "plain_sha256": "3bf9c1b3341cc7b08b89b76e8c665b1aab5625a141d562bb2bd6cffec4ab9e3f",
+   "cipher_sha256": "02c8288c18e67f9ecab4801ef7fe9aef2fc6ddca06756710db1a67d27f8a8658",
+   "plain_path": null,
+   "cipher_path": "cpenc/rec_4096.cpenc"
+  },
+  {
+   "slug": "rec_65539",
+   "kind": "recipe",
+   "size": 65539,
+   "max_workers": 1,
+   "recipe": {
+    "algo": "sha256_counter_v1",
+    "seed": "174b5ac6ce3776dca749fec3ee9031fd"
+   },
+   "salt": "015d80ee2d5a41dbdbc2fc9cec49cd16",
+   "iv": "5cbd17e6901d7003ec7376a4ea2534b4",
+   "flags": 0,
+   "version": 1,
+   "header_length": 51,
+   "display_name": "rec_65539.bin",
+   "filename_enc": false,
+   "leaf": "rec_65539.bin.cpenc",
+   "plain_sha256": "114bb87d06f6d25d0d8a80b35450020cff798e38aa4d9f615aacad318d06c3f1",
+   "cipher_sha256": "67aa5cb9c0ee523c23e1492dba86f594f0b58af22ff4c718dc2d2482e28d69d8",
+   "plain_path": null,
+   "cipher_path": "cpenc/rec_65539.cpenc"
+  },
+  {
+   "slug": "rec_262149",
+   "kind": "recipe",
+   "size": 262149,
+   "max_workers": 1,
+   "recipe": {
+    "algo": "sha256_counter_v1",
+    "seed": "2fad9ed0871dad1028065723001815d4"
+   },
+   "salt": "38263148c7eff814513cb9eb884e76dd",
+   "iv": "03ec67024e22d8c91a55f1ad7e851a0a",
+   "flags": 0,
+   "version": 1,
+   "header_length": 51,
+   "display_name": "rec_262149.bin",
+   "filename_enc": false,
+   "leaf": "rec_262149.bin.cpenc",
+   "plain_sha256": "9e3e325120087e0fd7cb1a7a1303090301409e0ac1f7177701b3e0ba2c4bfe4f",
+   "cipher_sha256": "9aa2ca50b8c0c39091774d278ac85875fd367fe2ecf5cc6927dd92e5e99800d1",
+   "plain_path": null,
+   "cipher_path": "cpenc/rec_262149.cpenc",
+   "ranges": [
+    {
+     "start": 0,
+     "end": 16,
+     "expect_hex": "f22c4d93a64a7877bfcb7224366d24dd"
+    },
+    {
+     "start": 3,
+     "end": 19,
+     "expect_hex": "93a64a7877bfcb7224366d24dd854509"
+    },
+    {
+     "start": 1000,
+     "end": 1032,
+     "expect_hex": "a0818852c2e53fa8d7a29ad623907b1fccd954e62ed1edd386dfc7dd45e04ea5"
+    },
+    {
+     "start": 262100,
+     "end": 262149,
+     "expect_hex": "d5a9e2494660c579bc55cc57fbcf513a17d275040697572c111ea0e459329b74dabbe3df58754d826dffe6c20c5876e6f1"
+    }
+   ]
+  },
+  {
+   "slug": "par_4194307_w2",
+   "kind": "hash_only",
+   "size": 4194307,
+   "max_workers": 2,
+   "recipe": {
+    "algo": "sha256_counter_v1",
+    "seed": "1a8c1885a5fe7128e97f68cddaedcaad"
+   },
+   "salt": "e5a3251e065572c41456f4d62df8ef71",
+   "iv": "debc8981ce1a6a1c85d193180cafd729",
+   "flags": 0,
+   "version": 1,
+   "header_length": 51,
+   "display_name": "par_4194307_w2.bin",
+   "filename_enc": false,
+   "leaf": "par_4194307_w2.bin.cpenc",
+   "plain_sha256": "0ea229e9b07074580f42fab41896c780b7a912147b52936611c8e98633f92b14",
+   "cipher_sha256": "baf0588c5306911e2c4ef872b6a74d364043b45f8c9050c99048419aab4688b3",
+   "plain_path": null,
+   "cipher_path": null
+  },
+  {
+   "slug": "par_8388611_w4",
+   "kind": "hash_only",
+   "size": 8388611,
+   "max_workers": 4,
+   "recipe": {
+    "algo": "sha256_counter_v1",
+    "seed": "8c7cc55ef1e2b712f237ce285fc64fa1"
+   },
+   "salt": "3fb68ec81f2768b7be26638ede891754",
+   "iv": "53d6efb2d914bfb61c96e8397e323d8d",
+   "flags": 0,
+   "version": 1,
+   "header_length": 51,
+   "display_name": "par_8388611_w4-报告 (1).txt",
+   "filename_enc": true,
+   "leaf": "FUUJUKOARHM433FRJKELAMVBJUKBALR4UAYMFO7NDRHJB5LT2GGCTP3WTCCPFUQLGAHPS4YTJ4ZXBFJMSCE5FJP72RKA.cpenc",
+   "plain_sha256": "10dd6fcd6af4bcb6f3bf2b9a99fe39add1f628741538283304dd4a952adbac2b",
+   "cipher_sha256": "2329e77c2d77064342fe94498682b5b4884a50b0a76adf00233ec20520012cbc",
+   "plain_path": null,
+   "cipher_path": null
+  },
+  {
+   "slug": "par_12345678_w4",
+   "kind": "hash_only",
+   "size": 12345678,
+   "max_workers": 4,
+   "recipe": {
+    "algo": "sha256_counter_v1",
+    "seed": "64280f86d1a20558cceca716da93bb1b"
+   },
+   "salt": "8b99c2c80966662b61a3c061e0db5857",
+   "iv": "c829d037482588e63c02ed774c54a1de",
+   "flags": 0,
+   "version": 1,
+   "header_length": 51,
+   "display_name": "par_12345678_w4.bin",
+   "filename_enc": false,
+   "leaf": "par_12345678_w4.bin.cpenc",
+   "plain_sha256": "eebf65f722c0beef8f65848c607e41dd3d4d0d58feed0e4c27c8cf6458d4bbfa",
+   "cipher_sha256": "913ce58de62f8a83d859967c453a0ee70ebf6d509211306e71c4bd3febc358ba",
+   "plain_path": null,
+   "cipher_path": null
+  }
+ ],
+ "vaults": [
+  {
+   "slug": "v3_enc_rec",
+   "path": "vault/v3_enc_rec.cloudprism_vault",
+   "password": "CloudPrism-Interop-主密码-pässwörd",
+   "vault_id": "620adaa9354b34a0cae3d674a036b27c",
+   "salt": "f78e479218451907f2704d476bc475d5",
+   "iv": "f52dfe45d8d7e10d0a34b323e5e7e22b",
+   "version": 3,
+   "protocol_version": 1,
+   "name_in": "我的密库 Vault-1",
+   "recovery_secret": "2670faa30f4df94bc885",
+   "recovery_blob": "60e371140c6359541dfbaf0e5bb1031ab7f98729c900d258ef2092e255ae2582cf315825d60c3d6286e98baccf65aa86e22528180b5d5a06c57392ff40470cb4ed657f463395fe",
+   "recovery_code": "EZYPVIYPJX4UXSEF",
+   "bytes_sha256": "6fecf4e746e23bd33355d75c2a8baafaf03525eb1cb9ab8fa4e99edcc05da719",
+   "length": 196,
+   "expect": {
+    "version": 3,
+    "name": "我的密库 Vault-1",
+    "filename_enc": true,
+    "protocol_version": 1,
+    "has_recovery": true,
+    "vault_id": "620adaa9354b34a0cae3d674a036b27c",
+    "salt": "f78e479218451907f2704d476bc475d5",
+    "iv": "f52dfe45d8d7e10d0a34b323e5e7e22b"
+   },
+   "split": {
+    "head_len": 123,
+    "tail_hex": "004760e371140c6359541dfbaf0e5bb1031ab7f98729c900d258ef2092e255ae2582cf315825d60c3d6286e98baccf65aa86e22528180b5d5a06c57392ff40470cb4ed657f463395fe"
+   }
+  },
+  {
+   "slug": "v3_plain_norec",
+   "path": "vault/v3_plain_norec.cloudprism_vault",
+   "password": "CloudPrism-Interop-主密码-pässwörd",
+   "vault_id": "068953d6a191460a4228d0513edeb557",
+   "salt": "ffdf0f683c5b3d0fc19a6ad2728f503c",
+   "iv": "3f74008daa5ab7998583d2732cfe14b5",
+   "version": 3,
+   "protocol_version": 1,
+   "name_in": "MyVault",
+   "recovery_secret": "8495a8b26c92b87037a3",
+   "recovery_blob": "",
+   "recovery_code": "QSK2RMTMSK4HAN5D",
+   "bytes_sha256": "f1d2b033bd2ba0d0f186c59871ec7396671baac4de9afb775ab9d872607fdc48",
+   "length": 110,
+   "expect": {
+    "version": 3,
+    "name": "MyVault",
+    "filename_enc": false,
+    "protocol_version": 1,
+    "has_recovery": false,
+    "vault_id": "068953d6a191460a4228d0513edeb557",
+    "salt": "ffdf0f683c5b3d0fc19a6ad2728f503c",
+    "iv": "3f74008daa5ab7998583d2732cfe14b5"
+   },
+   "split": {
+    "head_len": 110,
+    "tail_hex": ""
+   }
+  },
+  {
+   "slug": "v2_enc_norec",
+   "path": "vault/v2_enc_norec.cloudprism_vault",
+   "password": "CloudPrism-Interop-主密码-pässwörd",
+   "vault_id": "590d454f2260bada66fb70dc2ac98495",
+   "salt": "2c1d9a8be1b6dfc5c2ca37e4b6dbe175",
+   "iv": "6182a3e642d067936a6d87606d20c79c",
+   "version": 2,
+   "protocol_version": 1,
+   "name_in": "",
+   "recovery_secret": "5300f5fa382dbb7955b0",
+   "recovery_blob": "",
+   "recovery_code": "KMAPL6RYFW5XSVNQ",
+   "bytes_sha256": "99ca1de0f6cbda1a203bba933a50df4198e1b4a6139f69886f506f336caf1fbc",
+   "length": 103,
+   "expect": {
+    "version": 2,
+    "name": "",
+    "filename_enc": true,
+    "protocol_version": 1,
+    "has_recovery": false,
+    "vault_id": "590d454f2260bada66fb70dc2ac98495",
+    "salt": "2c1d9a8be1b6dfc5c2ca37e4b6dbe175",
+    "iv": "6182a3e642d067936a6d87606d20c79c"
+   },
+   "split": {
+    "head_len": 103,
+    "tail_hex": ""
+   }
+  },
+  {
+   "slug": "v1_norec",
+   "path": "vault/v1_norec.cloudprism_vault",
+   "password": "CloudPrism-Interop-主密码-pässwörd",
+   "vault_id": "6a7ba7c332d8e16b202ec84a85b68847",
+   "salt": "a41795edc6ce11c73b8616dd885677ef",
+   "iv": "bfd4ef8d60bb2a89c6d91a9b88abc968",
+   "version": 1,
+   "protocol_version": 1,
+   "name_in": "",
+   "recovery_secret": "85724411d9fbfaa39d16",
+   "recovery_blob": "",
+   "recovery_code": "QVZEIEOZ7P5KHHIW",
+   "bytes_sha256": "155453ee2c390be46eacca5e0a8e2063ab4492061e919e71cba510ae99303a51",
+   "length": 103,
+   "expect": {
+    "version": 1,
+    "name": "",
+    "filename_enc": false,
+    "protocol_version": 1,
+    "has_recovery": false,
+    "vault_id": "6a7ba7c332d8e16b202ec84a85b68847",
+    "salt": "a41795edc6ce11c73b8616dd885677ef",
+    "iv": "bfd4ef8d60bb2a89c6d91a9b88abc968"
+   },
+   "split": {
+    "head_len": 103,
+    "tail_hex": ""
+   }
+  },
+  {
+   "slug": "v3_name_trunc",
+   "path": "vault/v3_name_trunc.cloudprism_vault",
+   "password": "CloudPrism-Interop-主密码-pässwörd",
+   "vault_id": "ef96875155a924aa72b28578e06395f5",
+   "salt": "588f03cba798f5b6f56b27234d7c5e74",
+   "iv": "2193a7a3e1c83da54af2009fe5008b1e",
+   "version": 3,
+   "protocol_version": 1,
+   "name_in": "字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字",
+   "recovery_secret": "41f50b64b25d502b1fca",
+   "recovery_blob": "04eae69c8f80e973893ca757a22293b03f1ba38fbc9b14c4170265f18892798dc6b8c8ddb1d25524cf407dbaea65182a3c06184646530ba1fbe300f811b323a8079d747139e547",
+   "recovery_code": "IH2QWZFSLVICWH6K",
+   "bytes_sha256": "f2d17001ec4ba44fab109f42a8cd32a940c13a1ece1dae846280d5463c226e3d",
+   "length": 272,
+   "expect": {
+    "version": 3,
+    "name": "字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字",
+    "filename_enc": true,
+    "protocol_version": 1,
+    "has_recovery": true,
+    "vault_id": "ef96875155a924aa72b28578e06395f5",
+    "salt": "588f03cba798f5b6f56b27234d7c5e74",
+    "iv": "2193a7a3e1c83da54af2009fe5008b1e"
+   },
+   "split": {
+    "head_len": 199,
+    "tail_hex": "004704eae69c8f80e973893ca757a22293b03f1ba38fbc9b14c4170265f18892798dc6b8c8ddb1d25524cf407dbaea65182a3c06184646530ba1fbe300f811b323a8079d747139e547"
+   }
+  },
+  {
+   "slug": "v3_empty_name",
+   "path": "vault/v3_empty_name.cloudprism_vault",
+   "password": "CloudPrism-Interop-主密码-pässwörd",
+   "vault_id": "99d9f1eabc7b4ca8a191376d64cf8a6f",
+   "salt": "9781b58bfabc81eaa58b50963380d9fd",
+   "iv": "5ec4da8258cdf1fdeb0d4460ca0498ca",
+   "version": 3,
+   "protocol_version": 1,
+   "name_in": "",
+   "recovery_secret": "025bfcca473cc06b945e",
+   "recovery_blob": "",
+   "recovery_code": "AJN7ZSSHHTAGXFC6",
+   "bytes_sha256": "d90da2f37d5deddea54f1c564354279b1068d2009ee9eb40911504005f8f1574",
+   "length": 103,
+   "expect": {
+    "version": 3,
+    "name": "",
+    "filename_enc": true,
+    "protocol_version": 1,
+    "has_recovery": false,
+    "vault_id": "99d9f1eabc7b4ca8a191376d64cf8a6f",
+    "salt": "9781b58bfabc81eaa58b50963380d9fd",
+    "iv": "5ec4da8258cdf1fdeb0d4460ca0498ca"
+   },
+   "split": {
+    "head_len": 103,
+    "tail_hex": ""
+   }
+  }
+ ],
+ "filenames": [
+  {
+   "plain": "报告 2026 (最终版).txt",
+   "enc": "AXCD4SOA4NTGJSCJNFKCVM6DJ3SG742LTGFUL5WACWJURUAYLSLAXEONVHU46I4SS4HURWI6HBJGZZKYJYS7IRPX"
+  },
+  {
+   "plain": "a",
+   "enc": "LNRR3DSRXUK6E5S2A34UPWLCDLR4WSYC3KL5YCASB3FRKNQ"
+  },
+  {
+   "plain": "视频-第 3 集.1080p.mkv",
+   "enc": "5AOTPBS7JMVT4QC53IKOKMVHBCCR7LVHBSK5OZHXM3VHSN56M6DUB6R5SYUAE4EWHKXVFZYA5KTS7S6G7BF4CJA"
+  },
+  {
+   "plain": "emoji-🎬-name.mp4",
+   "enc": "RXXZBEPVMBAYYJTPHIOZBMF277WILES3KVLI4KHFIQM5CKB6CVBKOYZYZ32MZFAP6CYYYKUEQ5ZA"
+  }
+ ],
+ "go_emit": {
+  "cpenc": [
+   {
+    "slug": "go_lit_17",
+    "path": "go/cpenc/go_lit_17.cpenc",
+    "size": 17,
+    "recipe": {
+     "algo": "sha256_counter_v1",
+     "seed": "a432a1bf0e86665ff0a2859a3cf026f5"
+    },
+    "salt": "03f8349e9b819606ac260531a15e0429",
+    "iv": "d4b68c81f4ab67b95b4bda12c49b83b1",
+    "flags": 0,
+    "version": 1
+   },
+   {
+    "slug": "go_rec_4095",
+    "path": "go/cpenc/go_rec_4095.cpenc",
+    "size": 4095,
+    "recipe": {
+     "algo": "sha256_counter_v1",
+     "seed": "d9b00938df9633a2bae01df9286083c4"
+    },
+    "salt": "3ba03939440c2d1bb5cff2cb99e8dc79",
+    "iv": "979b6b781bf45b4606d22028e7dffbd2",
+    "flags": 0,
+    "version": 1
+   },
+   {
+    "slug": "go_rec_65539",
+    "path": "go/cpenc/go_rec_65539.cpenc",
+    "size": 65539,
+    "recipe": {
+     "algo": "sha256_counter_v1",
+     "seed": "d2bfdd5a9b95769dd6e6b89776a66104"
+    },
+    "salt": "10ba01a511f52ab7f257cc2461fa3f6b",
+    "iv": "9d688b320858076668770da73d59d85d",
+    "flags": 0,
+    "version": 1
+   }
+  ],
+  "vault": [
+   {
+    "slug": "go_v3_rec",
+    "path": "go/vault/go_v3_rec.cloudprism_vault",
+    "password": "CloudPrism-Interop-主密码-pässwörd",
+    "vault_id": "cbfdb8c2cf6e247b3f24dfe88907fc56",
+    "salt": "7f2d9de1025d63b20716cba795263c63",
+    "iv": "3b3a2fec6bb5b894ce8f8e1ccfd7cbe1",
+    "version": 3,
+    "protocol_version": 1,
+    "name": "Go 端密库",
+    "filename_enc": true,
+    "recovery_secret": "462d768573e90ad3f9bc",
+    "recovery_code": "IYWXNBLT5EFNH6N4",
+    "expect_name": "Go 端密库",
+    "expect_has_recovery": true
+   },
+   {
+    "slug": "go_v1",
+    "path": "go/vault/go_v1.cloudprism_vault",
+    "password": "CloudPrism-Interop-主密码-pässwörd",
+    "vault_id": "b6b3577c87bc0a079f2676d1aa11434d",
+    "salt": "ff13f90028fdeb93e3165ebdce7a8873",
+    "iv": "9f9674ebe8afbafdec4eec8276f30178",
+    "version": 1,
+    "protocol_version": 1,
+    "name": "",
+    "filename_enc": false,
+    "recovery_secret": null,
+    "recovery_code": null,
+    "expect_name": "",
+    "expect_has_recovery": false
+   }
+  ],
+  "filename": {
+   "salt": "56259e6539bddbf9e67eea8de6dfed61",
+   "key": "68f54c4583c453f2f89211eae43f6c267230bc399195abb73890036b625b985c",
+   "items": [
+    {
+     "index": 0,
+     "path": "go/filename/00.txt",
+     "plain": "报告 2026 (最终版).txt"
+    },
+    {
+     "index": 1,
+     "path": "go/filename/01.txt",
+     "plain": "a"
+    },
+    {
+     "index": 2,
+     "path": "go/filename/02.txt",
+     "plain": "视频-第 3 集.1080p.mkv"
+    },
+    {
+     "index": 3,
+     "path": "go/filename/03.txt",
+     "plain": "emoji-🎬-name.mp4"
+    }
+   ]
+  }
+ }
+}
