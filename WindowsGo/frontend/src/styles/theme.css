@@ -56,9 +56,7 @@
     --shadow-card: 0 2px 8px rgba(0, 0, 0, .08);
     --shadow-pop: 0 8px 24px rgba(0, 0, 0, .16); /* 菜单/对话框 */
 
-    /* ---- 亚克力近似（见计划阶段 6 第 4 条：放弃窗口级 translucen） ---- */
-    --acrylic-bg: color-mix(in srgb, var(--surface) 82%, transparent);
-    --acrylic-blur: blur(30px) saturate(140%);
+    /* 亚克力近似 token 已删除：全仓无消费点（死代码），详见 docs/ARCHITECTURE.md 差异 #13 */
 
     /* ---- 动效（Windows 11 标准缓动） ---- */
     --dur: 180ms;

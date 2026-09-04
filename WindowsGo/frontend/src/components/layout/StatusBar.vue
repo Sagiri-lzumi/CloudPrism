@@ -33,7 +33,7 @@ const connText = computed(() => {
   <footer class="cp-status">
     <span class="seg left">
       <span class="dot" :class="connecting ? 'busy' : connected ? 'on' : 'off'" />
-      <span v-if="connecting" class="conn">{{ ui.opText || '正在连接…' }}</span>
+      <span v-if="connecting" class="conn busy-text">{{ ui.opText || '正在连接…' }}</span>
       <span v-else-if="connected" class="conn">{{ connText }}</span>
       <span v-else class="conn off-text">未连接</span>
     </span>
@@ -61,7 +61,7 @@ const connText = computed(() => {
   display: flex;
   align-items: center;
   gap: 16px;
-  height: 28px;
+  height: 30px; /* 对照 Python 状态栏分段高度，增强存在感（此前 28px 过弱） */
   padding: 0 12px;
   font-size: 0.786rem; /* 11px：状态条信息弱化一档 */
   color: var(--text2);
@@ -95,10 +95,25 @@ const connText = computed(() => {
   opacity: 1;
 }
 
-/* 连接中：橙色点（视觉增强的脉冲动画在样式打磨批加入） */
+/* 连接中：橙色点 + 呼吸扩散环（对照 Fluent 活动指示语义） */
 .dot.busy {
   background: var(--warn);
   opacity: 1;
+  animation: dot-pulse 1.4s var(--ease) infinite;
+}
+
+@keyframes dot-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--warn) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 0%, transparent);
+  }
+}
+
+/* 连接中文案：主文字色（高于次级/弱化两档） */
+.busy-text {
+  color: var(--text);
 }
 
 .off-text {
