@@ -146,7 +146,7 @@ Chromium 建立 Mojo IPC 通道（实测 `platform_channel.cc:183 Check failed: 
 | # | 差异 | Python 端行为 | Go 端行为 | 理由 |
 |---|---|---|---|---|
 | 1 | WebView2 用户数据目录 | —（Qt 无此概念） | 显式指定 `<exe>/data/webview2`，不可写时降级 `%LOCALAPPDATA%` | go-webview2 默认落 `%AppData%\<exe 名>`，破坏便携约定 |
-| 2 | 缺失 WebView2 运行时 | — | 启动前探测注册表，弹系统模态框给出安装指引后退出 | GUI 子系统程序无控制台，否则表现为「双击无反应」 |
+| 2 | 缺失 WebView2 运行时 | — | 启动前探测注册表；缺失时先用系统默认浏览器打开微软官方下载页（fwlink），再弹模态框说明后退出 | GUI 子系统程序无控制台，否则表现为「双击无反应」；顺手直达下载页，省去用户手动搜索 |
 | 3 | 并行加密分段上限 | `num_segments = min(..., 4)`（子进程启动数秒，被迫限流） | 仅受 worker 数与 CPU 核数约束 | goroutine 启动是 µs 级，无需人为限流 |
 | 4 | 缩略图缓存位置 | `%TEMP%/cloudprism_thumbs` | `data/thumb-cache/` | 修掉便携性不一致 |
 | 5 | 缩略图缓存内容 | 最多 512KB 的原始图片头部字节，缩放在 UI 侧每次重做 | 服务端解码 + 缩放到 192px + 重编码 JPEG（约 5–15KB） | 解码开销、IPC 传输量、内存占用同时降一个数量级 |
@@ -157,6 +157,12 @@ Chromium 建立 Mojo IPC 通道（实测 `platform_channel.cc:183 Check failed: 
 | 10 | 传输任务生命周期 | `_release_worker` / `thread.wait(5000)` / `_graveyard` | `context` + `WaitGroup` | 整类生命周期问题天然消失 |
 | 11 | 速度统计 | `PerfMonitor.report_bytes()` 无生产调用方，状态栏恒为 `--` | 取队列 `done_bytes` 差分 | 修好死接线 |
 | 12 | 拖出到资源管理器 | `filesDraggedOut` 信号 | 改为「导出到…」按钮 + 右键菜单 | WebView2 无法发起 OS 级 drag-out |
+| 13 | 毛玻璃/亚克力材质 | Qt 实底绘制，无亚克力 | 主题预留 `--acrylic-bg`（`color-mix` 82% 表面色半透明）；**放弃** Wails 窗口级 translucent | 窗口级 translucent 在 Win10/11 行为不一致、影响文字锐度、拖慢合成，CSS 近似零平台风险 |
+| 14 | 代理响应缓存头 | 无 `Cache-Control`（Qt 播放器不缓存响应） | 流式响应恒发 `Cache-Control: no-store` | Chromium 会拼 206 片段入磁盘缓存——解密后的明文内容会落盘，必须显式禁止 |
+| 15 | 页面功能分布 | 连接信息卡、恢复码卡在**设置页** | 恢复码/同步/连接信息并入**密库页**（VaultsView）；设置页只留纯偏好 + 百度凭证 | 与「最近记录/快速重连」同屏同上下文，操作和信息一处找齐 |
+| 16 | 百度授权教程承载 | `gui/baidu_guide.py` 运行时读取 `assets/baidu_guide.md` 文件并弹独立窗口 | 教程 6 步文案内嵌前端（`GUIDE_LINES` 常量），展开卡片展示 | 省掉「运行时资产加载器」整体复杂度；release 随包仍带 md 供人工阅读 |
+| 17 | 并行分段粒度 | 修复后按 worker 数均分、向下 16 对齐（大文件单段可达 GB 级） | 固定 `ShardAlign = 1MiB` 分片（≥4MiB 才启用并行） | goroutine 无进程启动成本；1MiB 粒度进度更平滑、取消更及时、峰值内存 = workers×1MiB；偏移恒 16 对齐 → 与 Python 产物逐字节等价（interop 已验证） |
+| 18 | 检查更新 UI | 设置页「关于」组提供「检查更新」按钮（对比 GitHub Release） | **未接线 UI**：`pkg/update` checker 有单测但无绑定消费；「关于」组只展示 App.Version() 运行时诊断串 | Go 版暂无产品版本号载体；功能等价缺口，已记录待后续接线 |
 
 ### 明确不移植的 Python 历史包袱
 
@@ -165,4 +171,5 @@ Chromium 建立 Mojo IPC 通道（实测 `platform_channel.cc:183 Check failed: 
 ③ `_migrate_registry_settings`（改为只读 INI 一次性导入）；
 ④ `freeze_support()` + faulthandler crash.log（改 `defer recover()` + slog）；
 ⑤ `qconfig.load` 重定向（qfluentwidgets 专属）；
-⑥ 系统托盘（已确认 Python 端亦无 `QSystemTrayIcon`，Wails v2 也无托盘 API）。
+⑥ 系统托盘（已确认 Python 端亦无 `QSystemTrayIcon`，Wails v2 也无托盘 API）；
+⑦ 运行时资产文件加载器（`assets/baidu_guide.md` 类文件读取，教程文案内嵌前端，见差异 #16）。

@@ -225,6 +225,8 @@ AGENTS.md
 
 # Plan
 Plan/
+# Plan 未入库，改动前的手工备份目录同样不入库
+Plan_backup_*/
 
 # qfluentwidgets 运行时配置（qconfig 落盘产物，仅测试环境可能生成）
 config/

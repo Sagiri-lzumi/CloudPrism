@@ -9,6 +9,18 @@ This solution uses cloud storage as the medium, with local devices handling encr
 
 ---
 
+## 🧩 双客户端实现
+
+CloudPrism 有两套功能对等、**密库格式字节级兼容**的 Windows 客户端，可互换
+使用、互读同一份密库（协议对照见各自 README）：
+
+| | [WindowsGo/](WindowsGo/README.md)（Go 版，推荐） | [WindowsPy/](WindowsPy/)（Python 版） |
+|---|---|---|
+| 技术栈 | Go + Wails v2 + WebView2（无 cgo） | Python 3.12 + PySide6 |
+| 产物形态 | 绿色便携单 exe，无任何运行时依赖 | 需本机环境或 PyInstaller 打包 |
+| Release 命名 | `<日期>-<tag>-Go-exe` / `-Go-dir` | PyInstaller 双形态包 |
+| 体积参考 | ~14MB | ~70MB |
+
 ## ✨ 核心特性
 
 - **端到端加密**：文件在本地加密后才上传，下载后在本地解密，云端（网盘/服务器）永远只存密文
@@ -28,7 +40,7 @@ This solution uses cloud storage as the medium, with local devices handling encr
 
 ## 🖥️ 界面一览
 
-仿 IDE 风格的三栏布局桌面界面：
+仿 IDE 风格的三栏布局桌面界面（Go 版视觉高度还原 Python 版，两版交互一致）：
 
 - **文件**：浏览密库中的目录树，支持上传（含文件夹）、下载、重命名、删除与拖放
 - **传输**：实时查看上传/下载队列与进度
@@ -37,7 +49,10 @@ This solution uses cloud storage as the medium, with local devices handling encr
 
 ## 🚀 快速开始
 
-1. 从 [Release](https://github.com/Sagiri-lzumi/CloudPrism/tree/main/Release) 下载 `CloudPrism.exe` 并运行
+1. 从 [Release](https://github.com/Sagiri-lzumi/CloudPrism/tree/main/Release) 下载**Go 版**：
+   推荐 `…-Go-exe\CloudPrismGo.exe`（单文件绿色版，拷到 U 盘即用）或 `…-Go-dir`
+   便携目录版（附图标与百度网盘接入说明）；Windows 11 通常已自带 WebView2
+   运行时，缺失时程序会自动打开官方下载页引导安装。Python 版同样可用
 2. 首次启动会进入初始化向导：选择存储位置（本地文件夹 / WebDAV / 百度网盘）→ 测试连接 → 设置主密码 → 选择是否加密文件名
 3. 完成后即可浏览、上传、下载密库中的文件，选中即可预览或播放
 
@@ -55,15 +70,21 @@ CloudPrism 的全部本地数据（界面设置、最近密库记录、百度网
 
 ## 🔄 检查更新
 
-在**设置 → 关于**分组中点击「检查更新」，即可对比当前版本与 GitHub 上最新的 Release 版本；发现新版本时会给出下载页链接。检查为手动触发，不会在后台自动请求。
+**Python 版**：在**设置 → 关于**分组中点击「检查更新」，即可对比当前版本与
+GitHub 上最新的 Release 版本；发现新版本时会给出下载页链接。检查为手动触发，
+不会在后台自动请求。
+
+> Go 版此项尚未接线（`pkg/update` 引擎已有，缺 UI 入口），新版本请留意
+> [Release](https://github.com/Sagiri-lzumi/CloudPrism/tree/main/Release) 页。
 
 ## 🗺️ 路线图
 
-- [x] Windows 客户端：加密浏览、上传下载、流式播放、文件预览
+- [x] Windows 客户端（Python 版）：加密浏览、上传下载、流式播放、文件预览
 - [x] WebDAV 后端支持
 - [x] 密库快速重连
 - [x] 百度网盘后端接入（开放平台应用凭证 + 授权登录）
 - [x] 恢复码 / 文件夹同步 / 自动锁定 / 便携化存储 / 检查更新
+- [x] **WindowsGo**（Go + Wails v2 + WebView2）全功能对等重写，密库字节级兼容
 - [ ] Android 客户端（与 Windows 端通用同一套加密格式）
 
 ## 📄 许可证
