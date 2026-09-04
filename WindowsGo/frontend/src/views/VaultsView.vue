@@ -42,9 +42,8 @@ async function refreshRecents() {
 }
 
 onMounted(() => {
+  // 未连接时拉取最近列表；已连接态由连接流程负责跳页，此页不展示 recents
   void refreshRecents()
-  // 锁库事件（st:locked）后回到本页时刷新最近列表
-  if (!connected.value) void refreshRecents()
 })
 
 function openWizard() {
@@ -171,6 +170,7 @@ const autoLockText = computed(() => {
 // 重命名密库（MessageBox input）
 const renameDlg = reactive({open: false})
 function onRenameConfirm(payload: string | boolean) {
+  renameDlg.open = false
   const name = String(payload).trim()
   if (!name) return
   void (async () => {
@@ -274,8 +274,9 @@ async function startSync() {
 }
 
 // 同步进度/结果摘要
+const sync = computed(() => ui.snap?.sync ?? null)
 const syncText = computed(() => {
-  const s = ui.snap?.sync
+  const s = sync.value
   if (!s) return ''
   if (s.running) return `正在同步 ${s.current || '…'}（${s.done}/${s.total}）`
   if (s.total === 0 && s.failed === 0 && s.synced === 0) return '尚未开始过同步'
@@ -496,23 +497,23 @@ async function onOtherConfirm(payload: string | boolean) {
               </Button>
               <Button
                 icon="sync"
-                :disabled="syncBusy || !!ui.snap?.sync.running || !String(ui.settings.syncDir ?? '')"
+                :disabled="syncBusy || !!sync?.running || !String(ui.settings.syncDir ?? '')"
                 @click="startSync"
               >
-                {{ ui.snap?.sync.running ? '同步中…' : '开始同步' }}
+                {{ sync?.running ? '同步中…' : '开始同步' }}
               </Button>
             </div>
           </div>
-          <template v-if="ui.snap?.sync.running || syncText">
-            <div v-if="ui.snap?.sync.running" class="sync-bar">
+          <template v-if="sync?.running || syncText">
+            <div v-if="sync?.running" class="sync-bar">
               <ProgressBar
-                :value="ui.snap.sync.total > 0 ? Math.round((ui.snap.sync.done / ui.snap.sync.total) * 100) : 0"
-                :indeterminate="ui.snap.sync.total <= 0"
+                :value="sync.total > 0 ? Math.round((sync.done / sync.total) * 100) : 0"
+                :indeterminate="sync.total <= 0"
               />
             </div>
-            <div v-if="syncText && !ui.snap?.sync.running" class="card-note">{{ syncText }}</div>
-            <ul v-if="ui.snap?.sync.errors?.length" class="sync-errs">
-              <li v-for="(e, i) in ui.snap.sync.errors" :key="i">{{ e }}</li>
+            <div v-if="syncText && !sync?.running" class="card-note">{{ syncText }}</div>
+            <ul v-if="sync?.errors?.length" class="sync-errs">
+              <li v-for="(e, i) in sync.errors" :key="i">{{ e }}</li>
             </ul>
           </template>
 
@@ -538,15 +539,14 @@ async function onOtherConfirm(payload: string | boolean) {
             <span class="set-icon"><Icon name="library" :size="17" /></span>
             <div class="set-body">
               <div class="set-title">同一位置的其它密库</div>
-              <div class="set-content" v-if="othersOpen">
-                <template v-if="othersLoading">扫描中…</template>
-                <template v-else-if="!others.length">未发现其它密库（可在别的目录位置新建后再来切换）</template>
-              </div>
+              <div class="set-content" v-if="!othersOpen">展开查看存储在同一位置的其它密库，可一键切换</div>
+              <div class="set-content" v-else-if="othersLoading">扫描中…</div>
+              <div class="set-content" v-else-if="!others.length">未发现其它密库（可在别的目录位置新建后再来切换）</div>
             </div>
             <div class="set-right">
               <button type="button" class="expand-btn" @click="toggleOthers">
                 {{ othersOpen ? '收起' : '展开' }}
-                <Icon name="chevron_down_med" :size="12" :class="{rot: othersOpen}" />
+                <Icon :name="othersOpen ? 'chevron_down_med' : 'chevron_right_med'" :size="12" />
               </button>
             </div>
           </div>
@@ -632,8 +632,8 @@ async function onOtherConfirm(payload: string | boolean) {
       title="重命名密库"
       content="仅修改展示名称，不影响加密密钥与云端数据。"
       input-label="新名称"
-      :initial="snap().vaultName"
-      @confirm="renameDlg.open = false; onRenameConfirm"
+      :initial="ui.snap?.vaultName ?? ''"
+      @confirm="onRenameConfirm"
       @cancel="renameDlg.open = false"
     />
     <MessageBox
@@ -987,14 +987,14 @@ async function onOtherConfirm(payload: string | boolean) {
   background: color-mix(in srgb, var(--warn) 12%, transparent);
 }
 
-/* 同步进度/备注/错误（嵌在卡片下方） */
+/* 同步进度/备注/错误（嵌在卡片下方；与 set-card 内容 16px 左缘对齐） */
 .sync-bar {
-  margin: 4px 0 8px;
+  margin: 4px 16px 8px;
 }
 
 .card-note {
-  margin: 0;
-  padding: 0 4px 4px;
+  margin: 0 16px;
+  padding: 0 0 4px;
   font-size: 0.786rem;
   line-height: 1.5;
   color: var(--muted);
@@ -1005,8 +1005,8 @@ async function onOtherConfirm(payload: string | boolean) {
 }
 
 .sync-errs {
-  margin: 0;
-  padding: 0 4px 8px 24px;
+  margin: 0 16px;
+  padding: 0 0 8px 24px;
   font-size: 0.786rem;
   color: var(--err);
 }
@@ -1028,14 +1028,6 @@ async function onOtherConfirm(payload: string | boolean) {
 
 .expand-btn:hover {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.expand-btn .rot {
-  transform: rotate(180deg);
-}
-
-.expand-btn svg {
-  transition: transform var(--dur-fast) var(--ease);
 }
 
 /* 其它密库列表 */

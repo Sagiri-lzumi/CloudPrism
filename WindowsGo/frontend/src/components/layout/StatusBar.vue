@@ -7,17 +7,17 @@
 <script setup lang="ts">
 import {computed} from 'vue'
 import {ui, navigate} from '../../lib/store'
-import {fmtPct} from '../../lib/format'
 import Icon from '../fluent/Icon.vue'
 
 const snap = computed(() => ui.snap)
 
 // 统计阶段（statsDone=false 且总数>0 才显示：后端重启后自动跑一轮）
+// 快照无「已核对数」字段（statsDone 为完成标记 bool），故只展示总数
 const statsLabel = computed(() => {
   const s = snap.value
   if (!s?.connected || s.statsDone || s.statsTotal <= 0) return ''
   const err = s.statsFailed ? '（部分失败）' : ''
-  return `完整性核对中 ${s.statsDone}/${s.statsTotal}${err}`
+  return `完整性核对中（共 ${s.statsTotal} 项）${err}`
 })
 
 const connected = computed(() => !!snap.value?.connected)

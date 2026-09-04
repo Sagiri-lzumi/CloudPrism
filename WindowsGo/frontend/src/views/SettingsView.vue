@@ -157,8 +157,13 @@ async function onAutoLock(i: number) {
 
 /* ------------------------------------------------------- 文件夹同步 */
 
+// 同步目录操作的防重入（快速双击防重复弹目录框/重复请求）
+const syncBusy = ref(false)
+
 /** 浏览选择本地同步目录并立即落盘（与密库页同步卡共用同一 Go 绑定）。 */
 async function chooseSyncDir() {
+  if (syncBusy.value) return
+  syncBusy.value = true
   try {
     const dir = await Settings.ChooseSyncDir()
     if (!dir) return // 用户取消
@@ -167,26 +172,34 @@ async function chooseSyncDir() {
     showSuccess('本地同步目录已更新')
   } catch (e) {
     onErr(e)
+  } finally {
+    syncBusy.value = false
   }
 }
 
 /** 清除同步目录设置（回退未设置态）。 */
 async function clearSyncDir() {
-  ui.settings.syncDir = ''
+  if (syncBusy.value) return
+  syncBusy.value = true
   try {
+    ui.settings.syncDir = ''
     await Settings.SetSyncDir('')
     showInfo('已清除本地同步目录设置')
   } catch (e) {
     onErr(e)
+  } finally {
+    syncBusy.value = false
   }
 }
 
 /** 立即执行一轮本地 → 云端单向同步（需已连接密库）。 */
 async function syncNow() {
+  if (syncBusy.value) return
   if (!connected.value) {
     showWarning('请先连接密库后再同步')
     return
   }
+  syncBusy.value = true
   try {
     const n = await Settings.SyncNow()
     showInfo(n > 0 ? `已开始同步 ${n} 个文件` : '本地目录已是最新，无需同步')
@@ -194,6 +207,8 @@ async function syncNow() {
     const err = unwrap(e)
     if (err.code === 'sync-dir-unset') showWarning('请先选择本地同步目录')
     else onErr(e)
+  } finally {
+    syncBusy.value = false
   }
 }
 
@@ -426,9 +441,10 @@ const version = ref('读取运行时信息…')
               icon="cancel"
               iconOnly
               title="清除同步目录设置"
+              :disabled="syncBusy"
               @click="clearSyncDir"
             />
-            <Button icon="folder_add" @click="chooseSyncDir">
+            <Button icon="folder_add" :disabled="syncBusy" @click="chooseSyncDir">
               {{ syncDirSet ? '更改…' : '选择目录…' }}
             </Button>
           </div>
@@ -440,8 +456,13 @@ const version = ref('读取运行时信息…')
             <div class="set-content">执行一轮本地 → 云端单向增量同步（目录需先在密库页连接后可用）</div>
           </div>
           <div class="set-right">
-            <Button icon="sync" :disabled="!syncDirSet || !connected" title="需先连接密库" @click="syncNow">
-              开始同步
+            <Button
+              icon="sync"
+              :disabled="syncBusy || !syncDirSet || !connected"
+              title="需先连接密库"
+              @click="syncNow"
+            >
+              {{ syncBusy ? '执行中…' : '开始同步' }}
             </Button>
           </div>
         </div>

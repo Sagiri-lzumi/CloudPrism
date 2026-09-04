@@ -97,10 +97,15 @@ watch(
       window.addEventListener('pointerdown', onDocDown, true)
       window.addEventListener('keydown', onKey, true)
       window.addEventListener('blur', onDocBlur)
+      // 滚动/缩放时收起：菜单为 fixed 定位，容器滚动后继续悬浮会脱离锚点
+      window.addEventListener('scroll', onDocScroll, true)
+      window.addEventListener('resize', onDocScroll)
     } else {
       window.removeEventListener('pointerdown', onDocDown, true)
       window.removeEventListener('keydown', onKey, true)
       window.removeEventListener('blur', onDocBlur)
+      window.removeEventListener('scroll', onDocScroll, true)
+      window.removeEventListener('resize', onDocScroll)
     }
   },
 )
@@ -109,10 +114,17 @@ function onDocBlur() {
   emit('close') // 窗口失焦（如切系统任务）即收起菜单
 }
 
+// 滚动/窗口尺寸变化：fixed 菜单不跟随滚动容器，直接收起避免错位悬浮
+function onDocScroll() {
+  emit('close')
+}
+
 onBeforeUnmount(() => {
   window.removeEventListener('pointerdown', onDocDown, true)
   window.removeEventListener('keydown', onKey, true)
   window.removeEventListener('blur', onDocBlur)
+  window.removeEventListener('scroll', onDocScroll, true)
+  window.removeEventListener('resize', onDocScroll)
 })
 
 const menuStyle = computed(() => ({left: pos.value.left + 'px', top: pos.value.top + 'px'}))
