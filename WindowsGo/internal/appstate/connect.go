@@ -164,7 +164,10 @@ func (s *State) applyConnection(conn *connState) error {
 	s.resumeCount = len(s.pendingRecords())
 	s.mu.Unlock()
 
-	// 自动锁按设置重启（新连接重新计时）
+	// 自动锁按设置重启：applyConnection 只做装配，锁库 Lock() 会 stop 心跳，
+	// 此处按用户保存的档位重新武装（新连接重新计时，>0 才启动）
+	s.ApplyAutoLockIndex(s.cfg.Store.Int(settings.KeyAutoLockIndex, 0))
+
 	s.cfg.Log.Info("密库已连接",
 		"backend", conn.kind, "vaultPath", conn.vaultPath,
 		"filenameEnc", conn.meta.FilenameEnc)

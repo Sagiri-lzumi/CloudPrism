@@ -179,8 +179,10 @@ func (s *State) UploadPaths(ctx context.Context, localPaths []string, remoteDir 
 		if eErr != nil {
 			return eErr
 		}
-		remote := joinRemote(trimSlash(remoteDir), enc)
+		// 与 Mkdir/下载一致：先拼 vaultPath 前缀（子库密库时上传目标在库内）
+		remote := joinRemote(conn.vaultPath, joinRemote(trimSlash(remoteDir), enc))
 		t := transfer.NewTask(f.local, remote, transfer.DirUpload)
+		t.RemoteDir = trimSlash(remoteDir) // UI 目录 remote（根=空串）：前端刷新判定用
 		t.DisplayName = filepath.Base(f.local)
 		// 携带本地源快照：续传/锁库补拍后按 size+mtime 校验源未变（对照
 		// Python _make_upload_task 的 expected_size/expected_mtime）
@@ -274,6 +276,7 @@ func (s *State) Tasks() []TaskView {
 			DoneBytes:   snap.DoneBytes,
 			ErrorMsg:    snap.ErrorMsg,
 			RemotePath:  snap.RemotePath,
+			RemoteDir:   snap.RemoteDir,
 			LocalPath:   snap.LocalPath,
 		})
 	}

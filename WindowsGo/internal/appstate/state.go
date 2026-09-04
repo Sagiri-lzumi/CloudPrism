@@ -178,6 +178,7 @@ type TaskView struct {
 	DoneBytes   int64   `json:"doneBytes"`
 	ErrorMsg    string  `json:"errorMsg"`
 	RemotePath  string  `json:"remote"`
+	RemoteDir   string  `json:"remoteDir"` // 上传任务的目标父目录 remote（前端按此判定「上传到当前目录」）
 	LocalPath   string  `json:"local"`
 }
 

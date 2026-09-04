@@ -68,6 +68,7 @@ type Task struct {
 	ID            int64   // 进程内稳定标识（NewTask 时分配，不参与持久化）
 	LocalPath     string  // 本地文件路径
 	RemotePath    string  // 后端上的目标路径（含 .cpenc）
+	RemoteDir     string  // 目标父目录（上传任务：UI 目录 remote，根为空串；下载任务为空）
 	DisplayName   string  // 界面显示名；空时取本地文件名
 	Direction     string  // "upload" / "download"
 	State         string  // 状态机取值（见上）
@@ -102,6 +103,7 @@ func (t *Task) Snapshot() Task {
 		ID:            t.ID,
 		LocalPath:     t.LocalPath,
 		RemotePath:    t.RemotePath,
+		RemoteDir:     t.RemoteDir,
 		DisplayName:   t.DisplayName,
 		Direction:     t.Direction,
 		State:         t.State,

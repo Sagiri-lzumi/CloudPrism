@@ -85,13 +85,14 @@ func (s *State) checkAutoLockDue() {
 	min := s.autoLockMin
 	connected := s.conn != nil
 	idleFor := time.Since(s.lastActive)
+	syncRunning := s.syncRun.Running
 	s.mu.RUnlock()
 
 	if min <= 0 || !connected {
 		return
 	}
-	// 传输进行中：豁免（空闲计时继续走，传输结束后的下一拍即可能锁）
-	if s.cfg.Queue.HasActive() {
+	// 传输进行中或同步批次运行中：豁免（空闲计时继续走，结束后下一拍即可能锁）
+	if s.cfg.Queue.HasActive() || syncRunning {
 		return
 	}
 	if idleFor >= time.Duration(min)*time.Minute {

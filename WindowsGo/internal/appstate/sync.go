@@ -3,6 +3,8 @@ package appstate
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/paths"
@@ -43,6 +45,12 @@ func (s *State) StartSync(parent context.Context) (int, error) {
 	localDir := trimSpace(s.cfg.Store.Get(settings.KeySyncLocalDir, ""))
 	if localDir == "" {
 		return 0, ErrSyncDirUnset
+	}
+	// 预检：目录被删除/不可读时给友好错误，而不是让 Plan 报裸系统路径
+	if st, statErr := os.Stat(localDir); statErr != nil {
+		return 0, fmt.Errorf("同步目录不可用：%s", localDir)
+	} else if !st.IsDir() {
+		return 0, fmt.Errorf("同步目录不是文件夹：%s", localDir)
 	}
 
 	s.mu.Lock()
@@ -120,8 +128,10 @@ func (s *State) runSyncBatch(ctx context.Context, conn *connState, localDir stri
 		update()
 	}
 
-	// 合并上传成功条目并整体重写索引（索引损坏自愈语义在 engine 内）
-	if len(success) > 0 {
+	// 合并上传成功条目并整体重写索引（索引损坏自愈语义在 engine 内）。
+	// 取消/锁库（ctx.Err()!=nil）时不写回：会话已失效必然失败，且本批被
+	// 打断，成功集不完整——留给下轮批处理以「已同步」状态续接
+	if len(success) > 0 && ctx.Err() == nil {
 		if err := conn.engine.UpdateIndex(ctx, success); err != nil {
 			s.cfg.Log.Error("同步索引更新失败", "err", err)
 		}
