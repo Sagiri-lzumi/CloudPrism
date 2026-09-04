@@ -17,11 +17,13 @@ import {
   quitApp,
   uploadPaths,
   downloadSel,
+  clearRecovery,
 } from './lib/store'
 import FilesView from './views/FilesView.vue'
 import TransfersView from './views/TransfersView.vue'
 import VaultsView from './views/VaultsView.vue'
 import SettingsView from './views/SettingsView.vue'
+import RecoveryCodeDlg from './views/wizard/RecoveryCodeDlg.vue'
 import TransferBar from './components/layout/TransferBar.vue'
 import StatusBar from './components/layout/StatusBar.vue'
 import InfoBar from './components/fluent/InfoBar.vue'
@@ -159,6 +161,13 @@ async function pickUpload() {
 
     <!-- 通知条 host（队列在 lib/toast） -->
     <InfoBar />
+
+    <!-- 全局恢复码模态：新建成功的一次性码展示，独立于页面生命周期 -->
+    <RecoveryCodeDlg
+      :open="ui.pendingRecovery !== ''"
+      :code="ui.pendingRecovery"
+      @close="clearRecovery"
+    />
   </div>
 </template>
 

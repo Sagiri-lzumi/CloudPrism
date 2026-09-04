@@ -34,6 +34,8 @@ interface Ui {
   /** 长操作（向导/恢复码）阶段文案；空串=无操作 */
   opText: string
   opBusy: boolean
+  /** 新建成功待展示的一次性恢复码（空串=无）；App 全局模态展示，关闭时 clearRecovery() */
+  pendingRecovery: string
 
   // —— 页面导航 ——
   page: PageId
@@ -61,6 +63,7 @@ export const ui = reactive<Ui>({
   tasks: [],
   opText: '',
   opBusy: false,
+  pendingRecovery: '',
   page: 'vaults', // 启动默认密库页（未连接引导）
   viewMode: 'grid',
   remote: '',
@@ -294,10 +297,11 @@ export interface OpenVaultInput {
 
 /**
  * 新建/连接密库的统封装（向导与快速连接共用）：
- * 成功即重置浏览态并切入文件页；返回新建模式的一次性恢复码（空=连接模式）。
+ * 成功即重置浏览态并切入文件页；新建模式的一次性恢复码写入
+ * ui.pendingRecovery，由 App 全局模态展示（页面切换不影响展示）。
  * 失败向上抛 ApiError（调用方负责提示与就地展示）。
  */
-export async function openVault(input: OpenVaultInput): Promise<string> {
+export async function openVault(input: OpenVaultInput): Promise<void> {
   const req = {
     kind: input.kind,
     localDir: input.localDir ?? '',
@@ -312,11 +316,17 @@ export async function openVault(input: OpenVaultInput): Promise<string> {
     create: input.create ?? false,
   }
   const res = await Vault.Open(req)
+  // 新建成功的一次性恢复码：移交全局模态（向导随之卸载也不丢失）
+  if (res?.code) ui.pendingRecovery = res.code
   // 锁旧连接时已清浏览态；重置后进入文件页并拉根目录
   resetBrowse()
   ui.page = 'files'
   void listDir('')
-  return res?.code ?? ''
+}
+
+/** 清空待展示恢复码（App 全局恢复码模态关闭时调用）。 */
+export function clearRecovery() {
+  ui.pendingRecovery = ''
 }
 
 /** 锁定密库（NavRail/密库页共用）。 */

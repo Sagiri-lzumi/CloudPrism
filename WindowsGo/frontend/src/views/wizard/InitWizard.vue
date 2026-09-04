@@ -4,9 +4,9 @@
     模式（新建/连接）→ 后端类型（本地/WebDAV/百度）→ 后端配置
     （百度卡含授权表单）→ 凭据（新建=库名+文件名加密+主密码两遍；
     连接=主密码，可选「忘记密码」切恢复码开库）。
-  执行走 store.openVault（Vault.Open + 成功切文件页）；新建成功返回的
-  一次性恢复码经 RecoveryCodeDlg 展示后才允许进入。失败在面板内红字
-  展示（后端阶段文案由全局 op-banner 进度条透出）。
+  执行走 store.openVault（Vault.Open + 成功切文件页）；新建成功的一次性
+  恢复码写入 store，由 App 全局模态展示（本向导随页面切换卸载也不影响）。
+  失败在面板内红字展示（后端阶段文案由全局 op-banner 进度条透出）。
 -->
 <script setup lang="ts">
 import {computed, reactive, ref, watch} from 'vue'
@@ -18,7 +18,6 @@ import PrimaryButton from '../../components/fluent/PrimaryButton.vue'
 import Icon from '../../components/fluent/Icon.vue'
 import LineEdit from '../../components/fluent/LineEdit.vue'
 import ProgressBar from '../../components/fluent/ProgressBar.vue'
-import RecoveryCodeDlg from './RecoveryCodeDlg.vue'
 
 const emit = defineEmits<{close: []}>()
 
@@ -64,8 +63,6 @@ const form = reactive({
 
 const status = ref('') // 面板内错误/提示（红）
 const busy = ref(false) // 执行中（后端 op 事件另驱动全局横幅）
-const rcDlg = ref(false) // 新建成功的一次性恢复码
-const newCode = ref('')
 
 /* ---------------------------------------------------------- 最近记录 */
 
@@ -247,23 +244,13 @@ async function finish() {
       recoveryCode: form.useRecovery ? form.recovery.trim() : '',
       vaultPath: '',
     }
-    const code = await openVault(req)
-    if (code) {
-      newCode.value = code
-      rcDlg.value = true
-    } else {
-      emit('close') // openVault 已切入文件页
-    }
+    await openVault(req)
+    emit('close') // openVault 已切文件页；恢复码由 App 全局模态展示
   } catch (e) {
     status.value = unwrap(e).message
   } finally {
     busy.value = false
   }
-}
-
-function onRcClose() {
-  rcDlg.value = false
-  emit('close')
 }
 
 function cancel() {
@@ -555,8 +542,6 @@ function enterAt(e: KeyboardEvent) {
           </div>
         </div>
 
-        <!-- 新建成功的一次性恢复码 -->
-        <RecoveryCodeDlg :open="rcDlg" :code="newCode" @close="onRcClose" />
       </div>
     </Transition>
   </Teleport>
