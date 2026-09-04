@@ -116,7 +116,9 @@ function onFrame(payload: unknown) {
   if (!f.snap.connected) {
     if (ui.remote !== '') resetBrowse()
   }
-  // 上传批次收敛到当前目录 → 静默刷新一次（仅在文件页且仍连接时）
+  // 上传批次收敛到当前目录 → 静默刷新一次（仅在文件页且仍连接时）。
+  // 判定用任务的目标父目录 remoteDir（与 ui.remote 同语义：根=空串），
+  // 而非文件级 remote（永远不相等）
   if (
     wasTransferActive &&
     !f.snap.transferActive &&
@@ -125,7 +127,7 @@ function onFrame(payload: unknown) {
   ) {
     const wantRemote = ui.remote
     const hit = wasTasks.some(
-      (t) => t.direction === 'upload' && t.remote === wantRemote,
+      (t) => t.direction === 'upload' && t.remoteDir === wantRemote,
     )
     if (hit) refreshSilent()
   }

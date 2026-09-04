@@ -167,6 +167,7 @@ export namespace appstate {
 	    doneBytes: number;
 	    errorMsg: string;
 	    remote: string;
+	    remoteDir: string;
 	    local: string;
 	
 	    static createFrom(source: any = {}) {
@@ -184,6 +185,7 @@ export namespace appstate {
 	        this.doneBytes = source["doneBytes"];
 	        this.errorMsg = source["errorMsg"];
 	        this.remote = source["remote"];
+	        this.remoteDir = source["remoteDir"];
 	        this.local = source["local"];
 	    }
 	}
