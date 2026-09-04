@@ -8,6 +8,7 @@
 import {computed} from 'vue'
 import {ui, navigate} from '../../lib/store'
 import {fmtConnectSec, fmtPct} from '../../lib/format'
+import Icon from '../fluent/Icon.vue'
 
 const snap = computed(() => ui.snap)
 
@@ -31,27 +32,33 @@ const connText = computed(() => {
 
 <template>
   <footer class="cp-status">
-    <span class="seg left">
-      <span class="dot" :class="connecting ? 'busy' : connected ? 'on' : 'off'" />
-      <span v-if="connecting" class="conn busy-text">{{ ui.opText || '正在连接…' }}</span>
-      <span v-else-if="connected" class="conn">{{ connText }}</span>
-      <span v-else class="conn off-text">未连接</span>
+    <span
+      class="status-chip"
+      :class="connecting ? 'busy' : connected ? 'ok' : 'off'"
+      :title="connText"
+    >
+      <span class="dot" />
+      <span v-if="connecting" class="chip-text">{{ ui.opText || '正在连接…' }}</span>
+      <span v-else-if="connected" class="chip-text">{{ connText }}</span>
+      <span v-else class="chip-text">未连接</span>
     </span>
 
     <span class="spacer" />
 
-    <span v-if="statsLabel" class="seg stat" :class="snap?.statsFailed ? 'bad' : ''">
-      {{ statsLabel }}
+    <span v-if="statsLabel" class="status-chip stat" :class="snap?.statsFailed ? 'bad' : ''">
+      <Icon name="history" :size="12" />
+      <span class="chip-text">{{ statsLabel }}</span>
     </span>
 
     <button
       v-if="snap?.resumeCount && snap.resumeCount > 0"
       type="button"
-      class="seg resume"
+      class="status-chip resume"
       title="上次有任务未完成，点击查看"
       @click="navigate('transfers')"
     >
-      {{ snap.resumeCount }} 个任务可续传
+      <Icon name="cloud" :size="12" />
+      <span class="chip-text">{{ snap.resumeCount }} 个任务可续传</span>
     </button>
   </footer>
 </template>
@@ -60,87 +67,90 @@ const connText = computed(() => {
 .cp-status {
   display: flex;
   align-items: center;
-  gap: 16px;
-  height: 30px; /* 对照 Python 状态栏分段高度，增强存在感（此前 28px 过弱） */
-  padding: 0 12px;
-  font-size: 0.786rem; /* 11px：状态条信息弱化一档 */
+  gap: 8px;
+  height: 34px; /* 微调：与设置页卡片同 8px 圆角节奏更协调 */
+  padding: 0 14px;
+  font-size: 0.786rem;
   color: var(--text2);
   background: var(--bg-page);
   border-top: 1px solid var(--divider);
   user-select: none;
 }
 
-.seg {
+/* 状态胶囊：参考设置页 chip 风格（圆角+语义色底+透明层级） */
+.status-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  height: 22px;
+  padding: 0 10px;
   white-space: nowrap;
+  border-radius: var(--radius-round);
+  background: transparent;
+  border: none;
+  color: var(--text2);
+  font: inherit;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.status-chip.ok {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+.status-chip.busy {
+  color: var(--text);
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+}
+
+.status-chip.off {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.status-chip.stat {
+  color: var(--text2);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.status-chip.stat.bad {
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+}
+
+.status-chip.resume {
+  cursor: pointer;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+
+.status-chip.resume:hover {
+  background: color-mix(in srgb, var(--warn) 22%, transparent);
 }
 
 .dot {
-  width: 8px;
-  height: 8px;
+  flex: none;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--text2);
-  opacity: 0.5;
+  background: currentColor;
 }
 
-.dot.on {
-  background: var(--ok);
-  opacity: 1;
+/* 连接中：呼吸脉冲保留（替换原在 dot 上的动画） */
+.status-chip.busy .dot {
+  animation: status-pulse 1.4s var(--ease) infinite;
 }
 
-.dot.off {
-  background: var(--warn);
-  opacity: 1;
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 
-/* 连接中：橙色点 + 呼吸扩散环（对照 Fluent 活动指示语义） */
-.dot.busy {
-  background: var(--warn);
-  opacity: 1;
-  animation: dot-pulse 1.4s var(--ease) infinite;
-}
-
-@keyframes dot-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--warn) 45%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 0%, transparent);
-  }
-}
-
-/* 连接中文案：主文字色（高于次级/弱化两档） */
-.busy-text {
-  color: var(--text);
-}
-
-.off-text {
-  color: var(--muted);
+.chip-text {
+  font-variant-numeric: tabular-nums;
 }
 
 .spacer {
   flex: 1;
-}
-
-.stat.bad {
-  color: var(--err);
-}
-
-.resume {
-  height: 22px;
-  padding: 0 8px;
-  font-family: inherit;
-  font-size: inherit;
-  color: var(--warn);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-ctrl);
-  cursor: pointer;
-}
-
-.resume:hover {
-  background: color-mix(in srgb, var(--warn) 12%, transparent);
 }
 </style>
