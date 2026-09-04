@@ -125,7 +125,10 @@ function openCtx(e: MouseEvent, entry: appstate.FileEntry | null) {
   // 右键目标即时选中（菜单动作都以选中条目为对象）
   if (entry) selectEntry(entry)
   ctxEntry.value = entry
-  ctxAnchor.value = e.currentTarget as HTMLElement
+  // 锚点取 currentTarget；GridCard 走自定义事件 emit 时 currentTarget 已被
+  // 置空（原生事件派发结束），回退到 target（点击/右键命中的元素恒存在）
+  const el = (e.currentTarget ?? e.target) as HTMLElement | null
+  ctxAnchor.value = el
   ctxOpen.value = false
   ctxOpen.value = true
 }

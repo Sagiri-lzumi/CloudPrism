@@ -44,12 +44,17 @@ watch(
     if (!open || !props.anchor) return
     await nextTick()
     const a = props.anchor.getBoundingClientRect()
-    const m = menu.value!.getBoundingClientRect()
-    // 默认锚点下方左对齐；空间不足翻到上方；右缘越界则右对齐贴边
-    const top = a.bottom + props.gap + m.height > innerHeight && a.top - props.gap - m.height >= 0
-      ? a.top - props.gap - m.height
-      : a.bottom + props.gap
-    const left = Math.max(4, Math.min(a.left, innerWidth - m.width - 4))
+    const el = menu.value!
+    // 用 offsetWidth/offsetHeight 测量：pop 入场动画带 scale(.96)，
+    // getBoundingClientRect 会测到缩放后的偏小值，导致定位偏低/溢出
+    const mw = el.offsetWidth
+    const mh = el.offsetHeight
+    // 默认锚点下方左对齐；空间不足翻到上方
+    let top = a.bottom + props.gap
+    if (top + mh > innerHeight) top = a.top - props.gap - mh
+    // 双向钳位：无论锚点在何位置，菜单必须完整落在视口内（防底部被裁）
+    top = Math.max(4, Math.min(top, innerHeight - mh - 4))
+    const left = Math.max(4, Math.min(a.left, innerWidth - mw - 4))
     pos.value = {left, top}
   },
 )
