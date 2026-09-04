@@ -277,6 +277,57 @@ export async function downloadSel() {
   }
 }
 
+/** 向导/快速连接入参（字段镜像后端 appstate.OpenRequest，可选字段省略）。 */
+export interface OpenVaultInput {
+  kind: 'local' | 'webdav' | 'baidu'
+  localDir?: string
+  url?: string
+  user?: string
+  pass?: string
+  masterPassword?: string
+  recoveryCode?: string
+  filenameEnc?: boolean
+  vaultName?: string
+  vaultPath?: string
+  create?: boolean
+}
+
+/**
+ * 新建/连接密库的统封装（向导与快速连接共用）：
+ * 成功即重置浏览态并切入文件页；返回新建模式的一次性恢复码（空=连接模式）。
+ * 失败向上抛 ApiError（调用方负责提示与就地展示）。
+ */
+export async function openVault(input: OpenVaultInput): Promise<string> {
+  const req = {
+    kind: input.kind,
+    localDir: input.localDir ?? '',
+    url: input.url ?? '',
+    user: input.user ?? '',
+    pass: input.pass ?? '',
+    masterPassword: input.masterPassword ?? '',
+    recoveryCode: input.recoveryCode ?? '',
+    filenameEnc: input.filenameEnc ?? false,
+    vaultName: input.vaultName ?? '',
+    vaultPath: input.vaultPath ?? '',
+    create: input.create ?? false,
+  }
+  const res = await Vault.Open(req)
+  // 锁旧连接时已清浏览态；重置后进入文件页并拉根目录
+  resetBrowse()
+  ui.page = 'files'
+  void listDir('')
+  return res?.code ?? ''
+}
+
+/** 锁定密库（NavRail/密库页共用）。 */
+export const lockVault = async () => {
+  try {
+    await Vault.Lock()
+  } catch (e) {
+    showError('锁库失败：' + unwrap(e).message)
+  }
+}
+
 /** 新建文件夹（parentRemote 缺省为当前浏览目录，右键“子文件夹”时指定）。 */
 export async function newFolder(display: string, parentRemote: string = ui.remote) {
   if (!display) return
@@ -360,10 +411,4 @@ export type {appstate}
 
 // Quit 绑定在 App 域（NavRail 退出钮用）
 export const quitApp = () => void App.Quit()
-export const lockVault = async () => {
-  try {
-    await Vault.Lock()
-  } catch (e) {
-    showError('锁库失败：' + unwrap(e).message)
-  }
-}
+

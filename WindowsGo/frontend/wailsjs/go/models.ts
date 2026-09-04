@@ -190,3 +190,24 @@ export namespace appstate {
 
 }
 
+export namespace bind {
+	
+	export class BaiduAuthInfo {
+	    authorized: boolean;
+	    appKey: string;
+	    appId: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BaiduAuthInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.authorized = source["authorized"];
+	        this.appKey = source["appKey"];
+	        this.appId = source["appId"];
+	    }
+	}
+
+}
+

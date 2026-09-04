@@ -24,8 +24,9 @@ const opTimeout = 60 * time.Second
 
 // OpenRequest 是密库向导 / 快速连接 / 连接其他密库的统一入参。
 //
-// Kind=local 用 LocalDir；kind=webdav 用 URL/User/Pass；kind=baidu 只允许
-// Create=false（百度密库由已授权记录定位，见 storage.Build 的错误分类）。
+// Kind=local 用 LocalDir；kind=webdav 用 URL/User/Pass；kind=baidu 无独立
+// 参数——后端由 data/baidu.json 授权凭证定位（storage.Build 读凭证，未授权
+// 返回 IsBaiduUnauthorized，上层引导先去向导完成授权）。
 type OpenRequest struct {
 	Kind           string `json:"kind"`
 	LocalDir       string `json:"localDir"`
@@ -62,6 +63,9 @@ func (s *State) OpenVault(ctx context.Context, req OpenRequest) (OpenVaultResult
 		WebDAVURL:  req.URL,
 		WebDAVUser: req.User,
 		WebDAVPass: req.Pass,
+		// 百度凭证存储随 State 装配（data/baidu.json，DPAPI 加密）；
+		// nil 时 Build 报「未授权」，向导应引导先完成授权。
+		BaiduStore: s.baiduCred,
 	})
 	if err != nil {
 		return OpenVaultResult{}, err

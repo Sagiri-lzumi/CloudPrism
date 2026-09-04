@@ -4,18 +4,19 @@
 // （'light'|'dark'|'auto' 合法值，其余回退浅色）。内联脚本负责 HTML
 // 解析完成前防白闪，本模块负责运行期切换（设置页主题下拉）与启动兜底。
 //
-// 模式索引与 Go 端 settings 的 themeIndex 一致（0 浅色/1 深色/2 跟随
-// 系统，对应 Python 端 qfw Theme.LIGHT/DARK/AUTO）。
+// 模式索引与 Go/Python 两端 settings 的 themeIndex 一致：0=跟随系统、
+// 1=深色、2=浅色（对照 Python settings_store.theme_index 注释与
+// app.py modes=["system","dark","light"]）。
 
 export const THEME_KEY = 'cp-theme'
 
 export type ThemeMode = 'light' | 'dark' | 'auto'
 
-/** 索引 → 模式（themeIndex 语义，见文件头注释） */
-export const MODES: readonly ThemeMode[] = ['light', 'dark', 'auto']
+/** 索引 → 模式（themeIndex 语义，见文件头注释：0 系统/1 深/2 浅） */
+export const MODES: readonly ThemeMode[] = ['auto', 'dark', 'light']
 
 /** 设置页下拉文案（顺序与 MODES 对齐） */
-export const MODE_LABELS = ['浅色', '深色', '跟随系统'] as const
+export const MODE_LABELS = ['跟随系统', '深色', '浅色'] as const
 
 function validMode(s: string | null | undefined): s is ThemeMode {
   return s === 'light' || s === 'dark' || s === 'auto'

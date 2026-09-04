@@ -43,6 +43,9 @@ type Config struct {
 	Store *settings.Store
 	Queue *transfer.Queue
 	Log   *slog.Logger
+	// BaiduCred 百度网盘凭证存储（DPAPI 加密落盘 data/baidu.json，装配层
+	// 注入）；nil 时百度后端一律按「未授权」处理（storage.Build 语义）。
+	BaiduCred *storage.BaiduCredStore
 	// Emit 事件出口（nil 时静默丢弃），New 后可用 SetEmit 替换。
 	// 名称与载荷见各文件中的 emitXxx 注释；10Hz 合帧由 bind/events
 	// 决定发不发、何时发，本层只保证「状态变化即调用」。
@@ -77,6 +80,9 @@ type State struct {
 	mu   sync.RWMutex
 	conn *connState // nil = 未连接
 
+	// baiduCred 百度凭证存储（cfg.BaiduCred 拷贝，OpenVault/Bind 授权直用）
+	baiduCred *storage.BaiduCredStore
+
 	// emitFn 事件出口（cfg.Emit 的初始值；SetEmit 在装配期替换为
 	// bind/events 的 Forward）。只在启动连接前设置，无并发窗口不加锁。
 	emitFn func(name string, data any)
@@ -108,6 +114,7 @@ func New(cfg Config) *State {
 	s := &State{
 		cfg:        cfg,
 		emitFn:     cfg.Emit,
+		baiduCred:  cfg.BaiduCred,
 		lastActive: time.Now(),
 	}
 	// 装配队列终态回调（任务完成/失败 → 续传记录与横幅计数同步）
@@ -123,6 +130,9 @@ func (s *State) Store() *settings.Store { return s.cfg.Store }
 
 // Queue 返回传输队列（bind 层经 appstate 方法间接使用，直接引用仅装配用）。
 func (s *State) Queue() *transfer.Queue { return s.cfg.Queue }
+
+// BaiduCreds 返回百度凭证存储（nil = 未装配，OpenVault kind=baidu 恒「未授权」）。
+func (s *State) BaiduCreds() *storage.BaiduCredStore { return s.baiduCred }
 
 // ---------------------------------------------------------------------------
 // 事件出口

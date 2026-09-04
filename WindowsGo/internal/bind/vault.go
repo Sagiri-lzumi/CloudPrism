@@ -1,7 +1,15 @@
 package bind
 
 import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+
+	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/appstate"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/storage"
 )
 
 // Vault 是密库域的 Wails 绑定：连接/锁定/切换/恢复码/续传/统计入口。
@@ -112,3 +120,112 @@ func (v *Vault) RequestStats() error {
 
 // Activity 报告一次用户界面交互（自动锁空闲计时刷新）。
 func (v *Vault) Activity() { v.st.Activity() }
+
+// ---------------------------------------------------------------------------
+// 百度网盘授权（向导百度卡）：oob 授权码模式，凭证 DPAPI 加密落盘
+// data/baidu.json（与 Python 端磁盘格式一致，可互读）。
+// ---------------------------------------------------------------------------
+
+// BaiduAuthInfo 百度授权状态摘要（前端向导卡渲染用；AppKey 掩码防误抄）。
+type BaiduAuthInfo struct {
+	Authorized bool   `json:"authorized"`
+	AppKey     string `json:"appKey"`
+	AppID      string `json:"appId"`
+}
+
+// BaiduStatus 查询是否已完成百度授权（Load 损坏/缺失一律视为未授权）。
+func (v *Vault) BaiduStatus() BaiduAuthInfo {
+	store := v.st.BaiduCreds()
+	if store == nil {
+		return BaiduAuthInfo{}
+	}
+	d := store.Load()
+	if d == nil || d.AccessToken == "" {
+		return BaiduAuthInfo{}
+	}
+	return BaiduAuthInfo{
+		Authorized: true,
+		AppKey:     maskBaiduKey(d.AppKey),
+		AppID:      maskBaiduKey(d.AppID),
+	}
+}
+
+// BaiduAuthURL 校验凭证后打开系统浏览器进入百度授权页，返回授权地址
+// （oob 模式：页面登录同意后直接展示一次性 code，无回调）。
+func (v *Vault) BaiduAuthURL(appID, appKey string) (string, error) {
+	v.st.Activity()
+	appKey = strings.TrimSpace(appKey)
+	if appKey == "" {
+		return "", Wrap(errors.New("请先填写 AppKey（必填）"))
+	}
+	u := storage.BaiduAuthURL(appKey, strings.TrimSpace(appID))
+	if ctx := v.ctx.Context(); ctx != nil {
+		// 打开失败不阻断：返回 URL 供前端展示/复制兜底
+		wruntime.BrowserOpenURL(ctx, u)
+	}
+	return u, nil
+}
+
+// BaiduSaveAuth 用 oob 授权码换 token 并加密落盘（四凭证 + code 一次提交）。
+// code 一次性：失败后需重新走 BaiduAuthURL 拿新码。
+func (v *Vault) BaiduSaveAuth(appID, appKey, secretKey, signKey, code string) error {
+	v.st.Activity()
+	appKey = strings.TrimSpace(appKey)
+	secretKey = strings.TrimSpace(secretKey)
+	code = strings.TrimSpace(code)
+	if appKey == "" || secretKey == "" {
+		return Wrap(errors.New("请填写 AppKey 与 SecretKey"))
+	}
+	if code == "" {
+		return Wrap(errors.New("请粘贴授权页展示的 code"))
+	}
+	store := v.st.BaiduCreds()
+	if store == nil {
+		return Wrap(errors.New("百度凭证存储未装配"))
+	}
+	// 授权交换是真实网络往返，统一带超时防悬挂
+	ctx, cancel := context.WithTimeout(v.ctx.Context(), 60*time.Second)
+	defer cancel()
+	cred, err := storage.ExchangeBaiduToken(ctx, appKey, secretKey, code)
+	if err != nil {
+		return Wrap(err)
+	}
+	cred.AppID = strings.TrimSpace(appID)
+	cred.SignKey = strings.TrimSpace(signKey)
+	if err := store.Save(cred); err != nil {
+		return Wrap(err)
+	}
+	return nil
+}
+
+// BaiduClearAuth 清除本地百度授权记录（仅删本地凭证，不影响百度云端数据）。
+func (v *Vault) BaiduClearAuth() error {
+	v.st.Activity()
+	store := v.st.BaiduCreds()
+	if store == nil {
+		return Wrap(errors.New("百度凭证存储未装配"))
+	}
+	store.Clear()
+	return nil
+}
+
+// maskBaiduKey 掩码展示敏感键：超过 4 位只留前 4 位（对齐 Python 摘要口径）。
+func maskBaiduKey(s string) string {
+	if len(s) <= 4 {
+		return s
+	}
+	return s[:4] + "…"
+}
+
+// ChooseLocalDir 弹目录选择框返回密库存放目录；取消返回空串（非错误）。
+// 向导本地卡「浏览」按钮用；标题与 Settings.ChooseSyncDir 区分语义。
+func (v *Vault) ChooseLocalDir() (string, error) {
+	dir, err := wruntime.OpenDirectoryDialog(v.ctx.Context(), wruntime.OpenDialogOptions{
+		Title:                "选择密库存放的本地文件夹",
+		CanCreateDirectories: true,
+	})
+	if err != nil {
+		return "", Wrap(err)
+	}
+	return dir, nil
+}

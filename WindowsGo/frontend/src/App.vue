@@ -1,7 +1,7 @@
 <!--
   App.vue —— 应用外壳：48px 导航轨（内联 NavRail）+ 页面区 + 底栏。
-  页面：files = 文件浏览（三栏）；transfers/settings = s6c 前的占位；
-  vaults = 未连接时的引导占位（向导 s6c 交付）或密库信息占位。
+  页面：files = 文件浏览（三栏）；transfers = 传输任务；vaults = 密库
+  （未连接引导/已连接信息，双态自处理）；settings = 偏好设置。
   全局快捷键：F5 刷新、Ctrl+L 锁库、Ctrl+U 上传、Ctrl+D 下载选中；
   输入控件聚焦时全部忽略，避免打断输入。
 -->
@@ -19,7 +19,9 @@ import {
   downloadSel,
 } from './lib/store'
 import FilesView from './views/FilesView.vue'
-import StubPage from './views/StubPage.vue'
+import TransfersView from './views/TransfersView.vue'
+import VaultsView from './views/VaultsView.vue'
+import SettingsView from './views/SettingsView.vue'
 import TransferBar from './components/layout/TransferBar.vue'
 import StatusBar from './components/layout/StatusBar.vue'
 import InfoBar from './components/fluent/InfoBar.vue'
@@ -140,37 +142,14 @@ async function pickUpload() {
       <Transition name="page" mode="out-in">
         <FilesView v-if="ui.page === 'files'" key="files" class="page-fill" />
 
-        <!-- 传输页：任务管理在 s6c 落地 -->
-        <StubPage
-          v-else-if="ui.page === 'transfers'"
-          key="transfers"
-          icon="sync"
-          title="传输任务"
-          :sub="connected()
-            ? '上传/下载任务列表、续传与失败重试将在初始化向导完成后交付。'
-            : '连接密库后即可上传与下载。'"
-        />
+        <!-- 传输页：任务列表 + 续传/重试/清空 -->
+        <TransfersView v-else-if="ui.page === 'transfers'" key="transfers" class="page-fill" />
 
-        <!-- 密库页：未连接 = 引导占位；已连接 = 库信息占位（s6c 向导） -->
-        <StubPage
-          v-else-if="ui.page === 'vaults'"
-          key="vaults"
-          :icon="connected() ? 'certificate' : 'cloud'"
-          :title="connected() ? (ui.snap?.vaultName ?? '密库') : '初始化或连接密库'"
-          :sub="connected()
-            ? '密库管理页将在下一步交付：同步状态、恢复码与安全设置。'
-            : 'CloudPrism 将文件加密后存入本地目录或云盘；连接后文件在此浏览与播放。'"
-          action="向导开发中（即将推出）"
-        />
+        <!-- 密库页：未连接=欢迎+最近记录；已连接=库信息/同步/恢复码 -->
+        <VaultsView v-else-if="ui.page === 'vaults'" key="vaults" class="page-fill" />
 
-        <!-- 设置页 -->
-        <StubPage
-          v-else
-          key="settings"
-          icon="setting"
-          title="设置"
-          sub="主题、字体与网络设置在下一步交付。"
-        />
+        <!-- 设置页：外观/缓存/传输/安全/百度凭证/性能/关于 -->
+        <SettingsView v-else key="settings" class="page-fill" />
       </Transition>
     </main>
 

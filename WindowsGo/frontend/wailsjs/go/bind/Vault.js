@@ -6,6 +6,26 @@ export function Activity() {
   return window['go']['bind']['Vault']['Activity']();
 }
 
+export function BaiduAuthURL(arg1, arg2) {
+  return window['go']['bind']['Vault']['BaiduAuthURL'](arg1, arg2);
+}
+
+export function BaiduClearAuth() {
+  return window['go']['bind']['Vault']['BaiduClearAuth']();
+}
+
+export function BaiduSaveAuth(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['bind']['Vault']['BaiduSaveAuth'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function BaiduStatus() {
+  return window['go']['bind']['Vault']['BaiduStatus']();
+}
+
+export function ChooseLocalDir() {
+  return window['go']['bind']['Vault']['ChooseLocalDir']();
+}
+
 export function ConnectOtherVault(arg1, arg2) {
   return window['go']['bind']['Vault']['ConnectOtherVault'](arg1, arg2);
 }

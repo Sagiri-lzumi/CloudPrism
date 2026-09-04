@@ -82,6 +82,18 @@ func (s *Settings) SetAutoLock(index int) error {
 	return nil
 }
 
+// SetMaxCores 单任务加密核心数；0 = 自动（按 CPU 数，上限 8），即时应用。
+// 与 Python 设置页「性能」组语义对齐（Go 侧 0=auto 由队列回退 CPU 数）。
+func (s *Settings) SetMaxCores(n int) error {
+	store := s.st.Store()
+	store.SetInt(settings.KeyMaxCores, n)
+	if err := wrapSync(store.Sync()); err != nil {
+		return err
+	}
+	s.st.ApplyTransferPrefs()
+	return nil
+}
+
 // SetSyncDir 文件夹同步的本地目录（空串 = 清除设置）。
 func (s *Settings) SetSyncDir(dir string) error {
 	return s.putString(settings.KeySyncLocalDir, dir)
@@ -102,6 +114,19 @@ func (s *Settings) SyncNow() (int, error) {
 func (s *Settings) ChooseSyncDir() (string, error) {
 	dir, err := wruntime.OpenDirectoryDialog(s.ctx.Context(), wruntime.OpenDialogOptions{
 		Title:                "选择要同步的本地目录",
+		CanCreateDirectories: true,
+	})
+	if err != nil {
+		return "", Wrap(err)
+	}
+	return dir, nil
+}
+
+// ChooseCacheDir 弹目录选择框返回缩略图缓存目录；取消返回空串（非错误）。
+// 与 ChooseSyncDir 的「同步目录」语义区分，避免设置页误用。
+func (s *Settings) ChooseCacheDir() (string, error) {
+	dir, err := wruntime.OpenDirectoryDialog(s.ctx.Context(), wruntime.OpenDialogOptions{
+		Title:                "选择缩略图缓存目录",
 		CanCreateDirectories: true,
 	})
 	if err != nil {

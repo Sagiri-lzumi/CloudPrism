@@ -15,6 +15,7 @@ import (
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/platform/win"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/paths"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/settings"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/storage"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/transfer"
 )
 
@@ -38,6 +39,14 @@ type App struct {
 	preview  *bind.Preview
 }
 
+// dpapiProtector 把 internal/platform/win 的包级 DPAPI 函数适配成
+// storage.BaiduProtector 接口（落盘前缀 DPAPI，与 Python 端一致，可互读）。
+type dpapiProtector struct{}
+
+func (dpapiProtector) Protect(d []byte) ([]byte, error)   { return win.Protect(d) }
+func (dpapiProtector) Unprotect(d []byte) ([]byte, error) { return win.Unprotect(d) }
+func (dpapiProtector) Scheme() string                     { return "DPAPI" }
+
 // NewApp 构造依赖图：数据目录 → 日志 → 设置 → 传输队列 → 应用状态 →
 // 绑定域。wails build 的绑定生成阶段同样会执行本函数（bindings_mode.go
 // 只分流需要 GUI 的步骤），故这里不能有窗口/对话框等前台操作。
@@ -52,10 +61,14 @@ func NewApp() *App {
 		fatal("CloudPrism 启动失败", "设置存储初始化失败: "+err.Error())
 	}
 
+	// 百度凭证存储：DPAPI 加密落盘 data/baidu.json（与 Python 版同路径同格式）
+	baiduCred := storage.NewBaiduCredStore(paths.BaiduCredentialFile(), dpapiProtector{})
+
 	st := appstate.New(appstate.Config{
-		Store: store,
-		Queue: transfer.New(),
-		Log:   logger,
+		Store:     store,
+		Queue:     transfer.New(),
+		Log:       logger,
+		BaiduCred: baiduCred,
 	})
 
 	holder := bind.NewContextHolder()

@@ -635,7 +635,7 @@ func TestBaiduBackoffAndErrors(t *testing.T) {
 
 // TestBaiduAuthURL 授权 URL 构造。
 func TestBaiduAuthURL(t *testing.T) {
-	u := baiduAuthURL("my-key", "dev-123")
+	u := BaiduAuthURL("my-key", "dev-123")
 	parsed, err := url.Parse(u)
 	if err != nil {
 		t.Fatalf("URL 应可解析: %v", err)
@@ -647,7 +647,7 @@ func TestBaiduAuthURL(t *testing.T) {
 		t.Errorf("URL 参数不符: %s", u)
 	}
 	// 含保留字符的参数必须被转义（Python 端 format 直插不转义，这里是有意加固）
-	u2 := baiduAuthURL("a&b=c", "")
+	u2 := BaiduAuthURL("a&b=c", "")
 	if !strings.Contains(u2, "client_id=a%26b%3Dc") {
 		t.Errorf("app_key 应被 QueryEscape，实得 %s", u2)
 	}
