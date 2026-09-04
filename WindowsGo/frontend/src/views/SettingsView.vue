@@ -57,6 +57,10 @@ const cachePath = computed(() => String(ui.settings.cachePath ?? ''))
 const cachePathSet = computed(() => cachePath.value !== '')
 const maxCores = computed(() => num(ui.settings.maxCores, 0))
 const autoLockIdx = computed(() => num(ui.settings.autoLockIndex, 0))
+const syncDir = computed(() => String(ui.settings.syncDir ?? ''))
+const syncDirSet = computed(() => syncDir.value !== '')
+// 同步需先连接密库（引擎挂在连接态上）
+const connected = computed(() => !!ui.snap?.connected)
 
 /* ------------------------------------------------------------ 动作 */
 
@@ -148,6 +152,48 @@ async function onAutoLock(i: number) {
     if (i > 0) showInfo(`将在无操作 ${AUTOLOCK_LABELS[i]} 后自动锁定`)
   } catch (e) {
     onErr(e)
+  }
+}
+
+/* ------------------------------------------------------- 文件夹同步 */
+
+/** 浏览选择本地同步目录并立即落盘（与密库页同步卡共用同一 Go 绑定）。 */
+async function chooseSyncDir() {
+  try {
+    const dir = await Settings.ChooseSyncDir()
+    if (!dir) return // 用户取消
+    ui.settings.syncDir = dir
+    await Settings.SetSyncDir(dir)
+    showSuccess('本地同步目录已更新')
+  } catch (e) {
+    onErr(e)
+  }
+}
+
+/** 清除同步目录设置（回退未设置态）。 */
+async function clearSyncDir() {
+  ui.settings.syncDir = ''
+  try {
+    await Settings.SetSyncDir('')
+    showInfo('已清除本地同步目录设置')
+  } catch (e) {
+    onErr(e)
+  }
+}
+
+/** 立即执行一轮本地 → 云端单向同步（需已连接密库）。 */
+async function syncNow() {
+  if (!connected.value) {
+    showWarning('请先连接密库后再同步')
+    return
+  }
+  try {
+    const n = await Settings.SyncNow()
+    showInfo(n > 0 ? `已开始同步 ${n} 个文件` : '本地目录已是最新，无需同步')
+  } catch (e) {
+    const err = unwrap(e)
+    if (err.code === 'sync-dir-unset') showWarning('请先选择本地同步目录')
+    else onErr(e)
   }
 }
 
@@ -364,6 +410,42 @@ const version = ref('读取运行时信息…')
           </div>
         </div>
 
+        <!-- ===================== 文件夹同步 ===================== -->
+        <div class="group-title">文件夹同步</div>
+        <div class="set-card">
+          <span class="set-icon"><Icon name="sync" :size="17" /></span>
+          <div class="set-body">
+            <div class="set-title">本地同步目录</div>
+            <div class="set-content" :title="syncDir">
+              {{ syncDirSet ? syncDir : '未设置：选择后将本目录内容单向同步到密库当前目录' }}
+            </div>
+          </div>
+          <div class="set-right">
+            <Button
+              v-if="syncDirSet"
+              icon="cancel"
+              iconOnly
+              title="清除同步目录设置"
+              @click="clearSyncDir"
+            />
+            <Button icon="folder_add" @click="chooseSyncDir">
+              {{ syncDirSet ? '更改…' : '选择目录…' }}
+            </Button>
+          </div>
+        </div>
+        <div class="set-card">
+          <span class="set-icon"><Icon name="send" :size="17" /></span>
+          <div class="set-body">
+            <div class="set-title">立即同步</div>
+            <div class="set-content">执行一轮本地 → 云端单向增量同步（目录需先在密库页连接后可用）</div>
+          </div>
+          <div class="set-right">
+            <Button icon="sync" :disabled="!syncDirSet || !connected" title="需先连接密库" @click="syncNow">
+              开始同步
+            </Button>
+          </div>
+        </div>
+
         <!-- ===================== 安全 ===================== -->
         <div class="group-title">安全</div>
         <ComboBoxCard
@@ -374,7 +456,7 @@ const version = ref('读取运行时信息…')
           :model-value="autoLockIdx"
           @change="onAutoLock"
         />
-        <div class="hint-row">恢复码管理与文件夹同步位于「密库」页（连接密库后可见）。</div>
+        <div class="hint-row">连接详情与恢复码管理位于「密库」页（连接密库后可见）。</div>
 
         <!-- ===================== 百度网盘 ===================== -->
         <div class="group-title">百度网盘</div>
