@@ -6,6 +6,8 @@
 // 阶段 6 会被 Fluent 三栏布局整体替换，故此处不写任何业务样式与状态。
 import {onMounted, ref} from 'vue'
 import {Ping, Quit, Version} from '../wailsjs/go/main/App'
+// 临时挂载 Icon 验证 fluent-icons glob 打包（阶段 6 重写整页时移除）
+import Icon from './components/fluent/Icon.vue'
 
 const runtimeInfo = ref('读取中…')
 const echoResult = ref('尚未调用')
@@ -50,6 +52,13 @@ async function quit() {
     </dl>
 
     <button type="button" @click="quit">退出</button>
+
+    <p class="icons">
+      <Icon name="folder" :size="20" />
+      <Icon name="document" :size="20" />
+      <Icon name="play" :size="20" />
+      <Icon name="setting" :size="20" />
+    </p>
   </main>
 </template>
 
@@ -72,7 +81,7 @@ h1 {
 }
 
 .tag {
-  color: var(--cp-accent);
+  color: var(--accent);
 }
 
 .hint {
@@ -116,9 +125,15 @@ button {
   font-family: inherit;
   font-size: inherit;
   color: #fff;
-  background: var(--cp-accent);
-  border: 1px solid var(--cp-accent);
+  background: var(--accent);
+  border: 1px solid var(--accent);
   border-radius: 4px;
   cursor: pointer;
+}
+
+.icons {
+  display: flex;
+  gap: 12px;
+  color: var(--text2);
 }
 </style>

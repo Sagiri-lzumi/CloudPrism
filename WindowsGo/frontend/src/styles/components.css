@@ -1,0 +1,130 @@
+/*
+ * components.css —— 组件库跨组件共享结构（scoped 无法继承的骨架类）。
+ *
+ * 主要是 SettingCard 系列五件套的布局：qfw 的视觉约定是
+ * 「图标块(32) + 标题/说明两行文本 + 右侧操作区」，五个变体共用同一
+ * 骨架，只有右侧操作不同 —— 骨架提为全局类，变体组件只写自己的壳。
+ */
+
+/* ---- 设置卡骨架 ---- */
+.set-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px; /* qfw SettingCard 行高 */
+  padding: 8px 16px;
+  background: var(--surface);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--radius-card);
+}
+
+.set-card.clickable {
+  cursor: default;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.set-card.clickable:hover {
+  background: var(--surface-hover);
+}
+
+.set-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  color: var(--text);
+  background: var(--fill-quiet);
+  border-radius: var(--radius-ctrl);
+}
+
+.set-body {
+  flex: 1;
+  min-width: 0; /* 长 content 省略号生效前提 */
+}
+
+.set-title {
+  font-size: 1rem; /* 14px@默认：与正文 Body 同级、600 字重区分 */
+  font-weight: 600;
+  color: var(--heading);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 说明行：12px 次级文字，可多行（不截断，设置页同步目录等长路径可见） */
+.set-content {
+  margin-top: 2px;
+  font-size: 0.857rem;
+  color: var(--text2);
+  overflow-wrap: anywhere;
+}
+
+.set-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* 下拉卡当前值（qfw ComboBox 按钮样式：描边小圆角按钮） */
+.set-combo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px 0 12px;
+  font-family: inherit;
+  font-size: 0.857rem;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-ctrl);
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.set-combo:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.set-combo:active {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+/* 展开组：卡片头部 + 下方独立卡片列表 */
+.expand-group {
+  position: relative;
+}
+
+.expand-items {
+  margin-top: 4px;
+  padding: 0 4px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--radius-card);
+}
+
+/* 组内子设置行：铺满卡宽、去卡描边、底部分隔 */
+.expand-items .set-card {
+  min-height: 56px;
+  border: none;
+  border-radius: 0;
+  border-bottom: 1px solid var(--divider);
+}
+
+.expand-items .set-card:last-child {
+  border-bottom: none;
+}
+
+/* 展开箭头旋转（qfw ExpandGroupSettingCard 同款反馈） */
+.expand-arrow {
+  display: inline-flex;
+  color: var(--muted);
+  transition: transform var(--dur) var(--ease);
+}
+
+.expand-group.open .expand-arrow {
+  transform: rotate(180deg);
+}
