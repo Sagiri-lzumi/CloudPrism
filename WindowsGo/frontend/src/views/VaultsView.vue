@@ -10,7 +10,7 @@
 -->
 <script setup lang="ts">
 import {computed, onMounted, reactive, ref} from 'vue'
-import {ui, openVault, navigate, lockVault} from '../lib/store'
+import {ui, openVault, navigate, lockVault, endOp} from '../lib/store'
 import {Settings, Vault, unwrap} from '../lib/api'
 import {fmtSize, fmtConnectSec} from '../lib/format'
 import {showError, showInfo, showSuccess, showWarning} from '../lib/toast'
@@ -155,6 +155,7 @@ async function doQuickConnect() {
     qc.status = unwrap(e).message
   } finally {
     qc.busy = false
+    endOp() // 后端只发 progress：忙碌复位由调用方 finally 保证
   }
 }
 
@@ -219,6 +220,8 @@ async function onRegenConfirm(payload: string | boolean) {
     } else {
       showError('重新生成失败：' + err.message)
     }
+  } finally {
+    endOp()
   }
 }
 
@@ -298,6 +301,8 @@ async function onOtherConfirm(payload: string | boolean) {
     } else {
       showError('连接失败：' + err.message)
     }
+  } finally {
+    endOp() // ConnectOtherVault 亦只发 progress；成功后新连接由 onFrame 兜底接管
   }
 }
 </script>

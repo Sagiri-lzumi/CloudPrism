@@ -1,6 +1,7 @@
 <!--
   StatusBar.vue —— 底部状态条（对照 Python 状态栏）。
-  左：连接状态点 + 密库名/后端/连接时长（10Hz 快照驱动，随帧刷新）；
+  左：状态点 + 文案三态——连接中（忙碌态直通后端 progress 文案，橙点）、
+  已连接（密库名/后端/时长，10Hz 快照驱动）、未连接（灰点文案）。
   右：完整性统计进度（stats 未完成时）、可续传任务提醒（点按跳传输页）。
 -->
 <script setup lang="ts">
@@ -19,6 +20,8 @@ const statsLabel = computed(() => {
 })
 
 const connected = computed(() => !!snap.value?.connected)
+// 连接中：后端阶段文案经忙碌态直通（快照未连接时优先展示）
+const connecting = computed(() => ui.opBusy && !connected.value)
 const connText = computed(() => {
   const s = snap.value!
   const backend = s.backend ? ` · ${s.backend}` : ''
@@ -29,8 +32,9 @@ const connText = computed(() => {
 <template>
   <footer class="cp-status">
     <span class="seg left">
-      <span class="dot" :class="connected ? 'on' : 'off'" />
-      <span v-if="connected" class="conn">{{ connText }}</span>
+      <span class="dot" :class="connecting ? 'busy' : connected ? 'on' : 'off'" />
+      <span v-if="connecting" class="conn">{{ ui.opText || '正在连接…' }}</span>
+      <span v-else-if="connected" class="conn">{{ connText }}</span>
       <span v-else class="conn off-text">未连接</span>
     </span>
 
@@ -87,6 +91,12 @@ const connText = computed(() => {
 }
 
 .dot.off {
+  background: var(--warn);
+  opacity: 1;
+}
+
+/* 连接中：橙色点（视觉增强的脉冲动画在样式打磨批加入） */
+.dot.busy {
   background: var(--warn);
   opacity: 1;
 }

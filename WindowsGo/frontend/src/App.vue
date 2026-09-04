@@ -28,7 +28,6 @@ import TransferBar from './components/layout/TransferBar.vue'
 import StatusBar from './components/layout/StatusBar.vue'
 import InfoBar from './components/fluent/InfoBar.vue'
 import Icon from './components/fluent/Icon.vue'
-import ProgressBar from './components/fluent/ProgressBar.vue'
 import {Transfer, unwrap} from './lib/api'
 import {showError} from './lib/toast'
 
@@ -92,14 +91,6 @@ async function pickUpload() {
 
 <template>
   <div class="app-shell">
-    <!-- 长操作忙碌条（向导/恢复码期间全局可见） -->
-    <Transition name="fade">
-      <div v-if="ui.opBusy && ui.opText" class="op-banner">
-        <span class="op-text">{{ ui.opText }}</span>
-        <div class="op-track"><ProgressBar indeterminate /></div>
-      </div>
-    </Transition>
-
     <!-- NavRail：图标导轨，上下两组（对照 qfw ActivityBar） -->
     <nav class="app-nav">
       <div class="nav-group top">
@@ -230,31 +221,6 @@ async function pickUpload() {
   background: var(--ok);
 }
 
-/* 忙碌横幅：顶部通栏细条 */
-.op-banner {
-  position: absolute;
-  top: 0;
-  left: 48px;
-  right: 0;
-  z-index: 800;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 16px 5px;
-  font-size: 0.857rem;
-  color: var(--text);
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
-  backdrop-filter: blur(6px);
-}
-
-.op-text {
-  white-space: nowrap;
-}
-
-.op-track {
-  flex: 1;
-}
-
 /* 页面切换淡入（qfw StackedWidget 过渡语义） */
 .page-enter-active,
 .page-leave-active {
@@ -268,16 +234,6 @@ async function pickUpload() {
 
 .page-fill {
   height: 100%;
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity var(--dur) var(--ease);
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 
 /* app-nav 底内边距收束（layout.css 已定义网格轨道） */

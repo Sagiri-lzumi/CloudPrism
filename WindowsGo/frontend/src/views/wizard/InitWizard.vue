@@ -6,11 +6,11 @@
     连接=主密码，可选「忘记密码」切恢复码开库）。
   执行走 store.openVault（Vault.Open + 成功切文件页）；新建成功的一次性
   恢复码写入 store，由 App 全局模态展示（本向导随页面切换卸载也不影响）。
-  失败在面板内红字展示（后端阶段文案由全局 op-banner 进度条透出）。
+  失败在面板内红字展示（后端阶段文案经全局忙碌态在底部状态栏透出）。
 -->
 <script setup lang="ts">
 import {computed, reactive, ref, watch} from 'vue'
-import {ui, openVault, navigate} from '../../lib/store'
+import {ui, openVault, navigate, endOp} from '../../lib/store'
 import {Vault, unwrap} from '../../lib/api'
 import {showInfo, showWarning} from '../../lib/toast'
 import Button from '../../components/fluent/Button.vue'
@@ -62,7 +62,7 @@ const form = reactive({
 })
 
 const status = ref('') // 面板内错误/提示（红）
-const busy = ref(false) // 执行中（后端 op 事件另驱动全局横幅）
+const busy = ref(false) // 执行中（阶段文案走全局忙碌态，见 store 顶部约定）
 
 /* ---------------------------------------------------------- 最近记录 */
 
@@ -250,6 +250,7 @@ async function finish() {
     status.value = unwrap(e).message
   } finally {
     busy.value = false
+    endOp() // 后端只发 progress：忙碌复位由调用方 finally 保证
   }
 }
 

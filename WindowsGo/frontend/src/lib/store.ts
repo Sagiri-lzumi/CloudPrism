@@ -4,6 +4,11 @@
 // 视图层动作（列目录/上传/下载/建夹/改名/删除…）经 bind 域调用，
 // 错误统一 unwrap 成 ApiError，按 code 分流提示。
 //
+// op（长操作忙碌态）约定：后端只发 st:op-progress，没有终态事件；
+// busy 复位由每个 op 调用方在 finally 里调 endOp()，另有 onFrame 兜底
+// （快照 connected false→true 瞬间自动清）防事件缺失卡死。新增 op 入口
+// 时两处都别漏；Go 侧注释同指向本文件（双向指针）。
+//
 // 模块单例：App.vue onMounted 调 start()，onBeforeUnmount 调 stop()。
 
 import {reactive} from 'vue'
@@ -84,18 +89,24 @@ let started = false
 function onFrame(payload: unknown) {
   const f = payload as {snap?: appstate.Snapshot; tasks?: appstate.TaskView[]}
   if (!f || !f.snap) return
+  const wasConnected = !!ui.snap?.connected
   ui.snap = f.snap
   ui.tasks = f.tasks ?? []
+  // 快照权威：连接建立瞬间自动收尾 op 忙碌态（防终态事件缺失卡死）
+  if (!wasConnected && f.snap.connected && ui.opBusy) endOp()
   // 锁库/连接态变化时清理遗留的浏览态
   if (!f.snap.connected) {
     if (ui.remote !== '') resetBrowse()
   }
 }
 
+// op 阶段文案：仅置忙碌（后端不发射终态；复位走调用方 finally endOp + onFrame 兜底）
 function onOpProgress(msg: unknown) {
   ui.opText = String(msg ?? '')
   ui.opBusy = true
 }
+
+// onOpDone/onOpError：事件名保留定义但后端当前不发射（防御性处理器，语义同 endOp）
 
 function onOpDone(msg: unknown) {
   ui.opBusy = false
@@ -409,6 +420,12 @@ export async function revoke(url: string): Promise<void> {
   } catch {
     /* 吊销失败静默：注册表随锁库 RevokeAll，不阻塞预览 */
   }
+}
+
+/** 结束长操作忙碌态：每个 op 入口的 finally 必调（onFrame 兜底同语义，幂等）。 */
+export function endOp() {
+  ui.opBusy = false
+  ui.opText = ''
 }
 
 /** 主密码类长操作（向导/恢复码）在 op 事件窗口内的忙碌态。 */

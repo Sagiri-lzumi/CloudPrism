@@ -53,6 +53,9 @@ type OpenVaultResult struct {
 // 编排（对照 app.py 向导回调链）：构造后端 → 建/开库（PBKDF2 秒级派生，
 // 阶段文案经 progress 回调发事件）→ 换入新连接 → 记住最近记录 → 续传探测。
 // 已处于连接态时先锁旧连接，保证任意时刻至多一个连接上下文。
+//
+// 进度约定：本文件只发 EventOpProgress 阶段文案；busy 复位收口在前端
+// store.ts（调用方 finally endOp + 快照 connected 兜底），不补发终态事件。
 func (s *State) OpenVault(ctx context.Context, req OpenRequest) (OpenVaultResult, error) {
 	prog := func(msg string) { s.emit(EventOpProgress, msg) }
 	prog("正在连接存储位置…")
@@ -125,7 +128,7 @@ func (s *State) OpenVault(ctx context.Context, req OpenRequest) (OpenVaultResult
 		return OpenVaultResult{}, err
 	}
 	s.rememberCurrentVault(conn, req.User)
-	prog("连接成功")
+	// 不补发「连接成功」：前端以快照 connected + 调用方 finally 收尾（见本文件顶部约定）
 	return OpenVaultResult{Code: code}, nil
 }
 
