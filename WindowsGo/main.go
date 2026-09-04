@@ -49,9 +49,14 @@ func main() {
 func ensureWebView2Runtime() {
 	ver := win.RuntimeVersion()
 	if ver == "" {
+		// 顺手用系统默认浏览器打开官方下载页，用户装完即可回来重试
+		if err := win.OpenURL("https://go.microsoft.com/fwlink/p/?LinkId=2124703"); err != nil {
+			log.Printf("[startup] 打开 WebView2 下载页失败: %v", err)
+		}
 		fatal("CloudPrism 无法启动",
 			"未检测到 Microsoft Edge WebView2 运行时。\n\n"+
-				"请安装后重试：\n"+
+				"已为你打开微软官方下载页，安装后重新启动即可。\n"+
+				"若未自动打开浏览器，请访问：\n"+
 				"https://developer.microsoft.com/microsoft-edge/webview2/")
 		return // fatal 内部 os.Exit，编译器不识别其不返回，故需显式收尾
 	}
