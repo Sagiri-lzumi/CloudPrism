@@ -91,6 +91,7 @@ interface CtxItem {
 
 const ctxOpen = ref(false)
 const ctxAnchor = ref<HTMLElement | null>(null)
+const ctxPos = ref<{x: number; y: number} | null>(null)
 const ctxEntry = ref<appstate.FileEntry | null>(null)
 
 const ctxItems = computed<CtxItem[]>(() => {
@@ -125,8 +126,9 @@ function openCtx(e: MouseEvent, entry: appstate.FileEntry | null) {
   // 右键目标即时选中（菜单动作都以选中条目为对象）
   if (entry) selectEntry(entry)
   ctxEntry.value = entry
-  // 锚点取 currentTarget；GridCard 走自定义事件 emit 时 currentTarget 已被
-  // 置空（原生事件派发结束），回退到 target（点击/右键命中的元素恒存在）
+  // 菜单跟随光标弹出：记录鼠标坐标（RoundMenu position 优先于元素锚点）
+  ctxPos.value = {x: e.clientX, y: e.clientY}
+  // 元素锚点兜底（currentTarget 对自定义事件已置空时用 target）
   const el = (e.currentTarget ?? e.target) as HTMLElement | null
   ctxAnchor.value = el
   ctxOpen.value = false
@@ -399,9 +401,10 @@ function confirmDlg(payload: string | boolean) {
       </div>
     </template>
 
-    <!-- 右键上下文菜单 -->
+    <!-- 右键上下文菜单（跟随光标弹出） -->
     <RoundMenu
       :open="ctxOpen"
+      :position="ctxPos"
       :anchor="ctxAnchor"
       :items="ctxItems"
       @select="onCtx"

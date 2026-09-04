@@ -10,8 +10,10 @@ import Icon from './Icon.vue'
 const props = withDefaults(
   defineProps<{
     open: boolean
-    /** 锚点元素（getBoundingClientRect 定位） */
+    /** 锚点元素（getBoundingClientRect 定位）；与 position 二选一 */
     anchor: HTMLElement | null
+    /** 光标坐标（右键/更多钮菜单用）：提供时优先于 anchor，菜单在鼠标处弹出 */
+    position?: {x: number; y: number} | null
     items: {
       /** 条目文案（divider 项忽略） */
       label?: string
@@ -26,7 +28,7 @@ const props = withDefaults(
     /** 上方留白（px） */
     gap?: number
   }>(),
-  {anchor: null, gap: 4},
+  {anchor: null, position: null, gap: 4},
 )
 
 const emit = defineEmits<{
@@ -41,20 +43,34 @@ const menu = ref<HTMLElement>()
 watch(
   () => props.open,
   async (open) => {
-    if (!open || !props.anchor) return
+    if (!open) return
     await nextTick()
-    const a = props.anchor.getBoundingClientRect()
     const el = menu.value!
     // 用 offsetWidth/offsetHeight 测量：pop 入场动画带 scale(.96)，
     // getBoundingClientRect 会测到缩放后的偏小值，导致定位偏低/溢出
     const mw = el.offsetWidth
     const mh = el.offsetHeight
-    // 默认锚点下方左对齐；空间不足翻到上方
-    let top = a.bottom + props.gap
-    if (top + mh > innerHeight) top = a.top - props.gap - mh
-    // 双向钳位：无论锚点在何位置，菜单必须完整落在视口内（防底部被裁）
+    // 锚点基准点：光标坐标（右键/更多）优先，其次锚点元素（下拉）
+    let baseX: number
+    let baseY: number
+    let baseH = 0
+    if (props.position) {
+      baseX = props.position.x
+      baseY = props.position.y
+    } else if (props.anchor) {
+      const a = props.anchor.getBoundingClientRect()
+      baseX = a.left
+      baseY = a.top
+      baseH = a.height
+    } else {
+      return // 无锚点不定位
+    }
+    // 默认基准点下方弹出；空间不足翻到上方
+    let top = baseY + baseH + props.gap
+    if (top + mh > innerHeight) top = baseY - props.gap - mh
+    // 双向钳位：菜单必须完整落在视口内（防底部被裁）
     top = Math.max(4, Math.min(top, innerHeight - mh - 4))
-    const left = Math.max(4, Math.min(a.left, innerWidth - mw - 4))
+    const left = Math.max(4, Math.min(baseX, innerWidth - mw - 4))
     pos.value = {left, top}
   },
 )
