@@ -254,3 +254,5 @@ WindowsGo/frontend/node_modules/
 WindowsGo/frontend/package.json.md5
 *.syso
 *.exe
+
+.workbuddy/
