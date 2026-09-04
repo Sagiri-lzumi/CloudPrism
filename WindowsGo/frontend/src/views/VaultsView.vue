@@ -358,153 +358,161 @@ async function onOtherConfirm(payload: string | boolean) {
       </div>
     </template>
 
-    <!-- ======================= 已连接：密库信息 ======================= -->
+    <!-- ======================= 已连接：密库信息（设置页同款单列卡） ======================= -->
     <template v-else>
-      <div class="v-cards">
-        <!-- 左列 -->
-        <div class="col">
-          <!-- 连接信息 -->
-          <Card padding="md" class="info-card">
-            <div class="ic-head">
-              <span class="ic-badge"><Icon name="certificate" :size="20" /></span>
-              <div class="ic-titles">
-                <div class="ic-name">{{ snap().vaultName }}</div>
-                <div class="ic-sub">{{ snap().backend }} · {{ snap().backendId }}</div>
-              </div>
-              <PrimaryButton icon="lock" title="锁定密库（Ctrl+L）" @click="lockVault">
-                锁定
-              </PrimaryButton>
+      <div class="v-conn">
+        <div class="v-inner">
+          <!-- 概览卡：图标 + 库名/后端 + 快捷操作（锁定/重命名） -->
+          <section class="ov-card">
+            <span class="ov-icon"><Icon name="cloud" :size="22" /></span>
+            <div class="ov-body">
+              <div class="ov-name">{{ snap().vaultName }}</div>
+              <div class="ov-meta">{{ snap().backend }} · {{ snap().backendId }}</div>
             </div>
-            <div class="kv-grid">
-              <span class="kv-k">密库名称</span>
-              <span class="kv-v">{{ snap().vaultName }}</span>
-              <span class="kv-k">存储位置</span>
-              <span class="kv-v" :title="snap().backendId">{{ snap().backendId }}</span>
-              <span class="kv-k">密库路径</span>
-              <span class="kv-v">{{ snap().vaultPath || '根目录' }}</span>
-              <span class="kv-k">文件名加密</span>
-              <span class="kv-v">{{ snap().filenameEnc ? '开启（文件名不可见）' : '关闭（云端可见）' }}</span>
-              <span class="kv-k">已连接</span>
-              <span class="kv-v">{{ fmtConnectSec(snap().connectedSec) }}</span>
-              <span class="kv-k">自动锁定</span>
-              <span class="kv-v">{{ autoLockText }}</span>
+            <div class="ov-actions">
+              <Button icon="edit" @click="renameDlg.open = true">重命名</Button>
+              <PrimaryButton icon="lock" title="锁定密库（Ctrl+L）" @click="lockVault">锁定</PrimaryButton>
             </div>
-            <div class="ic-actions">
-              <Button icon="edit" @click="renameDlg.open = true">重命名密库</Button>
-            </div>
-          </Card>
+          </section>
 
-          <!-- 云端占用 -->
-          <Card padding="md">
-            <div class="card-head">
-              <span class="ch-title">云端占用</span>
-              <Button
-                icon="update"
-                :disabled="statBusy"
-                title="重新统计（遍历全部文件）"
-                @click="requestStats"
-              >
+          <!-- ============ 连接信息 ============ -->
+          <div class="group-title">连接信息</div>
+          <div class="set-card">
+            <span class="set-icon"><Icon name="folder" :size="17" /></span>
+            <div class="set-body">
+              <div class="set-title">密库路径</div>
+              <div class="set-content">{{ snap().vaultPath || '根目录' }}</div>
+            </div>
+          </div>
+          <div class="set-card">
+            <span class="set-icon"><Icon name="hide" :size="17" /></span>
+            <div class="set-body">
+              <div class="set-title">文件名加密</div>
+              <div class="set-content">
+                {{ snap().filenameEnc ? '开启（云端仅见密文名，不可读）' : '关闭（云端可见明文文件名）' }}
+              </div>
+            </div>
+            <div class="set-right">
+              <span class="ch-badge" :class="snap().filenameEnc ? 'ok' : 'warn'">
+                {{ snap().filenameEnc ? '已开启' : '未开启' }}
+              </span>
+            </div>
+          </div>
+          <div class="set-card">
+            <span class="set-icon"><Icon name="date_time" :size="17" /></span>
+            <div class="set-body">
+              <div class="set-title">已连接时长</div>
+              <div class="set-content">本次连接已持续 {{ fmtConnectSec(snap().connectedSec) }}</div>
+            </div>
+          </div>
+          <div class="set-card">
+            <span class="set-icon"><Icon name="stop_watch" :size="17" /></span>
+            <div class="set-body">
+              <div class="set-title">自动锁定</div>
+              <div class="set-content">无操作超过设定时间后自动锁定密库</div>
+            </div>
+            <div class="set-right">
+              <span class="set-value">{{ autoLockText }}</span>
+            </div>
+          </div>
+
+          <!-- ============ 云端占用 ============ -->
+          <div class="group-title">云端占用</div>
+          <div class="set-card">
+            <span class="set-icon"><Icon name="pie_single" :size="17" /></span>
+            <div class="set-body">
+              <div class="set-title">密库空间统计</div>
+              <div class="set-content">
+                <template v-if="snap().statsDone && !snap().statsFailed">
+                  已用 <b class="em">{{ fmtSize(snap().statsTotal) }}</b>，共
+                  <b class="em">{{ snap().statsFiles }}</b> 个文件
+                </template>
+                <template v-else-if="snap().statsFailed">
+                  <span class="err">上一轮统计有部分文件核对失败（网络中断等），可重试。</span>
+                </template>
+                <template v-else>尚未统计：递归遍历全部文件，计数 + 云端占用字节，结果仅存本机展示</template>
+              </div>
+            </div>
+            <div class="set-right">
+              <Button icon="update" :disabled="statBusy" title="重新统计（遍历全部文件）" @click="requestStats">
                 立即统计
               </Button>
             </div>
-            <div v-if="snap().statsDone && !snap().statsFailed" class="stats-row">
-              <div class="stat-cell">
-                <b>{{ fmtSize(snap().statsTotal) }}</b>
-                <i>占用空间</i>
-              </div>
-              <div class="stat-cell">
-                <b>{{ snap().statsFiles }}</b>
-                <i>文件数</i>
-              </div>
-            </div>
-            <div v-else-if="snap().statsFailed" class="card-note err">
-              上一轮完整性统计有部分文件核对失败（网络中断等），可重试。
-            </div>
-            <div v-else class="card-note">
-              尚未统计。统计会递归遍历密库全部文件（计数 + 云端占用字节），结果仅存本机展示。
-            </div>
-          </Card>
-        </div>
+          </div>
 
-        <!-- 右列 -->
-        <div class="col">
-          <!-- 文件夹同步 -->
-          <Card padding="md">
-            <div class="card-head">
-              <span class="ch-title">文件夹同步</span>
+          <!-- ============ 同步与安全 ============ -->
+          <div class="group-title">同步与安全</div>
+          <div class="set-card">
+            <span class="set-icon"><Icon name="sync" :size="17" /></span>
+            <div class="set-body">
+              <div class="set-title">文件夹同步</div>
+              <div class="set-content">
+                <template v-if="String(ui.settings.syncDir ?? '')">
+                  {{ String(ui.settings.syncDir) }}（本地 → 云端，单向增量）
+                </template>
+                <template v-else>未设置本地同步目录（点击右上角前往设置）</template>
+              </div>
+            </div>
+            <div class="set-right">
               <Button icon="sync" :disabled="syncBusy || !!ui.snap?.sync.running" @click="startSync">
                 {{ ui.snap?.sync.running ? '同步中…' : '开始同步' }}
               </Button>
             </div>
-            <div class="kv-grid">
-              <span class="kv-k">本地目录</span>
-              <span class="kv-v" :title="String(ui.settings.syncDir ?? '')">
-                {{ String(ui.settings.syncDir ?? '') || '未设置（点击右上角前往设置）' }}
-              </span>
-              <span class="kv-k">方向</span>
-              <span class="kv-v">本地 → 云端（单向增量）</span>
+          </div>
+          <template v-if="ui.snap?.sync.running || syncText">
+            <div v-if="ui.snap?.sync.running" class="sync-bar">
+              <ProgressBar
+                :value="ui.snap.sync.total > 0 ? Math.round((ui.snap.sync.done / ui.snap.sync.total) * 100) : 0"
+                :indeterminate="ui.snap.sync.total <= 0"
+              />
             </div>
-            <template v-if="ui.snap?.sync.running">
-              <div class="sync-bar">
-                <ProgressBar
-                  :value="ui.snap.sync.total > 0 ? Math.round((ui.snap.sync.done / ui.snap.sync.total) * 100) : 0"
-                  :indeterminate="ui.snap.sync.total <= 0"
-                />
-              </div>
-              <div class="card-note">{{ syncText }}</div>
-            </template>
-            <template v-else>
-              <div class="card-note">{{ syncText }}</div>
-              <ul v-if="ui.snap?.sync.errors?.length" class="sync-errs">
-                <li v-for="(e, i) in ui.snap.sync.errors" :key="i">{{ e }}</li>
-              </ul>
-            </template>
-          </Card>
+            <div v-if="syncText && !ui.snap?.sync.running" class="card-note">{{ syncText }}</div>
+            <ul v-if="ui.snap?.sync.errors?.length" class="sync-errs">
+              <li v-for="(e, i) in ui.snap.sync.errors" :key="i">{{ e }}</li>
+            </ul>
+          </template>
 
-          <!-- 恢复码与安全 -->
-          <Card padding="md">
-            <div class="card-head">
-              <span class="ch-title">恢复码与安全</span>
+          <div class="set-card">
+            <span class="set-icon"><Icon name="qrcode" :size="17" /></span>
+            <div class="set-body">
+              <div class="set-title">恢复码</div>
+              <div class="set-content">
+                忘记主密码时可凭恢复码开库；恢复码仅加密保存在本机库内，重新生成后旧码立即失效。
+              </div>
+            </div>
+            <div class="set-right">
               <span class="ch-badge" :class="snap().hasRecovery ? 'ok' : 'warn'">
                 {{ snap().hasRecovery ? '已生成' : '未生成' }}
               </span>
+              <Button icon="update" @click="regenDlg.err = ''; regenDlg.open = true">重新生成</Button>
             </div>
-            <p class="card-note">
-              忘记主密码时可凭恢复码开库。恢复码只在本机加密保存的库内，不会上传云端；
-              重新生成后旧码立即失效。
-            </p>
-            <div class="ic-actions">
-              <Button icon="update" @click="regenDlg.err = ''; regenDlg.open = true">
-                重新生成恢复码
-              </Button>
-            </div>
-          </Card>
+          </div>
 
-          <!-- 同一位置的其它密库 -->
-          <Card padding="md">
-            <button type="button" class="card-head expandable" @click="toggleOthers">
-              <span class="ch-title">同一位置的其它密库</span>
-              <Icon
-                name="chevron_down_med"
-                :size="14"
-                class="chev"
-                :class="{open: othersOpen}"
-              />
-            </button>
-            <template v-if="othersOpen">
-              <div v-if="othersLoading" class="card-note">扫描中…</div>
-              <div v-else-if="!others.length" class="card-note">
-                未发现其它密库（可在别的目录位置新建后再来切换）
+          <!-- ============ 其它密库 ============ -->
+          <div class="group-title">其它密库</div>
+          <div class="set-card">
+            <span class="set-icon"><Icon name="library" :size="17" /></span>
+            <div class="set-body">
+              <div class="set-title">同一位置的其它密库</div>
+              <div class="set-content" v-if="othersOpen">
+                <template v-if="othersLoading">扫描中…</template>
+                <template v-else-if="!others.length">未发现其它密库（可在别的目录位置新建后再来切换）</template>
               </div>
-              <div v-else class="other-list">
-                <div v-for="p in others" :key="p" class="other-row">
-                  <Icon name="library" :size="15" class="oth-ic" />
-                  <span class="oth-path">{{ p || '（根目录）' }}</span>
-                  <Button iconOnly icon="connect" title="连接该密库" @click="connectOther(p)" />
-                </div>
-              </div>
-            </template>
-          </Card>
+            </div>
+            <div class="set-right">
+              <button type="button" class="expand-btn" @click="toggleOthers">
+                {{ othersOpen ? '收起' : '展开' }}
+                <Icon name="chevron_down_med" :size="12" :class="{rot: othersOpen}" />
+              </button>
+            </div>
+          </div>
+          <div v-if="othersOpen && !othersLoading && others.length" class="other-list">
+            <div v-for="p in others" :key="p" class="other-row">
+              <Icon name="library" :size="15" class="oth-ic" />
+              <span class="oth-path">{{ p || '（根目录）' }}</span>
+              <Button iconOnly icon="connect" title="连接该密库" @click="connectOther(p)" />
+            </div>
+          </div>
         </div>
       </div>
     </template>
@@ -764,132 +772,163 @@ async function onOtherConfirm(payload: string | boolean) {
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
-/* ---------- 已连接：双列卡片 ---------- */
-.v-cards {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
-  padding: 18px;
+/* ---------- 已连接：设置页同款单列卡片 ---------- */
+.v-conn {
+  height: 100%;
+  overflow-y: auto;
+  padding: 18px 24px 28px;
 }
 
-.col {
+.v-inner {
+  max-width: 760px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  min-width: 0;
+  gap: 8px;
 }
 
-.info-card .ic-head {
+/* 概览卡：图标 + 名称/后端 + 快捷操作 */
+.ov-card {
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 16px;
+  margin-bottom: 6px;
+  padding: 18px 16px;
+  background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 7%, var(--surface)), var(--surface));
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
 }
 
-.ic-badge {
+.ov-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   color: var(--accent);
   background: var(--accent-soft);
   border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
-.ic-titles {
+.ov-body {
   flex: 1;
   min-width: 0;
 }
 
-.ic-name {
+.ov-name {
   overflow: hidden;
-  font-size: 1.071rem;
+  font-size: 1.143rem;
   font-weight: 600;
   color: var(--heading);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ic-sub {
+.ov-meta {
   overflow: hidden;
+  margin-top: 2px;
   font-size: 0.786rem;
   color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.kv-grid {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px 20px;
-  align-items: baseline;
-}
-
-.kv-k {
-  font-size: 0.786rem;
-  color: var(--muted);
-  white-space: nowrap;
-  align-self: baseline;
-}
-
-.kv-v {
-  overflow: hidden;
-  font-size: 0.857rem;
-  color: var(--text);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  align-self: baseline;
-}
-
-.ic-actions {
+.ov-actions {
   display: flex;
-  justify-content: flex-end;
   gap: 8px;
-  margin-top: 12px;
+  flex: none;
 }
 
-.card-head {
+/* 分组标题（对照 SettingsView 同款） */
+.group-title {
+  margin: 14px 4px 2px;
+  font-size: 0.857rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.group-title:first-child {
+  margin-top: 0;
+}
+
+/* 设置卡（对照 SettingsView .set-card：图标+标题+说明+右侧控件） */
+.set-card {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
+  gap: 14px;
+  min-height: 56px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  transition: border-color var(--dur-fast) var(--ease);
 }
 
-.card-head.expandable {
-  width: 100%;
-  padding: 0;
-  text-align: left;
-  color: inherit;
-  background: none;
-  border: none;
-  cursor: pointer;
+.set-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 8px;
 }
 
-.card-head .ch-title {
+.set-body {
   flex: 1;
-  font-size: 0.929rem;
+  min-width: 0;
+}
+
+.set-title {
+  font-size: 0.857rem;
   font-weight: 600;
   color: var(--heading);
-  letter-spacing: 0.01em;
 }
 
-.chev {
-  color: var(--muted);
-  transition: transform var(--dur-fast) var(--ease);
+.set-content {
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 0.786rem;
+  line-height: 1.45;
+  color: var(--text2);
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
-.chev.open {
-  transform: rotate(180deg);
+.set-content .em {
+  color: var(--heading);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
+.set-content .err {
+  color: var(--err);
+}
+
+.set-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.set-value {
+  font-size: 0.857rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* 徽章（复用原 ok/warn 语义） */
 .ch-badge {
   padding: 2px 10px;
   font-size: 0.786rem;
   border-radius: var(--radius-round);
+  white-space: nowrap;
 }
 
 .ch-badge.ok {
@@ -902,8 +941,14 @@ async function onOtherConfirm(payload: string | boolean) {
   background: color-mix(in srgb, var(--warn) 12%, transparent);
 }
 
+/* 同步进度/备注/错误（嵌在卡片下方） */
+.sync-bar {
+  margin: 4px 0 8px;
+}
+
 .card-note {
   margin: 0;
+  padding: 0 4px 4px;
   font-size: 0.786rem;
   line-height: 1.5;
   color: var(--muted);
@@ -913,53 +958,56 @@ async function onOtherConfirm(payload: string | boolean) {
   color: var(--err);
 }
 
-.stats-row {
-  display: flex;
-  gap: 32px;
-  margin-top: 6px;
-}
-
-.stat-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.stat-cell b {
-  font-size: 1.286rem;
-  font-weight: 600;
-  color: var(--heading);
-  font-variant-numeric: tabular-nums;
-}
-
-.stat-cell i {
-  font-size: 0.786rem;
-  font-style: normal;
-  color: var(--muted);
-}
-
-.sync-bar {
-  margin: 10px 0 6px;
-}
-
 .sync-errs {
-  margin: 8px 0 0;
-  padding-left: 18px;
+  margin: 0;
+  padding: 0 4px 8px 24px;
   font-size: 0.786rem;
   color: var(--err);
 }
 
+/* 展开/收起钮（文字链接风） */
+.expand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 0.786rem;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-ctrl);
+  cursor: pointer;
+}
+
+.expand-btn:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.expand-btn .rot {
+  transform: rotate(180deg);
+}
+
+.expand-btn svg {
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+/* 其它密库列表 */
 .other-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  margin: 0 4px 8px;
+  padding: 4px;
+  background: var(--bg-page);
+  border-radius: var(--radius-ctrl);
 }
 
 .other-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 4px;
+  padding: 7px 6px;
   border-radius: var(--radius-ctrl);
 }
 
