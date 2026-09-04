@@ -168,7 +168,7 @@ async function pickUpload() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
 }
 
 .nav-space {
@@ -176,6 +176,7 @@ async function pickUpload() {
 }
 
 .nav-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -189,13 +190,26 @@ async function pickUpload() {
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
+/* 选中态左侧 2px 指示条（VS Code/ActivityBar 语义） */
+.nav-btn.on::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 22px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
 .nav-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--text);
 }
 
 .nav-btn:disabled {
-  opacity: 0.35;
+  opacity: 0.3;
 }
 
 .nav-btn.on {
@@ -203,8 +217,20 @@ async function pickUpload() {
   background: var(--accent-soft);
 }
 
+.nav-btn.on:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
 .nav-btn.dim {
   color: var(--text2);
+}
+
+/* 底部操作簇：小圆点 + 锁定/退出，整体圆角聚组，hover 分明 */
+.nav-group.bottom {
+  gap: 2px;
+  padding-top: 6px;
+  margin-top: 6px;
+  border-top: 1px solid var(--divider);
 }
 
 /* 连接状态点（导航轨底部） */
@@ -212,13 +238,15 @@ async function pickUpload() {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  margin: 6px 0 2px;
+  margin: 4px 0 4px;
   background: var(--warn);
-  opacity: 0.8;
+  opacity: 0.85;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent);
 }
 
 .dot.ok {
   background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 16%, transparent);
 }
 
 /* 页面切换淡入（qfw StackedWidget 过渡语义） */
