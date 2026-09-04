@@ -225,13 +225,36 @@ async function onRegenConfirm(payload: string | boolean) {
   }
 }
 
-// 文件夹同步：无同步目录时引导去设置页
+// 文件夹同步：无同步目录时可在此就地选择（设置页亦有同入口）
 const syncBusy = ref(false)
+const syncDirBusy = ref(false)
+
+/** 选择/更改本地同步目录（弹目录框，选完即落盘）。 */
+async function chooseSyncDir() {
+  if (syncDirBusy.value) return
+  syncDirBusy.value = true
+  try {
+    const dir = await Settings.ChooseSyncDir()
+    if (!dir) return // 用户取消
+    ui.settings.syncDir = dir
+    await Settings.SetSyncDir(dir)
+    showSuccess('本地同步目录已更新')
+  } catch (e) {
+    showError('设置同步目录失败：' + unwrap(e).message)
+  } finally {
+    syncDirBusy.value = false
+  }
+}
+
+/** 前往设置页（自动锁定等偏好项在设置页集中管理）。 */
+function gotoSettings() {
+  navigate('settings')
+}
+
 async function startSync() {
   if (syncBusy.value) return
   if (!String(ui.settings.syncDir ?? '')) {
-    showWarning('请先在设置页指定要同步的本地目录')
-    navigate('settings')
+    showWarning('请先选择要同步的本地目录')
     return
   }
   syncBusy.value = true
@@ -241,8 +264,7 @@ async function startSync() {
   } catch (e) {
     const err = unwrap(e)
     if (err.code === 'sync-dir-unset') {
-      showWarning('请先在设置页指定要同步的本地目录')
-      navigate('settings')
+      showWarning('请先选择要同步的本地目录')
     } else {
       showError('同步启动失败：' + err.message)
     }
@@ -378,6 +400,14 @@ async function onOtherConfirm(payload: string | boolean) {
           <!-- ============ 连接信息 ============ -->
           <div class="group-title">连接信息</div>
           <div class="set-card">
+            <span class="set-icon"><Icon name="globe" :size="17" /></span>
+            <div class="set-body">
+              <div class="set-title">存储位置</div>
+              <div class="set-content" :title="snap().backendId">{{ snap().backendId }}</div>
+            </div>
+            <div class="set-right"><span class="ch-badge">{{ snap().backend }}</span></div>
+          </div>
+          <div class="set-card">
             <span class="set-icon"><Icon name="folder" :size="17" /></span>
             <div class="set-body">
               <div class="set-title">密库路径</div>
@@ -389,7 +419,8 @@ async function onOtherConfirm(payload: string | boolean) {
             <div class="set-body">
               <div class="set-title">文件名加密</div>
               <div class="set-content">
-                {{ snap().filenameEnc ? '开启（云端仅见密文名，不可读）' : '关闭（云端可见明文文件名）' }}
+                创建密库时决定，不可中途修改。
+                {{ snap().filenameEnc ? '已加密：云端仅见密文名。' : '未加密：云端可见明文文件名。' }}
               </div>
             </div>
             <div class="set-right">
@@ -401,18 +432,19 @@ async function onOtherConfirm(payload: string | boolean) {
           <div class="set-card">
             <span class="set-icon"><Icon name="date_time" :size="17" /></span>
             <div class="set-body">
-              <div class="set-title">已连接时长</div>
-              <div class="set-content">本次连接已持续 {{ fmtConnectSec(snap().connectedSec) }}</div>
+              <div class="set-title">本次连接</div>
+              <div class="set-content">自连接起已持续 {{ fmtConnectSec(snap().connectedSec) }}，锁定后重连需重新验证</div>
             </div>
           </div>
           <div class="set-card">
             <span class="set-icon"><Icon name="stop_watch" :size="17" /></span>
             <div class="set-body">
               <div class="set-title">自动锁定</div>
-              <div class="set-content">无操作超过设定时间后自动锁定密库</div>
+              <div class="set-content">无操作超过设定时间后自动锁定密库；修改在设置页进行</div>
             </div>
             <div class="set-right">
               <span class="set-value">{{ autoLockText }}</span>
+              <Button icon="setting" title="前往设置页修改" @click="gotoSettings">去设置</Button>
             </div>
           </div>
 
@@ -450,11 +482,23 @@ async function onOtherConfirm(payload: string | boolean) {
                 <template v-if="String(ui.settings.syncDir ?? '')">
                   {{ String(ui.settings.syncDir) }}（本地 → 云端，单向增量）
                 </template>
-                <template v-else>未设置本地同步目录（点击右上角前往设置）</template>
+                <template v-else>尚未选择本地目录：先选择要同步的文件夹，再点「开始同步」</template>
               </div>
             </div>
             <div class="set-right">
-              <Button icon="sync" :disabled="syncBusy || !!ui.snap?.sync.running" @click="startSync">
+              <Button
+                icon="folder_add"
+                :disabled="syncDirBusy"
+                title="选择要同步到密库的本地目录"
+                @click="chooseSyncDir"
+              >
+                {{ String(ui.settings.syncDir ?? '') ? '更改目录' : '选择目录…' }}
+              </Button>
+              <Button
+                icon="sync"
+                :disabled="syncBusy || !!ui.snap?.sync.running || !String(ui.settings.syncDir ?? '')"
+                @click="startSync"
+              >
                 {{ ui.snap?.sync.running ? '同步中…' : '开始同步' }}
               </Button>
             </div>
@@ -923,10 +967,12 @@ async function onOtherConfirm(payload: string | boolean) {
   white-space: nowrap;
 }
 
-/* 徽章（复用原 ok/warn 语义） */
+/* 徽章（ok/warn 语义；无修饰类时用中性底展示后端类型等） */
 .ch-badge {
   padding: 2px 10px;
   font-size: 0.786rem;
+  color: var(--text2);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   border-radius: var(--radius-round);
   white-space: nowrap;
 }
