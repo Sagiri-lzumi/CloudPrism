@@ -361,6 +361,14 @@ function confirmDlg(payload: string | boolean) {
                 <span class="row-name" :title="e.display">{{ e.display }}</span>
                 <span class="row-size">{{ e.isDir ? '文件夹' : fmtSize(e.size) }}</span>
                 <button
+                  type="button"
+                  class="more"
+                  title="更多操作（删除、重命名、下载…）"
+                  @click.stop="openCtx($event, e)"
+                >
+                  <Icon name="more" :size="14" />
+                </button>
+                <button
                   v-if="e.isDir"
                   type="button"
                   class="open"
@@ -605,6 +613,34 @@ function confirmDlg(payload: string | boolean) {
 }
 
 .open:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--accent);
+}
+
+/* 更多菜单（hover 才显式可见，右键始终可用） */
+.more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin-left: 2px;
+  color: var(--text2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-ctrl);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.row:hover .more,
+.row.sel .more,
+.more:focus-visible {
+  opacity: 1;
+}
+
+.more:hover {
   background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--accent);
 }

@@ -66,6 +66,14 @@ const placeholderIcon = computed(() =>
     @dblclick="emit('open', entry)"
     @contextmenu.prevent="emit('ctx', $event, entry)"
   >
+    <button
+      type="button"
+      class="gc-more"
+      title="更多操作（删除、重命名、下载…）"
+      @click.stop="emit('ctx', $event, entry)"
+    >
+      <Icon name="more" :size="12" />
+    </button>
     <div class="thumb">
       <template v-if="entry.isDir">
         <Icon name="folder" :size="44" class="ic dir" />
@@ -80,6 +88,7 @@ const placeholderIcon = computed(() =>
 
 <style scoped>
 .gc {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -100,6 +109,35 @@ const placeholderIcon = computed(() =>
 .gc.sel {
   background: var(--accent-soft);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* 更多菜单：hover 才显示；定位卡片右上角 */
+.gc-more {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text2);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border: 1px solid var(--stroke);
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.gc:hover .gc-more,
+.gc.sel .gc-more,
+.gc-more:focus-visible {
+  opacity: 1;
+}
+
+.gc-more:hover {
+  background: var(--surface);
+  color: var(--accent);
 }
 
 /* 图标位：96px 视窗内容 96×72 图区（Python iconSize 96 的扁化） */
