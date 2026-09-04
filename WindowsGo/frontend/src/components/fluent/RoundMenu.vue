@@ -13,7 +13,8 @@ const props = withDefaults(
     /** 锚点元素（getBoundingClientRect 定位） */
     anchor: HTMLElement | null
     items: {
-      label: string
+      /** 条目文案（divider 项忽略） */
+      label?: string
       /** 前置图标（可选） */
       icon?: string
       disabled?: boolean

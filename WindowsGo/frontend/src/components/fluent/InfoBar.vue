@@ -1,57 +1,14 @@
 <!--
-  InfoBar.vue —— 通知条（qfw InfoBar 对应物：右上角堆叠滑入）。
-  模块级静态 API：任意视图 import {showInfo/showSuccess/showWarning/showError}
-  即可弹条，无需在模板里挂组件（组件实例由下方 host 常驻渲染）。
-  行为：滑入 180ms、自动消失（info/success 3s，warning/error 5s）、可手动关闭。
-  同文案去重（1s 内相同消息不重复弹）。
+  InfoBar.vue —— 通知条渲染 host（qfw InfoBar 对应物：右上角堆叠滑入）。
+  队列与静态 API 在 lib/toast.ts（showInfo/showSuccess/showWarning/showError）；
+  本组件常驻挂在 App.vue，把队列渲染为右上角浮层。滑入 180ms；
+  图标与主题色语义：info→accent、success→ok、warning→warn、error→err。
 -->
-<script lang="ts">
-// —— 模块级通知队列（普通 script 块导出，供组件外直接调用）——
-import {reactive} from 'vue'
-
-export type InfoLevel = 'info' | 'success' | 'warning' | 'error'
-
-export interface ToastItem {
-  id: number
-  level: InfoLevel
-  message: string
-}
-
-let seq = 0
-let lastKey = ''
-let lastAt = 0
-
-/** 全局通知列表（响应式，host 组件渲染） */
-export const toasts = reactive<ToastItem[]>([])
-
-function push(level: InfoLevel, message: string, duration: number) {
-  const now = Date.now()
-  const key = level + '|' + message
-  // 同文案 1s 内去重：连续失败通知（如逐文件重试）不刷屏
-  if (key === lastKey && now - lastAt < 1000) return
-  lastKey = key
-  lastAt = now
-  const t: ToastItem = {id: ++seq, level, message}
-  toasts.push(t)
-  window.setTimeout(() => dismiss(t.id), duration)
-}
-
-/** 手动关闭（由关闭钮 / 超时调用） */
-export function dismiss(id: number) {
-  const i = toasts.findIndex((t) => t.id === id)
-  if (i >= 0) toasts.splice(i, 1)
-}
-
-export function showInfo(message: string) { push('info', message, 3000) }
-export function showSuccess(message: string) { push('success', message, 3000) }
-export function showWarning(message: string) { push('warning', message, 5000) }
-export function showError(message: string) { push('error', message, 5000) }
-</script>
-
 <script setup lang="ts">
-// —— host：常驻渲染右上角堆叠（普通 script 与 setup 同模块作用域，
-// toasts/dismiss 直接可用，无需自 import）——
+import {dismiss, toasts} from '../../lib/toast'
 import Icon from './Icon.vue'
+
+const iconOf = {info: 'info', success: 'completed', warning: 'feedback', error: 'cancel'} as const
 </script>
 
 <template>
@@ -65,11 +22,7 @@ import Icon from './Icon.vue'
           :class="'lv-' + t.level"
           role="status"
         >
-          <Icon
-            :name="{info: 'info', success: 'completed', warning: 'feedback', error: 'cancel'}[t.level]"
-            :size="16"
-            class="lv-icon"
-          />
+          <Icon :name="iconOf[t.level]" :size="16" class="lv-icon" />
           <span class="msg">{{ t.message }}</span>
           <button type="button" class="x" title="关闭" @click="dismiss(t.id)">
             <Icon name="cancel" :size="12" />

@@ -1,0 +1,127 @@
+/*
+ * layout.css —— 应用级布局骨架：三栏网格、底栏、工具栏通用样式。
+ *
+ * 对照 main_window.py 的动态布局：文件页 = 文件视图 + 预览面板
+ * （Splitter 分隔，初始 400:800 由 JS 记忆在 localStorage）；其余页
+ * 中栏全宽。根网格 = 48px 导航轨 | 内容区；底部分别是传输条（仅活动
+ * 时占位）与状态条。
+ */
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 48px 1fr; /* NavRail | 内容 */
+  grid-template-rows: 1fr auto auto; /* 内容 | TransferBar(可无) | StatusBar */
+  height: 100%;
+  background: var(--bg-page);
+}
+
+.app-nav {
+  grid-row: 1 / 4; /* 导航轨贯通到底（qfw ActivityBar 语义） */
+  grid-column: 1;
+}
+
+.app-main {
+  grid-row: 1;
+  grid-column: 2;
+  min-width: 0;
+  min-height: 0; /* 允许内部滚动区收缩 */
+  overflow: hidden;
+}
+
+.app-transfer {
+  grid-row: 2;
+  grid-column: 2;
+}
+
+.app-status {
+  grid-row: 3;
+  grid-column: 2;
+}
+
+/* ---- 文件页双栏（视图 + 预览），列宽由 Splitter 写 CSS 变量 ---- */
+.files-shell {
+  display: grid;
+  grid-template-columns: var(--split-l, 400px) 4px 1fr;
+  height: 100%;
+}
+
+/* 分隔拖柄：hover/拖动时高亮 */
+.split-handle {
+  grid-column: 2;
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.split-handle:hover,
+.split-handle.dragging {
+  background: var(--accent);
+}
+
+/* 拖动遮罩（覆盖全窗拦截指针，防拖出时选中文本/触发子元素） */
+.split-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  cursor: col-resize;
+}
+
+/* ---- 页面级工具栏（文件视图顶部动作行共用） ---- */
+.cp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.cp-toolbar .spacer {
+  flex: 1;
+}
+
+.cp-toolbar .sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 6px;
+  background: var(--divider);
+}
+
+/* 模式切换的选中态（视图图标钮组） */
+.toolbar-mode {
+  color: var(--text2);
+}
+
+.toolbar-mode.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* ---- 空态/引导占位（整页居中） ---- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+}
+
+.empty-state .lead {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--heading);
+}
+
+.empty-state .sub {
+  font-size: 0.857rem;
+  color: var(--text2);
+  max-width: 420px;
+  line-height: 1.5;
+}
+
+/* ---- 视图切换动画容器（base.css 的 .page-* 配合） ---- */
+.view-wrap {
+  height: 100%;
+}

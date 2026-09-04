@@ -17,8 +17,21 @@ import (
 // 与后端故障区分开：前者确定无法继续，后者可能瞬时。
 var errContainerShort = errors.New("streaming: 远端密文不足，容器不完整或已损坏")
 
+// setCommonHeaders 输出代理共用响应头。
+//
+// CORS：Wails 页面与代理端口不同源，<video>/<img> 标签不需要跨源许可，
+// 但前端文本预览用 fetch 拉取必须放行；代理仅监听回环且 URL 带一次性
+// 令牌、无 Cookie/凭据，放开 * 无实际安全面（记录于 docs/ARCHITECTURE
+// 差异清单「前端跨源拉取」）。
+func setCommonHeaders(h http.Header) {
+	h.Set("Access-Control-Allow-Origin", "*")
+	h.Set("X-Content-Type-Options", "nosniff")
+}
+
 // route 是代理入口：只认 GET/HEAD 与 /s/、/t/ 两种端点形态。
 func (s *Server) route(w http.ResponseWriter, r *http.Request) {
+	// 全部响应（含错误）统一带公共头，先于任何分支设置
+	setCommonHeaders(w.Header())
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
