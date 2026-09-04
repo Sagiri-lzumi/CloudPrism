@@ -32,9 +32,9 @@ func main() {
 		ensureWebView2Runtime()
 	}
 
-	// 阶段 5 在此构造 internal/appstate.State（唯一有状态对象），并把
-	// internal/bind 的 5 个域 struct 逐个注册进 Bind；当前仍是骨架阶段，
-	// 只挂占位宿主 App。
+	// 构造依赖图（internal/appstate.State + internal/bind 的 5 个域 struct），
+	// 全部注册进 Bind —— 域间互不依赖，避免单个巨型绑定对象撑爆
+	// wailsjs 生成物；宿主 App 只留生命周期钩子与全局操作。
 	app := NewApp()
 
 	if err := wails.Run(runtimeOptions(app)); err != nil {
@@ -94,9 +94,12 @@ func runtimeOptions(app *App) *options.App {
 		BackgroundColour: &options.RGBA{R: 0xFA, G: 0xFA, B: 0xFA, A: 0xFF},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
-		Windows:          winOpts,
+		// 系统级拖放在 startup 里经 wruntime.OnFileDrop 注册（见 app.go）
+		Windows: winOpts,
 		Bind: []interface{}{
 			app,
+			// 5 域：Vault/Files/Transfer/Settings/Preview
+			app.vault, app.files, app.transfer, app.settings, app.preview,
 		},
 	}
 }

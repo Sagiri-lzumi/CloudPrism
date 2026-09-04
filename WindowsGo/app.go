@@ -3,44 +3,123 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"runtime"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/appstate"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/bind"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/loggingx"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/platform/win"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/paths"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/settings"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/transfer"
 )
 
-// App 是骨架阶段的绑定宿主占位。
-//
-// 阶段 5 会把它替换为 internal/bind 下的 5 个域 struct
-// （VaultAPI / FilesAPI / TransferAPI / SettingsAPI / PreviewAPI），
-// 每个域各持 *appstate.State 且方法数 ≤ 12 —— 直接 Bind 一个 60+ 方法的
-// 巨型 struct 会让 Wails 生成单个无法维护的 wailsjs/go/main/App.js。
-// 届时本文件只保留生命周期钩子。
+// App 是 Wails 绑定宿主：承担生命周期钩子与 App 域（Quit/Version 等
+// 全局操作），并持有装配好的依赖图。业务编排都在 internal/appstate
+// （唯一有状态对象）与 internal/bind（5 个域 struct），本层不写逻辑。
 type App struct {
-	ctx context.Context
+	ctx      context.Context
+	holder   *bind.ContextHolder
+	log      *slog.Logger
+	closeLog func()
+
+	st     *appstate.State
+	events *bind.Events
+
+	// 5 个绑定域：域间互不依赖，共享同一 State 与 ContextHolder
+	vault    *bind.Vault
+	files    *bind.Files
+	transfer *bind.Transfer
+	settings *bind.Settings
+	preview  *bind.Preview
 }
 
-// NewApp 构造占位宿主。
-func NewApp() *App { return &App{} }
+// NewApp 构造依赖图：数据目录 → 日志 → 设置 → 传输队列 → 应用状态 →
+// 绑定域。wails build 的绑定生成阶段同样会执行本函数（bindings_mode.go
+// 只分流需要 GUI 的步骤），故这里不能有窗口/对话框等前台操作。
+func NewApp() *App {
+	paths.EnsureDataDir()
 
-// startup 由 Wails 在窗口创建后调用。
+	logger, closeLog := loggingx.New(paths.DataDir())
+
+	store, err := settings.Open(paths.SettingsFile())
+	if err != nil {
+		closeLog()
+		fatal("CloudPrism 启动失败", "设置存储初始化失败: "+err.Error())
+	}
+
+	st := appstate.New(appstate.Config{
+		Store: store,
+		Queue: transfer.New(),
+		Log:   logger,
+	})
+
+	holder := bind.NewContextHolder()
+	return &App{
+		holder:   holder,
+		log:      logger,
+		closeLog: closeLog,
+		st:       st,
+		vault:    bind.NewVault(st, holder),
+		files:    bind.NewFiles(st, holder),
+		transfer: bind.NewTransfer(st, holder),
+		settings: bind.NewSettings(st, holder),
+		preview:  bind.NewPreview(st, holder),
+	}
+}
+
+// startup 由 Wails 在窗口创建后调用：注入前台 context 并接上事件管线。
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.holder.Set(ctx)
+	// 系统级文件拖放（列表/预览页内部的拖放由前端自行处理）
+	wruntime.OnFileDrop(ctx, a.fileDropped)
+	// 状态帧合帧器（10Hz）在 State 构造之后才有前台 context 可用，
+	// 就绪后把事件出口接上（见 State.SetEmit 注释的装配顺序说明）
+	a.events = bind.NewEvents(ctx, a.st)
+	a.st.SetEmit(a.events.Forward)
+	a.log.Info("CloudPrism 启动完成", "mode", runModeLabel())
 }
 
-// shutdown 由 Wails 在退出前调用，负责收尾（停代理、落盘传输队列等）。
-func (a *App) shutdown(context.Context) {}
+// shutdown 收尾：停合帧 → 锁库收尾（落盘未完成任务/停代理/清会话）→ 关日志。
+func (a *App) shutdown(ctx context.Context) {
+	wruntime.OnFileDropOff(ctx)
+	if a.events != nil {
+		a.st.SetEmit(nil) // 退出阶段不再向已销毁的窗口广播
+		a.events.Close()
+	}
+	a.st.Lock()
+	a.log.Info("CloudPrism 退出")
+	a.closeLog()
+}
+
+// fileDropped 处理系统级文件拖放：转成事件给前端（载荷为本地路径列表，
+// 前端按当前目录发起上传）。
+func (a *App) fileDropped(_ int, _ int, paths []string) {
+	if a.events != nil {
+		a.events.Dropped(paths)
+	}
+}
+
+// runModeLabel 运行时/绑定生成模式的日志标识（排障时一眼区分）。
+func runModeLabel() string {
+	if generatingBindings {
+		return "bindings"
+	}
+	return "runtime"
+}
 
 // Ping 原样回传 token，用于验证前后端绑定往返是否打通。
 //
-// 这是阶段 2 spike 中 S1b 未能验证的一项（IDE 沙箱禁止 Chromium
-// 建立 Mojo IPC 通道）；骨架页启动即调用它，因此在沙箱外运行本程序
-// 就等于顺手完成了 S1b 验证。
+// 骨架阶段 S1b spike 未能在沙箱内验证的 Mojo IPC 通道，沙箱外运行本程序
+// 时由骨架页启动即调用完成验证；阶段 6 重写前端后可移除。
 func (a *App) Ping(token string) string { return "pong:" + token }
 
-// Version 汇总运行时诊断信息，骨架页启动即展示。
+// Version 汇总运行时诊断信息（骨架页与「关于」入口展示）。
 func (a *App) Version() string {
 	wv := win.RuntimeVersion()
 	if wv == "" {

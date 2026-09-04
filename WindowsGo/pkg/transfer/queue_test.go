@@ -354,6 +354,36 @@ func TestClearSuppressesCallbacks(t *testing.T) {
 	}
 }
 
+// TestRebindRestoresCallbacks draining 只服务于当前连接：Clear 后再次 Bind
+// （锁库 → 重新连接）必须恢复终态回调，否则新连接的任务进度/记录全静默。
+func TestRebindRestoresCallbacks(t *testing.T) {
+	b, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := bindQueue(t, b)
+
+	// 第一次连接内 Clear（模拟锁库打断）
+	q.Clear()
+
+	// 第二次连接：Bind 后入队并完成任务，终态回调应恢复
+	q.Bind(newSession(t), b, nil)
+	var cbCount atomic.Int32
+	q.OnTaskFinished = func(task *Task, success bool) { cbCount.Add(1) }
+	q.Runner = func(ctx context.Context, task *Task, report func(float64)) error { return nil }
+	local := writeLocal(t, t.TempDir(), "s.bin", []byte("x"))
+	task := NewTask(local, "f.cpenc", DirUpload)
+	q.Enqueue([]*Task{task})
+
+	waitIdle(t, q, 3*time.Second)
+	if got := cbCount.Load(); got != 1 {
+		t.Errorf("Rebind 后应恢复终态回调（1 次），实得 %d", got)
+	}
+	if s := task.Snapshot(); s.State != StateDone {
+		t.Errorf("Rebind 后任务应正常完成，实得 %s", s.State)
+	}
+}
+
 func (q *Queue) isTaskRunning(task *Task) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()

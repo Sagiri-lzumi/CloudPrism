@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/session"
@@ -51,6 +52,10 @@ const AutoRetries = 1
 // 时才可知，进度条需要一个先验值）；对照 transfer_queue.py:28。
 const HeaderEstimate = 51
 
+// 任务 ID 分配器：绑定层以 ID 为稳定句柄引用任务（快照无指针语义，
+// 前端无法持有 *Task，重试/移除必须靠 ID 定位）。
+var nextTaskID atomic.Int64
+
 // Task 是单个传输任务的状态载体。
 //
 // 与 Python dataclass(eq=False) 对齐：任务以指针身份比较，不做按值语义。
@@ -60,6 +65,7 @@ const HeaderEstimate = 51
 // mu 为指针字段是有意设计：队列需要跨 goroutine 锁任务，快照拷贝时
 // 不想连带锁对象（快照不可变，无人加锁）；指针化后值拷贝对调用方透明。
 type Task struct {
+	ID            int64   // 进程内稳定标识（NewTask 时分配，不参与持久化）
 	LocalPath     string  // 本地文件路径
 	RemotePath    string  // 后端上的目标路径（含 .cpenc）
 	DisplayName   string  // 界面显示名；空时取本地文件名
@@ -93,6 +99,7 @@ func (t *Task) Snapshot() Task {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return Task{
+		ID:            t.ID,
 		LocalPath:     t.LocalPath,
 		RemotePath:    t.RemotePath,
 		DisplayName:   t.DisplayName,
@@ -111,6 +118,7 @@ func (t *Task) Snapshot() Task {
 // NewTask 构造任务；Direction 缺省按 upload。
 func NewTask(localPath, remotePath, direction string) *Task {
 	t := &Task{
+		ID:         nextTaskID.Add(1),
 		LocalPath:  localPath,
 		RemotePath: remotePath,
 		Direction:  direction,
@@ -174,13 +182,32 @@ func New() *Queue {
 }
 
 // Bind 绑定一次成功连接（连接密库后调用），并唤醒可能因未绑定而停摆的调度。
+//
+// draining 随 Clear 置位、随新连接复位：draining 只服务于「当前连接内」的
+// 静默清场（锁库打断），下一次连接意味着新生命周期，终态回调必须恢复。
 func (q *Queue) Bind(session *session.Session, backend storage.Backend, kdfSalt []byte) {
 	q.mu.Lock()
 	q.Session = session
 	q.Backend = backend
 	q.KDFSalt = kdfSalt
+	q.draining = false
 	q.mu.Unlock()
 	q.kick()
+}
+
+// Options 是队列当前传输参数快照（线程安全读：AppState 的 Runner 在任务
+// 启动时实时取，避免直接读字段与 SetTransferOptions 写并发产生数据竞争）。
+type Options struct {
+	Chunk         int // 分块大小（字节）
+	MaxWorkers    int // 单任务并行加密核数
+	MaxConcurrent int // 并发任务数
+}
+
+// Options 返回当前传输参数快照。
+func (q *Queue) Options() Options {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return Options{Chunk: q.Chunk, MaxWorkers: q.MaxWorkers, MaxConcurrent: q.MaxConcurrent}
 }
 
 // SetTransferOptions 同步设置页的分块大小与并行加密核数。
@@ -316,6 +343,50 @@ func (q *Queue) HasActive() bool {
 
 // IsIdle 与 HasActive 相反。
 func (q *Queue) IsIdle() bool { return !q.HasActive() }
+
+// AllTasks 返回全部任务指针（按入队顺序；供绑定层按 ID 定位重试目标）。
+// 调用方不得持有指针跨终态使用——任务可能被 Clear/RemoveFinished 回收，
+// 定位后应立即完成操作。
+func (q *Queue) AllTasks() []*Task {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := make([]*Task, len(q.tasks))
+	copy(out, q.tasks)
+	return out
+}
+
+// FindByID 按任务 ID 定位任务指针；不存在返回 nil（任务已被回收/清除）。
+func (q *Queue) FindByID(id int64) *Task {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, t := range q.tasks {
+		t.lock()
+		match := t.ID == id
+		t.unlock()
+		if match {
+			return t
+		}
+	}
+	return nil
+}
+
+// RemoveFinished 移除全部终态任务（done/failed/cancelled），任务列表
+// 只保留可继续操作项。传输页「清空完成」按钮调用。
+func (q *Queue) RemoveFinished() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	kept := q.tasks[:0]
+	for _, t := range q.tasks {
+		t.lock()
+		finished := t.State == StateDone || t.State == StateFailed || t.State == StateCancelled
+		t.unlock()
+		if finished {
+			continue
+		}
+		kept = append(kept, t)
+	}
+	q.tasks = kept
+}
 
 // UnfinishedTasks 未完成（waiting/running）的任务快照（续传记录持久化用）。
 func (q *Queue) UnfinishedTasks() []Task {
