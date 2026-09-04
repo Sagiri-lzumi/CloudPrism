@@ -768,23 +768,23 @@ async function onOtherConfirm(payload: string | boolean) {
 .v-cards {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
+  gap: 18px;
   align-items: start;
-  padding: 16px;
+  padding: 18px;
 }
 
 .col {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
   min-width: 0;
 }
 
 .info-card .ic-head {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
+  gap: 14px;
+  margin-bottom: 16px;
 }
 
 .ic-badge {
@@ -796,7 +796,8 @@ async function onOtherConfirm(payload: string | boolean) {
   height: 44px;
   color: var(--accent);
   background: var(--accent-soft);
-  border-radius: 10px;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .ic-titles {
@@ -832,6 +833,7 @@ async function onOtherConfirm(payload: string | boolean) {
   font-size: 0.786rem;
   color: var(--muted);
   white-space: nowrap;
+  align-self: baseline;
 }
 
 .kv-v {
@@ -840,6 +842,7 @@ async function onOtherConfirm(payload: string | boolean) {
   color: var(--text);
   text-overflow: ellipsis;
   white-space: nowrap;
+  align-self: baseline;
 }
 
 .ic-actions {
@@ -871,6 +874,7 @@ async function onOtherConfirm(payload: string | boolean) {
   font-size: 0.929rem;
   font-weight: 600;
   color: var(--heading);
+  letter-spacing: 0.01em;
 }
 
 .chev {
