@@ -85,6 +85,24 @@ export const ui = reactive<Ui>({
 
 let started = false
 
+// 空闲轮询定时器：文件页 + 已连接 + 无传输进行中 + 距上次手动刷新 ≥ 1s → 静默刷一次
+let pollTimer: ReturnType<typeof setInterval> | null = null
+const POLL_MS = 5000
+
+function pollTick() {
+  if (!ui.snap?.connected) return
+  if (ui.page !== 'files') return
+  if (ui.snap.transferActive) return
+  if (ui.loading) return
+  if (Date.now() - lastManualReloadAt < 1000) return
+  refreshSilent()
+}
+
+// 上一帧传输态/任务清单：onFrame 用以检测「活动→静止」边界，触发文件列表静默刷新
+let wasTransferActive = false
+let wasTasks: appstate.TaskView[] = []
+let lastManualReloadAt = 0
+
 // 帧事件处理器固定引用（EventsOff 需要同一引用）
 function onFrame(payload: unknown) {
   const f = payload as {snap?: appstate.Snapshot; tasks?: appstate.TaskView[]}
@@ -98,6 +116,21 @@ function onFrame(payload: unknown) {
   if (!f.snap.connected) {
     if (ui.remote !== '') resetBrowse()
   }
+  // 上传批次收敛到当前目录 → 静默刷新一次（仅在文件页且仍连接时）
+  if (
+    wasTransferActive &&
+    !f.snap.transferActive &&
+    f.snap.connected &&
+    ui.page === 'files'
+  ) {
+    const wantRemote = ui.remote
+    const hit = wasTasks.some(
+      (t) => t.direction === 'upload' && t.remote === wantRemote,
+    )
+    if (hit) refreshSilent()
+  }
+  wasTransferActive = f.snap.transferActive
+  wasTasks = f.tasks ?? []
 }
 
 // op 阶段文案：仅置忙碌（后端不发射终态；复位走调用方 finally endOp + onFrame 兜底）
@@ -142,6 +175,7 @@ export function start() {
   EventsOn(evt.EvtOpError, onOpError)
   EventsOn(evt.EvtLocked, onLocked)
   EventsOn(evt.EvtDropped, onDropped)
+  if (!pollTimer) pollTimer = setInterval(pollTick, POLL_MS)
   void boot()
 }
 
@@ -155,6 +189,10 @@ export function stop() {
   EventsOff(evt.EvtOpError)
   EventsOff(evt.EvtLocked)
   EventsOff(evt.EvtDropped)
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
 }
 
 /** 启动引导：同步一次快照 + 应用设置（主题/字号，供设置页下拉回显）。 */
@@ -187,32 +225,68 @@ export function applyFontSize(px: number) {
 
 /* ------------------------------------------------------------ 浏览与选中 */
 
-/** 列目录：seq 代际防旧结果覆盖新目录。 */
-export async function listDir(remote: string) {
+/**
+ * 列目录：seq 代际防旧结果覆盖新目录。
+ * silent=true 时不置 loading、不清 sel，用于传输收敛与空闲轮询的静默刷新；
+ * 静默模式仍保留 seq 代际防护，仅在条目集合确实变化时写回 ui.entries，避免闪烁。
+ */
+export async function listDir(remote: string, opts: {silent?: boolean} = {}) {
   ui.seq++
   const seq = ui.seq
   ui.remote = remote
-  ui.loading = true
-  ui.loadError = ''
-  ui.sel = null
+  if (!opts.silent) {
+    ui.loading = true
+    ui.loadError = ''
+    ui.sel = null
+  }
   try {
     const entries = await Files.List(remote)
     if (seq !== ui.seq) return // 期间已切换目录
-    ui.entries = entries
+    if (opts.silent) {
+      // 仅在条目集合变化时写回，保留当前 sel 避免闪烁
+      if (!entriesEqual(ui.entries, entries)) {
+        ui.entries = entries
+        if (ui.sel && !entries.some((e) => e.remote === ui.sel!.remote)) {
+          ui.sel = null
+        }
+      }
+    } else {
+      ui.entries = entries
+    }
   } catch (e) {
     const err = unwrap(e)
     if (seq !== ui.seq) return
+    if (opts.silent) return // 静默失败不打扰用户
     ui.entries = []
     ui.loadError = err.message
     if (err.code !== ApiCode.Locked) showError('读取目录失败：' + err.message)
   } finally {
-    if (seq === ui.seq) ui.loading = false
+    if (seq === ui.seq && !opts.silent) ui.loading = false
   }
+}
+
+/** 静默刷新当前目录（不闪烁、不清选择）。失败静默。 */
+export function refreshSilent() {
+  if (ui.page !== 'files' || !ui.snap?.connected) return
+  void listDir(ui.remote, {silent: true})
+}
+
+/** 浅比较：条目集合变化（数量/remote 集合）时返回 false。 */
+function entriesEqual(
+  a: appstate.FileEntry[] | null,
+  b: appstate.FileEntry[],
+): boolean {
+  if (a === null) return false
+  if (a.length !== b.length) return false
+  const set = new Set(a.map((e) => e.remote))
+  for (const e of b) if (!set.has(e.remote)) return false
+  return true
 }
 
 /** 刷新当前目录（F5 / 传输结束后）；root=true 重置到密库根。 */
 export function reloadDir() {
   if (ui.page !== 'files') return
+  lastManualReloadAt = Date.now()
   void listDir(ui.remote)
 }
 
@@ -265,13 +339,13 @@ export function navigate(p: PageId) {
 
 /* ---------------------------------------------------------- 文件动作封装 */
 
-/** 选择并上传（工具栏/拖放/右键共用；remoteDir 缺省为当前浏览目录）。 */
+/** 选择并上传（工具栏/拖放/右键共用；remoteDir 缺省为当前浏览目录）。
+ *  注意：上传/下载结束后**不再**强制跳转传输页 —— 进度由底部 TransferBar
+ *  展示，用户想细看再点「详情」。批次收敛后由 onFrame 静默刷新当前目录。 */
 export async function uploadPaths(localPaths: string[], remoteDir: string = ui.remote) {
   try {
     await Transfer.Upload(localPaths, remoteDir)
     showInfo(`已加入上传队列：${localPaths.length} 项`)
-    // 传完由任务帧驱动；切到传输页让用户看到进度
-    ui.page = 'transfers'
   } catch (e) {
     showError('上传失败：' + unwrap(e).message)
   }
@@ -285,7 +359,7 @@ export async function downloadSel() {
     const dir = await Transfer.DownloadDialog()
     if (!dir) return // 用户取消
     await Transfer.Download([e], dir)
-    ui.page = 'transfers'
+    showInfo(`已开始下载：${e.display}`)
   } catch (err) {
     showError('下载失败：' + unwrap(err).message)
   }
