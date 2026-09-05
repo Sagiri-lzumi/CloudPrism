@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
+	"regexp"
 	"runtime"
+	"strings"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -89,6 +92,9 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.holder.Set(ctx)
+	// 前端产物指纹先落日志：用户反馈「界面不对」时凭 cloudprism.log 即可
+	// 自证所跑前端版本（曾发生便携目录错放旧 exe 导致改版看不到的教训）
+	a.log.Info("前端产物指纹", "assets", frontendFingerprint())
 	// 系统级文件拖放（列表/预览页内部的拖放由前端自行处理）
 	wruntime.OnFileDrop(ctx, a.fileDropped)
 	// 状态帧合帧器（10Hz）在 State 构造之后才有前台 context 可用，
@@ -108,6 +114,30 @@ func (a *App) shutdown(ctx context.Context) {
 	a.st.Lock()
 	a.log.Info("CloudPrism 退出")
 	a.closeLog()
+}
+
+// frontendFingerprint 从内嵌 dist 的 index.html 提取产物文件名
+// （index-<hash>.js/css），启动日志据此可核对界面实际加载的前端版本。
+// 提取失败或未命中（未来 Wails 压缩内嵌资源时）返回 unknown，不阻断启动。
+func frontendFingerprint() string {
+	raw, err := fs.ReadFile(assets, "frontend/dist/index.html")
+	if err != nil {
+		return "unknown"
+	}
+	re := regexp.MustCompile(`assets/(index-[\w-]+\.(?:css|js))`)
+	seen := map[string]bool{}
+	names := []string{}
+	for _, m := range re.FindAllSubmatch(raw, -1) {
+		name := string(m[1])
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return "unknown"
+	}
+	return strings.Join(names, " + ")
 }
 
 // fileDropped 处理系统级文件拖放：转成事件给前端（载荷为本地路径列表，
