@@ -252,6 +252,8 @@ WindowsGo/build/bin/
 WindowsGo/frontend/node_modules/
 # 图标包临时解包目录（仅构建期拉取 Lucide 用，勿入库）
 WindowsGo/frontend/.tmp-lucide/
+# 图标包临时解包目录（构建期拉取 Lucide 用，勿入库；lucide-icons 为早期试下载残留）
+WindowsGo/frontend/src/assets/lucide-icons/
 # Wails 用它判断 package.json 是否变化以决定是否重跑 npm install，属构建缓存
 WindowsGo/frontend/package.json.md5
 *.syso
