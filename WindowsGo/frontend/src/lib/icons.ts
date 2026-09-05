@@ -1,30 +1,48 @@
-// icons.ts —— Fluent 图标注册表。
+// icons.ts —— 图标注册表（Fluent 填充 + Lucide 线性 双源）。
 //
-// 源：assets/fluent-icons/*.svg —— 由 qfluentwidgets 内置资源（与 Python
-// 版 GUI 完全同源的微软 Fluent 图形）一次性导出，共 174 枚浅色版。
-// 图标以 SVG 原文内联进 Icon.vue，由 CSS fill: currentColor 随主题着色，
-// 明暗两套共用同一份图形。
+// 源 A：assets/fluent-icons/*.svg —— qfluentwidgets 内置微软 Fluent 实心
+// 图形（2048 坐标系，fill 型），作为默认与兜底；
+// 源 B：assets/lucide/*.svg —— Lucide 线性图标（24 坐标系，stroke 型），
+// 文件名与引用名一一对应（由 lucide 原图归一），**同名覆盖** fluent。
 //
-// 经 import.meta.glob 全量导入：eager + query '?raw' 在构建期把全部 SVG
-// 文本打进产物（合计约 250KB，gzip 后 <80KB），换取任意 IconName 零
-// 再编译直接可用。
+// STROKE_NAMES 记录所有来自 Lucide 的名字，Icon.vue 据此自动切 stroke
+// 渲染（fill:none + stroke:currentColor + 24 viewBox），其余走 fill。
 
-const raw = import.meta.glob('../assets/fluent-icons/*.svg', {
+const rawFlu = import.meta.glob('../assets/fluent-icons/*.svg', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>
+
+const rawLuc = import.meta.glob('../assets/lucide/*.svg', {
   query: '?raw',
   import: 'default',
   eager: true,
 }) as Record<string, string>
 
 function baseName(p: string): string {
-  // 形如 ../assets/fluent-icons/folder.svg → folder
+  // 形如 ../assets/xxx/folder.svg → folder
   const m = /\/([^/]+)\.svg$/.exec(p)
   return m ? m[1] : p
 }
 
-/** 全量图标表：key 为文件名（不含 .svg），值与 qfw FluentIcon 枚举名一一对应。 */
-export const ICONS: Readonly<Record<string, string>> = Object.freeze(
-  Object.fromEntries(Object.entries(raw).map(([p, s]) => [baseName(p), s])),
+const fluentIcons: Record<string, string> = Object.fromEntries(
+  Object.entries(rawFlu).map(([p, s]) => [baseName(p), s]),
 )
+const lucideIcons: Record<string, string> = Object.fromEntries(
+  Object.entries(rawLuc).map(([p, s]) => [baseName(p), s]),
+)
+
+/** 线性图标名集合（Lucide 源，stroke 渲染）。 */
+export const STROKE_NAMES: ReadonlySet<string> = Object.freeze(
+  new Set(Object.keys(lucideIcons)),
+)
+
+/** 全量图标表：Lucide 同名覆盖 Fluent；未覆盖名保持 Fluent 图形。 */
+export const ICONS: Readonly<Record<string, string>> = Object.freeze({
+  ...fluentIcons,
+  ...lucideIcons,
+})
 
 /** 图标名（字符串字面量联合，供 Icon.vue 的 name prop 静态校验）。 */
 export type IconName = keyof typeof ICONS
