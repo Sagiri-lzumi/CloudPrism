@@ -141,12 +141,10 @@ const ctxMulti = computed(
 function buildCtxItems(): CtxItem[] {
   const e = ctxEntry.value
   if (ctxMulti.value && e) {
-    // 多选批量菜单
+    // 多选批量菜单：精简版（去掉"复制明文名"歧义项，按主操作 + 危险分组）
     return [
       {label: `下载所选 ${ui.multi.length} 项`, icon: 'download'},
       {label: `解密导出所选 ${ui.multi.length} 项`, icon: 'share'},
-      {divider: true},
-      {label: '复制明文名（仅主条目）', icon: 'copy'},
       {divider: true},
       {label: `删除所选 ${ui.multi.length} 项`, icon: 'delete', danger: true},
       {label: '取消选择', icon: 'cancel'},
@@ -207,7 +205,7 @@ function openCtx(ev: MouseEvent, entry?: appstate.FileEntry | null) {
 }
 
 // 菜单项分发：索引 = ctxItems 数组下标（分隔线占位占下标，勿按视觉顺序改）
-//   批量 0下载 1导出 3复制主名 5删除 6取消；空白 0新建 1上传 3刷新
+//   批量 0下载 1导出 3删除 4取消；空白 0新建 1上传 3刷新
 //   目录 0打开 1建子夹 2上传 4下载 6复制路径 8重命名 9删除
 //   文件 0预览 1下载 2导出 4复制名 5复制路径 7重命名 8删除
 async function onCtx(i: number) {
@@ -216,9 +214,8 @@ async function onCtx(i: number) {
   if (ctxMulti.value && e) {
     if (i === 0) void downloadSel() // 批量下载
     else if (i === 1) void exportSel() // 批量导出
-    else if (i === 3) void copyEntryName(ui.multi[ui.multi.length - 1])
-    else if (i === 5) openMsg('delete') // 批量删除（危险确认）
-    else if (i === 6) clearMulti() // 取消选择
+    else if (i === 3) openMsg('delete') // 批量删除（危险确认）
+    else if (i === 4) clearMulti() // 取消选择
     return
   }
   if (!e) {
