@@ -65,6 +65,21 @@ Pop-Location
 $exe = Join-Path $root "build\bin\CloudPrismGo.exe"
 if (-not (Test-Path $exe)) { Fail "未找到构建产物 $exe" }
 
+# ---------- 产物自检 ----------
+# S1 前端嵌入断言：exe 内必须能找到 dist/index.html 引用的 css/js 文件名。
+# 曾发生「前端已改、dist 已重建，但发布目录里放的是旧 exe」的错配事故
+# （v15-dir 曾错放 v14 exe），此处直接扫 exe 字节验证内嵌资源与 dist 一致，
+# 不一致立即失败，杜绝「打包了却看不到改动」类问题。
+$html = Get-Content (Join-Path $root "frontend\dist\index.html") -Raw
+$assetHashes = [regex]::Matches($html, 'assets/(index-[\w-]+\.(?:css|js))') | ForEach-Object { $_.Groups[1].Value }
+if (-not $assetHashes) { Fail "dist/index.html 未解析到产物文件名，S1 自检无法执行" }
+$exeBytes = [IO.File]::ReadAllBytes($exe)
+$exeText = [Text.Encoding]::UTF8.GetString($exeBytes)
+foreach ($h in $assetHashes) {
+    if (-not $exeText.Contains($h)) { Fail "前端产物 $h 未嵌入 exe（dist 与 exe 不一致），请重新 wails build" }
+}
+Write-Host "[release] S1 通过：exe 已嵌入前端产物 $($assetHashes -join ' + ')" -ForegroundColor Green
+
 # ---------- 4. 组装双形态产物 ----------
 Step "[3/4] 组装 $ver-dir"
 if (Test-Path $dirOut) { Remove-Item $dirOut -Recurse -Force }
@@ -149,6 +164,27 @@ Step "[4/4] 组装 $ver-exe"
 if (Test-Path $exeOut) { Remove-Item $exeOut -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $exeOut | Out-Null
 Copy-Item $exe $exeOut
+
+# S2 双形态一致性断言：-dir 与 -exe 两处 exe 必须逐字节一致（防装错产物）
+$hashDir = (Get-FileHash (Join-Path $dirOut "CloudPrismGo.exe") -Algorithm MD5).Hash
+$hashExe = (Get-FileHash (Join-Path $exeOut "CloudPrismGo.exe") -Algorithm MD5).Hash
+if ($hashDir -ne $hashExe) {
+    Fail "S2 失败：-dir 与 -exe 的 exe 不一致（dir=$hashDir exe=$hashExe），疑似装错产物"
+}
+Write-Host "[release] S2 通过：双形态 exe 一致（MD5=$hashDir）" -ForegroundColor Green
+
+# S3 指纹清单：构建时间 / 双 exe MD5 / 前端产物名落盘，供用户核对所跑版本
+$stampLines = @(
+    "CloudPrismGo $ver 构建指纹",
+    "时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+    "-dir exe MD5: $hashDir",
+    "-exe exe MD5: $hashExe",
+    "前端产物: $($assetHashes -join ' + ')",
+    "自检: S1 嵌入断言通过 / S2 双形态一致通过"
+)
+$md5File = Join-Path $relRoot "$ver-MD5.txt"
+[System.IO.File]::WriteAllLines($md5File, $stampLines, (New-Object System.Text.UTF8Encoding($true)))
+Write-Host ("[release] 指纹清单: {0}" -f $md5File)
 
 # ---------- 收尾 ----------
 $dirSize = (Get-ChildItem $dirOut -Recurse -File | Measure-Object Length -Sum).Sum
