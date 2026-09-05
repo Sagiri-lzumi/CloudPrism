@@ -93,14 +93,14 @@ const multiMode = computed(() => ui.multi.length > 1)
         <Icon name="more" :size="14" />
       </button>
     </div>
-    <!-- 缩略图：让位 14px 给 header band，宽 110 高 44 -->
+    <!-- 缩略图：96px 与 Python side_panel iconSize 对齐，header band 在上方独立不挤压此区 -->
     <div class="thumb">
       <template v-if="entry.isDir">
-        <Icon name="folder" :size="36" class="ic dir" />
+        <Icon name="folder" :size="56" class="ic dir" />
       </template>
       <img v-else-if="thumb" :src="thumb" class="img" alt="" draggable="false" @error="fail = true" />
-      <Icon v-else-if="loading" name="sync" :size="20" class="ic spin" />
-      <Icon v-else :name="placeholderIcon" :size="32" class="ic" :class="{err: fail}" />
+      <Icon v-else-if="loading" name="sync" :size="28" class="ic spin" />
+      <Icon v-else :name="placeholderIcon" :size="48" class="ic" :class="{err: fail}" />
     </div>
     <figcaption class="name" :title="entry.display">{{ entry.display }}</figcaption>
   </figure>
@@ -191,13 +191,13 @@ const multiMode = computed(() => ui.multi.length > 1)
   background: color-mix(in srgb, var(--surface) 85%, transparent);
 }
 
-/* 缩略图：让位 22px+2px 给 header band，宽 110 高 44 */
+/* 缩略图：96px 与 Python side_panel iconSize 对齐；header band 独立在上方不挤压此区 */
 .thumb {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 44px;
+  height: 96px;
   padding: 0 6px;
 }
 
@@ -215,7 +215,7 @@ const multiMode = computed(() => ui.multi.length > 1)
 
 .img {
   max-width: 98px;
-  max-height: 44px;
+  max-height: 96px;
   object-fit: contain;
 }
 
