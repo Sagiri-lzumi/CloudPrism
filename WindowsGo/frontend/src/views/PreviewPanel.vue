@@ -146,11 +146,12 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
           <div class="ring"><ProgressBar indeterminate /></div>
         </div>
 
-        <!-- 视频 / 音频：令牌流内嵌播放器 -->
+        <!-- 视频 / 音频：令牌流内嵌播放器（remote 用于记忆续播 key） -->
         <MediaPlayer
           v-else-if="url && (kind === 'video' || kind === 'audio')"
           :url="url"
           :display="sel.display"
+          :remote="sel.remote"
         />
 
         <!-- 图片：代理 URL 直显 -->

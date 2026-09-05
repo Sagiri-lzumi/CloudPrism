@@ -1,15 +1,20 @@
 <!--
   MediaPlayer.vue —— 令牌化解密流的自绘播放器（预览面板内嵌）。
   对应 Python PlayerWidget：不做落盘，明文仅在 WebView 与 Go 代理内存中
-  流动。能力：播放/暂停、进度拖动（change 才 seek —— 拖动过程只是预览
-  时间，避免逐像素触发后端 Range 解密）、当前/总时长、音量与静音。
-  失败兜底：错误横幅 + 「解密导出到本地」按钮（Go Export 弹目录框）。
+  流动。能力：播放/暂停、进度拖动（change 才 seek）、当前/总时长、音量与静音。
+
+  本轮 v8 调整：
+  · 进入预览**不自动播放**（v7 行为：watch url 即 el.play() 自动起播），挂载后只
+    预载 metadata，等用户点中央大钮/底条小钮才 start。
+  · **记忆续播**：上次播放位置按 props.remote（密文路径）作 key 写入
+    localStorage（cp.video.resume.{remote}）。再次进入同一文件时 seek 到
+    该位置，但**不恢复播放**（仍需用户点播放）。播到末尾自动清除记忆。
+  · 错误兜底仅展示原因，**不再提供「导出到本地」按钮**（用户认为该功能
+    冗余；文件页/批量下载等已完整覆盖解密导出场景）。
 -->
 <script setup lang="ts">
 import {computed, nextTick, onBeforeUnmount, ref, watch} from 'vue'
 import {fmtDur} from '../../lib/format'
-import {exportSel} from '../../lib/store'
-import Button from '../fluent/Button.vue'
 import Icon from '../fluent/Icon.vue'
 
 const props = defineProps<{
@@ -17,24 +22,87 @@ const props = defineProps<{
   url: string
   /** 远端展示名（信息行用） */
   display: string
+  /** 远端路径（密文相对路径），记忆续播 localStorage key；空则不落盘 */
+  remote?: string
 }>()
 
 const v = ref<HTMLVideoElement | null>(null)
 
 const playing = ref(false)
 const muted = ref(false)
-/** 缓冲期（切源后等待 metadata） */
 const ready = ref(false)
 const failed = ref(false)
 const duration = ref(0)
 const current = ref(0)
-/** 拖动中的临时进度（秒）；null = 未在拖动 */
 const dragPos = ref<number | null>(null)
 const volume = ref(1)
 
 const shownPos = computed(() => dragPos.value ?? current.value)
+const currentRemote = computed(() => props.remote ?? '')
 
-/** 播放/暂停切换（中央大钮与底条小钮共用）。 */
+/* ----------------------------------------------- 记忆续播（localStorage） */
+
+const RESUME_PREFIX = 'cp.video.resume.'
+/** 仅播放到 ≥2s 才落盘（避免初始化阶段覆盖） */
+const RESUME_MIN = 2
+/** 进度写盘节流 5s（timeupdate 频繁，只节流落盘，不影响 UI 进度） */
+const RESUME_FLUSH_MS = 5000
+
+function loadResume(remote: string): number | null {
+  if (!remote) return null
+  try {
+    const raw = localStorage.getItem(RESUME_PREFIX + remote)
+    if (!raw) return null
+    const sec = Number(raw)
+    return Number.isFinite(sec) && sec >= RESUME_MIN ? sec : null
+  } catch {
+    return null
+  }
+}
+
+function saveResume(remote: string, sec: number) {
+  if (!remote) return
+  try {
+    localStorage.setItem(RESUME_PREFIX + remote, String(sec))
+  } catch {
+    /* 隐私模式/已满：忽略 */
+  }
+}
+
+function clearResume(remote: string) {
+  if (!remote) return
+  try {
+    localStorage.removeItem(RESUME_PREFIX + remote)
+  } catch {
+    /* ignore */
+  }
+}
+
+let resumeTimer: ReturnType<typeof setTimeout> | null = null
+function flushResume() {
+  if (resumeTimer) {
+    clearTimeout(resumeTimer)
+    resumeTimer = null
+  }
+  const el = v.value
+  const remote = currentRemote.value
+  if (!el || !remote) return
+  saveResume(remote, el.currentTime)
+}
+function scheduleSave() {
+  if (resumeTimer) return
+  resumeTimer = setTimeout(() => {
+    resumeTimer = null
+    const el = v.value
+    const remote = currentRemote.value
+    if (!el || !remote) return
+    // 暂停态/失败态不写记忆（用户可能不再继续看）
+    if (playing.value) saveResume(remote, el.currentTime)
+  }, RESUME_FLUSH_MS)
+}
+
+/* -------------------------------------------------- 控件 */
+
 function togglePlay() {
   const el = v.value
   if (!el || failed.value) return
@@ -42,7 +110,6 @@ function togglePlay() {
   else el.pause()
 }
 
-/** 进度条拖动：拖动过程只更新显示，松手才 seek（省后端 Range 请求）。 */
 function seekCommit() {
   if (dragPos.value == null || !v.value) return
   v.value.currentTime = dragPos.value
@@ -64,29 +131,65 @@ function onVol(e: Event) {
   el.muted = muted.value
 }
 
-// 切源（换选中文件）→ 重置状态并重载
+function onTimeUpdate() {
+  if (dragPos.value != null) return
+  const el = v.value
+  if (!el) return
+  current.value = el.currentTime
+  // 接近末尾（剩 1s 内）→ 清除记忆，下次进入从 0 开始
+  if (el.duration > 0 && el.currentTime >= el.duration - 1 && currentRemote.value) {
+    clearResume(currentRemote.value)
+    return
+  }
+  scheduleSave()
+}
+
+function onPause() {
+  // 暂停立即落盘（用户主动停的，记忆有意义）
+  flushResume()
+}
+
+function onEnded() {
+  // 播放结束清记忆（避免下次从末尾进入）
+  const remote = currentRemote.value
+  if (remote) clearResume(remote)
+}
+
+/* ----------------------------------------------- 切源：预载 + 记忆续播 seek（不自动播） */
+
 watch(
   () => props.url,
   async (url) => {
+    // 切源前 flush 旧源记忆
+    flushResume()
     failed.value = false
     ready.value = false
     duration.value = 0
     current.value = 0
     dragPos.value = null
     if (!url) return
+    const last = loadResume(currentRemote.value)
     await nextTick()
     const el = v.value
-    if (el) {
-      el.load()
-      // 用户已在本会话播放过（有交互手势权限），尽量续播
-      void el.play().catch(() => {})
+    if (!el) return
+    el.load()
+    // 有记忆则 seek 到该位置；不自动 play（保持手动）
+    if (last != null) {
+      const seekWhenReady = () => {
+        if (el.readyState >= 1 && el.duration > 0) {
+          el.currentTime = Math.min(last, Math.max(0, el.duration - 0.5))
+        } else {
+          setTimeout(seekWhenReady, 120)
+        }
+      }
+      seekWhenReady()
     }
   },
   {immediate: true},
 )
 
 onBeforeUnmount(() => {
-  // 停止解码，让代理连接尽快关闭（换条目会先 revoke token）
+  flushResume()
   v.value?.pause()
 })
 </script>
@@ -99,23 +202,22 @@ onBeforeUnmount(() => {
       :src="url"
       preload="metadata"
       @loadedmetadata="(e: Event) => {duration = (e.target as HTMLVideoElement).duration; ready = true}"
-      @timeupdate="(e: Event) => {if (dragPos == null) current = (e.target as HTMLVideoElement).currentTime}"
       @durationchange="(e: Event) => {duration = (e.target as HTMLVideoElement).duration; ready = true}"
+      @timeupdate="onTimeUpdate"
       @play="playing = true"
-      @pause="playing = false"
-      @ended="playing = false; current = duration"
+      @pause="onPause"
+      @ended="onEnded"
       @error="failed = true"
       @click="togglePlay"
     ></video>
 
-    <!-- 解码失败横幅：红字 + 落盘兜底（系统播放器播放导出文件） -->
+    <!-- 解码失败：仅展示原因，不再提供导出入口 -->
     <div v-if="failed" class="err" role="alert">
       <p class="err-msg">无法解码此媒体（或后端流式响应异常）。</p>
-      <p class="err-sub">可先解密导出到本地，再用系统播放器打开。</p>
-      <Button icon="download" @click="exportSel">导出到本地</Button>
+      <p class="err-sub">请用系统播放器打开该格式，或检查后端连接。</p>
     </div>
 
-    <!-- 中央播放钮（暂停态悬浮） -->
+    <!-- 中央播放钮（暂停/未播时悬浮） -->
     <button
       v-if="!playing && !failed"
       type="button"
@@ -174,7 +276,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #000; /* 视频区黑底（图片文本不走此组件） */
+  background: #000;
 }
 
 .surface {
@@ -216,7 +318,6 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 底条：播放控制 + 进度 + 音量 */
 .bar {
   display: flex;
   align-items: center;
@@ -257,7 +358,6 @@ onBeforeUnmount(() => {
   color: var(--text2);
 }
 
-/* range 进度条/音量条统一样式（webkit 桌面渲染） */
 .seek,
 .vol {
   --track: color-mix(in srgb, var(--text) 20%, transparent);
@@ -292,7 +392,6 @@ onBeforeUnmount(() => {
   opacity: 0.4;
 }
 
-/* 错误横幅 */
 .err {
   position: absolute;
   inset: 0;
@@ -308,7 +407,7 @@ onBeforeUnmount(() => {
 
 .err-msg {
   margin: 0;
-  color: #d13438; /* 语义红固定值：黑底上的高对比（主题 err 深色下偏亮） */
+  color: #d13438;
   font-weight: 600;
 }
 
