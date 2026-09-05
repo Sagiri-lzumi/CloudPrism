@@ -170,7 +170,7 @@ const menuStyle = computed(() => ({left: pos.value.left + 'px', top: pos.value.t
   padding: 4px;
   background: var(--surface);
   border: 1px solid var(--stroke-card);
-  border-radius: 6px;
+  border-radius: var(--radius-card); /* 与卡片/弹层圆角口径一致 */
   box-shadow: var(--shadow-pop);
 }
 

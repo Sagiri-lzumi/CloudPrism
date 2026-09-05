@@ -104,10 +104,12 @@ function splitEnd() {
   localStorage.setItem(SPLIT_KEY, String(splitL.value))
 }
 
-/* --------------------------------------------------------- 右键菜单 */
+/* --------------------------------------------------------- 右键/更多菜单 */
 
-// 菜单 items 按目标动态生成，索引即动作：
-//   blank=无目标；multi=多选批量；dir=目录；file=文件
+// 菜单 items 是**唯一事实源**：右键、列表行 ⋯、网格卡 ⋯ 三条入口
+// 全部经由 openCtx → ctxItems 取同一份内容，保证任意入口弹出的菜单一致。
+// 目标类型优先级：multi=多选批量（目标 ∈ 当前多选集且 >1 项）→
+//   blank=无目标（空白区）→ dir=目录 → file=文件
 interface CtxItem {
   label?: string
   icon?: string
@@ -128,7 +130,8 @@ const ctxMulti = computed(
     ui.multi.some((x) => x.remote === ctxEntry.value!.remote),
 )
 
-const ctxItems = computed<CtxItem[]>(() => {
+/** 构建目标上下文菜单项（索引含分隔线占位，onCtx 按下标分发，两者必须同步改）。 */
+function buildCtxItems(): CtxItem[] {
   const e = ctxEntry.value
   if (ctxMulti.value && e) {
     // 多选批量菜单
@@ -173,23 +176,20 @@ const ctxItems = computed<CtxItem[]>(() => {
     {label: '重命名', icon: 'edit'},
     {label: '删除', icon: 'delete', danger: true},
   ]
-})
+}
 
-function openCtx(e: MouseEvent | [MouseEvent, appstate.FileEntry], entry?: appstate.FileEntry) {
-  // Vue 3 组件事件内联 handler 名（无括号）= 把整个 emit payload 作为**单参数**
-  // 传 handler。GridCard emit('ctx', ev, entry) → 父级 @ctx="openCtx" 调
-  // openCtx([ev, entry])。Zone 右键 openCtx($event, null) 走单参数分支。
-  // 兼容两种调用形参。
-  const ev: MouseEvent = Array.isArray(e) ? (e[0] as MouseEvent) : e
-  const ent: appstate.FileEntry | null = Array.isArray(e)
-    ? (e[1] as appstate.FileEntry | undefined) ?? null
-    : (entry ?? null)
-  // 右键目标在集合内则保留多选，否则单选该目标
-  if (ent) {
-    if (!(hasMulti.value && ui.multi.some((x) => x.remote === ent!.remote))) {
-      selectEntry(ent)
-    }
-  }
+// 响应式取用单一事实源；任何入口改动 ctxEntry 都会经此重算菜单内容
+const ctxItems = computed<CtxItem[]>(() => buildCtxItems())
+
+function openCtx(ev: MouseEvent, entry?: appstate.FileEntry | null) {
+  // 所有入口都显式内联传参：GridCard @ctx="openCtx($event, e)"、列表行
+  // @contextmenu/@click ⋯、空白区 openCtx($event, undefined)，不依赖
+  // 组件 emit 的传参语义，杜绝「目标丢失弹空白菜单」类问题。
+  const ent: appstate.FileEntry | null = entry ?? null
+  // 先判定：目标已是当前多选集合成员且 >1 项 → 保留多选并弹批量菜单；
+  // 否则把该目标收敛为单选（selectEntry 会重置 multi 为单元素）。
+  const inMulti = !!ent && ui.multi.length > 1 && ui.multi.some((x) => x.remote === ent!.remote)
+  if (ent && !inMulti) selectEntry(ent)
   ctxEntry.value = ent
   // 菜单跟随光标弹出：记录鼠标坐标（RoundMenu position 优先于元素锚点）
   ctxPos.value = {x: ev.clientX, y: ev.clientY}
@@ -199,6 +199,10 @@ function openCtx(e: MouseEvent | [MouseEvent, appstate.FileEntry], entry?: appst
   ctxOpen.value = true
 }
 
+// 菜单项分发：索引 = ctxItems 数组下标（分隔线占位占下标，勿按视觉顺序改）
+//   批量 0下载 1导出 3复制主名 5删除 6取消；空白 0新建 1上传 3刷新
+//   目录 0打开 1建子夹 2上传 4下载 6复制路径 8重命名 9删除
+//   文件 0预览 1下载 2导出 4复制名 5复制路径 7重命名 8删除
 async function onCtx(i: number) {
   const e = ctxEntry.value
   // —— 多选批量菜单 ——
@@ -380,7 +384,7 @@ function confirmDlg(payload: string | boolean) {
       <!-- 多选批量条：>1 项时展示，一键下载/导出/删除/取消 -->
       <Transition name="fade">
         <div v-if="hasMulti" class="multi-bar">
-          <Icon name="check" :size="15" class="mb-check" />
+          <Icon name="square-check" :size="15" class="mb-check" />
           <span class="mb-text">已选 {{ multiSel.length }} 项</span>
           <span class="mb-actions">
             <Button icon="download" :disabled="!connected" @click="downloadSel">下载</Button>
@@ -452,7 +456,7 @@ function confirmDlg(payload: string | boolean) {
                 :entry="e"
                 @select="onItemClick"
                 @open="enterDir"
-                @ctx="openCtx"
+                @ctx="openCtx($event, e)"
               />
             </div>
 
@@ -539,11 +543,19 @@ function confirmDlg(payload: string | boolean) {
   height: 100%;
 }
 
+/* 双栏（grid 骨架在 layout.css）：作为 flex 子项用 flex 拉伸，勿再用 height:100%，
+   否则多选批量条出现时内容区会被顶出视口 */
+.files-shell {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
 .dim {
   color: var(--text2);
 }
 
-/* 行多选勾选（square-check 图标自带蓝底白勾） */
+/* 行多选勾选（lucide square-check：描边勾选框，随 accent 着色） */
 .row-check {
   flex: none;
   color: var(--accent);

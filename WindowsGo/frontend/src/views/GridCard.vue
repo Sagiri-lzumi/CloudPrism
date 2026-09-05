@@ -71,15 +71,18 @@ function isSel(e: appstate.FileEntry): boolean {
     @dblclick="emit('open', entry)"
     @contextmenu.prevent="emit('ctx', $event, entry)"
   >
-    <Icon v-if="isSel(entry)" name="square-check" :size="16" class="gc-check" />
-    <button
-      type="button"
-      class="gc-more"
-      title="更多操作（删除、重命名、下载…）"
-      @click.stop="emit('ctx', $event, entry)"
-    >
-      <Icon name="more" :size="12" />
-    </button>
+    <!-- 顶部操作条：⋯ 与勾选角标只落在这条留白带内，绝不压住下方图区 -->
+    <div class="gc-top">
+      <Icon v-if="isSel(entry)" name="square-check" :size="15" class="gc-check" />
+      <button
+        type="button"
+        class="gc-more"
+        title="更多操作（与右键菜单一致）"
+        @click.stop="emit('ctx', $event, entry)"
+      >
+        <Icon name="more" :size="12" />
+      </button>
+    </div>
     <div class="thumb">
       <template v-if="entry.isDir">
         <Icon name="folder" :size="44" class="ic dir" />
@@ -100,10 +103,10 @@ function isSel(e: appstate.FileEntry): boolean {
   align-items: center;
   gap: 4px;
   width: 96px;
-  padding: 8px 4px 6px;
+  padding: 0 4px 6px;
   margin: 0;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-card);
   cursor: default;
   user-select: none;
 }
@@ -117,30 +120,38 @@ function isSel(e: appstate.FileEntry): boolean {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
-/* 更多菜单：hover 才显示；定位卡片右上角 */
+/* 顶部操作条：常驻 20px 高留白带（透明），悬停/选中时显示其中控件。
+   图区从本带之下开始，保证 ⋯ 与勾选角标永远不遮挡缩略图/图标。 */
+.gc-top {
+  position: relative;
+  width: 100%;
+  height: 20px;
+  flex: none;
+}
+
+/* 更多按钮：操作带右上角；不透明底 + 描边 */
 .gc-more {
   position: absolute;
-  top: 4px;
-  right: 4px;
+  top: 0;
+  right: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 20px;
   height: 20px;
   color: var(--text2);
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: 4px;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
-/* 选中标记：square-check 图标自带蓝底白勾，直接放卡片左上角 */
+/* 选中标记：lucide square-check 为描边勾选框，随 accent 着色，放操作带左上角 */
 .gc-check {
   position: absolute;
   top: 2px;
   left: 4px;
-  z-index: 1;
 }
 
 .gc:hover .gc-more,
@@ -150,11 +161,11 @@ function isSel(e: appstate.FileEntry): boolean {
 }
 
 .gc-more:hover {
-  background: var(--surface);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--accent);
 }
 
-/* 图标位：96px 视窗内容 96×72 图区（Python iconSize 96 的扁化） */
+/* 图标位：96px 视窗内容 96×64 图区（Python iconSize 96 的扁化） */
 .thumb {
   display: flex;
   align-items: center;

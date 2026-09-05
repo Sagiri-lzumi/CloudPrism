@@ -37,6 +37,38 @@ const current = ref(0)
 const dragPos = ref<number | null>(null)
 const volume = ref(1)
 
+// 中央大播放钮仅「鼠标在媒体区活动时」短暂显示，静止/移出即淡出，
+// 避免未播放时一直悬浮遮挡首帧画面（v8 起不自动播放，首帧停留最常见）
+const showCtrl = ref(false)
+const CTRL_HIDE_MS = 2500
+let ctrlTimer: ReturnType<typeof setTimeout> | null = null
+
+function pokeCtrl() {
+  showCtrl.value = true
+  if (ctrlTimer) clearTimeout(ctrlTimer)
+  ctrlTimer = setTimeout(() => {
+    if (!playing.value) showCtrl.value = false
+  }, CTRL_HIDE_MS)
+}
+
+function onMediaLeave() {
+  showCtrl.value = false
+  if (ctrlTimer) {
+    clearTimeout(ctrlTimer)
+    ctrlTimer = null
+  }
+}
+
+// 播放中不显示中央钮；播放状态翻转时立即隐藏并清计时
+watch(playing, (p) => {
+  if (!p) return
+  showCtrl.value = false
+  if (ctrlTimer) {
+    clearTimeout(ctrlTimer)
+    ctrlTimer = null
+  }
+})
+
 const shownPos = computed(() => dragPos.value ?? current.value)
 const currentRemote = computed(() => props.remote ?? '')
 
@@ -191,11 +223,15 @@ watch(
 onBeforeUnmount(() => {
   flushResume()
   v.value?.pause()
+  if (ctrlTimer) {
+    clearTimeout(ctrlTimer)
+    ctrlTimer = null
+  }
 })
 </script>
 
 <template>
-  <div class="cp-media" :class="{failed}">
+  <div class="cp-media" :class="{failed}" @pointermove="pokeCtrl" @pointerleave="onMediaLeave">
     <video
       ref="v"
       class="surface"
@@ -217,17 +253,20 @@ onBeforeUnmount(() => {
       <p class="err-sub">请用系统播放器打开该格式，或检查后端连接。</p>
     </div>
 
-    <!-- 中央播放钮（暂停/未播时悬浮） -->
-    <button
-      v-if="!playing && !failed"
-      type="button"
-      class="big-play"
-      :title="ready ? '播放' : '加载中…'"
-      :disabled="!ready"
-      @click="togglePlay"
-    >
-      <Icon :name="ready ? 'play' : 'sync'" :size="30" :class="{spin: !ready}" />
-    </button>
+    <!-- 中央播放钮（暂停且鼠标活动时悬浮；静止 2.5s/移出/播放即淡出，
+         保证首帧画面不被遮挡，点击视频画面本身亦可起播） -->
+    <Transition name="fade">
+      <button
+        v-if="showCtrl && !playing && !failed"
+        type="button"
+        class="big-play"
+        :title="ready ? '播放' : '加载中…'"
+        :disabled="!ready"
+        @click="togglePlay"
+      >
+        <Icon :name="ready ? 'play' : 'sync'" :size="30" :class="{spin: !ready}" />
+      </button>
+    </Transition>
 
     <!-- 底条控制 -->
     <div v-if="!failed" class="bar">
@@ -310,6 +349,17 @@ onBeforeUnmount(() => {
 
 .spin {
   animation: cpspin 1.2s linear infinite;
+}
+
+/* 中央钮淡入淡出（避免显隐生硬跳变） */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity var(--dur) var(--ease);
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 @keyframes cpspin {
