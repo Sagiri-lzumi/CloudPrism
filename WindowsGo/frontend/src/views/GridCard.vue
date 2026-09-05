@@ -72,18 +72,18 @@ function isSel(e: appstate.FileEntry): boolean {
     @dblclick="emit('open', entry)"
     @contextmenu.prevent="emit('ctx', {ev: $event, entry})"
   >
-    <!-- 选中徽章：浮出卡片左上角外（不挡图）；18px 圆形 accent 底 + 白色对勾 -->
+    <!-- 选中徽章：叠在缩略图左上角内（仿 Windows 资源管理器选中态），不会被滚动容器裁剪 -->
     <span v-if="isSel(entry)" class="gc-check" aria-hidden="true">
-      <Icon name="check" :size="14" class="gc-check-ic" />
+      <Icon name="check" :size="11" class="gc-check-ic" />
     </span>
-    <!-- 更多按钮：浮出卡片右上角外；无背景框，仅 hover 显现；命中区 ≥ 24px -->
+    <!-- 更多按钮：叠在缩略图右上角内，hover 时显半透明底，命中区与图标同尺寸 -->
     <button
       type="button"
       class="gc-more"
       title="更多操作（与右键菜单一致）"
       @click.stop="emit('ctx', {ev: $event, entry})"
     >
-      <Icon name="more" :size="12" />
+      <Icon name="more" :size="14" />
     </button>
     <div class="thumb">
       <template v-if="entry.isDir">
@@ -105,7 +105,7 @@ function isSel(e: appstate.FileEntry): boolean {
   align-items: center;
   gap: 4px;
   width: 96px;
-  padding: 8px 4px 6px;
+  padding: 4px 4px 6px;
   margin: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-card);
@@ -122,23 +122,24 @@ function isSel(e: appstate.FileEntry): boolean {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
-/* 更多按钮：浮出卡片右上角外（top/right 负值），无背景框，仅显示图标；
-   box 自身 ≥ 24px 保证命中区域，hover/选中时显现 */
+/* 更多按钮：卡片右上角内 overlay；无背景框、仅图标；
+   box 18×18，hover/选中时显半透明 surface 底（点击更稳） */
 .gc-more {
   position: absolute;
-  top: -8px;
-  right: -8px;
+  top: 2px;
+  right: 2px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   color: var(--text2);
   background: transparent;
   border: none;
   border-radius: 50%;
   opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
 }
 
 .gc:hover .gc-more,
@@ -149,21 +150,24 @@ function isSel(e: appstate.FileEntry): boolean {
 
 .gc-more:hover {
   color: var(--accent);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
 }
 
-/* 选中徽章：浮出卡片左上角外；18px 圆形 accent 底 + 白色对勾图标 */
+/* 选中徽章：卡片左上角内 overlay；16px 圆形 accent 底 + 白色对勾图标，
+   仿 Windows 资源管理器选中态角标；不会被 .zone 滚动容器裁剪 */
 .gc-check {
   position: absolute;
-  top: -8px;
-  left: -8px;
+  top: 2px;
+  left: 2px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   background: var(--accent);
   border-radius: 50%;
   z-index: 2;
+  box-shadow: 0 0 0 1.5px var(--surface);
 }
 
 .gc-check-ic {
