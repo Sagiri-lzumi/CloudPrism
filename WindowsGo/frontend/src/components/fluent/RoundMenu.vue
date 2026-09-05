@@ -153,7 +153,7 @@ const menuStyle = computed(() => ({left: pos.value.left + 'px', top: pos.value.t
             :disabled="item.disabled"
             @click="pick(i)"
           >
-            <Icon v-if="item.icon" :name="item.icon" :size="15" class="item-icon" />
+            <Icon v-if="item.icon" :name="item.icon" :size="16" class="item-icon" />
             <span class="item-label">{{ item.label }}</span>
           </button>
         </template>
@@ -208,7 +208,7 @@ const menuStyle = computed(() => ({left: pos.value.left + 'px', top: pos.value.t
 }
 
 .item-icon {
-  color: var(--text2); /* danger 条目图标随文字红 */
+  color: var(--text); /* v15 加深：text2→text，菜单图标对比度更高 */
 }
 
 .item.danger .item-icon {
