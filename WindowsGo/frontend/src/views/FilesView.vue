@@ -77,6 +77,13 @@ function onItemClick(ev: MouseEvent, e: appstate.FileEntry) {
   shiftAnchor.value = e.remote
 }
 
+/** 网格卡 ctx 事件载荷：GridCard emit 单对象 {ev, entry}，此处拆开后调 openCtx。
+ *  改用方法引用（而非 inline `openCtx($event, e)`）绕开 Vue 3 编译器在组件事件上
+ *  丢弃闭包变量 `e` 的 bug——否则 GridCard 右键永远拿到 entry=null 弹空白菜单。 */
+function onCardCtx(p: {ev: MouseEvent; entry: appstate.FileEntry}) {
+  openCtx(p.ev, p.entry)
+}
+
 /* -------------------------------------------------------- Splitter */
 
 const SPLIT_KEY = 'cp-split-l'
@@ -456,7 +463,7 @@ function confirmDlg(payload: string | boolean) {
                 :entry="e"
                 @select="onItemClick"
                 @open="enterDir"
-                @ctx="openCtx($event, e)"
+                @ctx="onCardCtx"
               />
             </div>
 

@@ -18,7 +18,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [ev: MouseEvent, e: appstate.FileEntry]
   open: [e: appstate.FileEntry]
-  ctx: [e: MouseEvent, entry: appstate.FileEntry]
+  /** 上下文菜单：单对象载荷避免 Vue 编译器在组件事件上丢掉闭包变量 */
+  ctx: [payload: {ev: MouseEvent; entry: appstate.FileEntry}]
 }>()
 
 const isImg = ref(!props.entry.isDir && kindOf(props.entry.display) === 'image')
@@ -69,20 +70,21 @@ function isSel(e: appstate.FileEntry): boolean {
     :class="{sel: isSel(entry)}"
     @click="emit('select', $event, entry)"
     @dblclick="emit('open', entry)"
-    @contextmenu.prevent="emit('ctx', $event, entry)"
+    @contextmenu.prevent="emit('ctx', {ev: $event, entry})"
   >
-    <!-- 顶部操作条：⋯ 与勾选角标只落在这条留白带内，绝不压住下方图区 -->
-    <div class="gc-top">
-      <Icon v-if="isSel(entry)" name="square-check" :size="15" class="gc-check" />
-      <button
-        type="button"
-        class="gc-more"
-        title="更多操作（与右键菜单一致）"
-        @click.stop="emit('ctx', $event, entry)"
-      >
-        <Icon name="more" :size="12" />
-      </button>
-    </div>
+    <!-- 选中徽章：浮出卡片左上角外（不挡图）；18px 圆形 accent 底 + 白色对勾 -->
+    <span v-if="isSel(entry)" class="gc-check" aria-hidden="true">
+      <Icon name="check" :size="14" class="gc-check-ic" />
+    </span>
+    <!-- 更多按钮：浮出卡片右上角外；无背景框，仅 hover 显现；命中区 ≥ 24px -->
+    <button
+      type="button"
+      class="gc-more"
+      title="更多操作（与右键菜单一致）"
+      @click.stop="emit('ctx', {ev: $event, entry})"
+    >
+      <Icon name="more" :size="12" />
+    </button>
     <div class="thumb">
       <template v-if="entry.isDir">
         <Icon name="folder" :size="44" class="ic dir" />
@@ -103,7 +105,7 @@ function isSel(e: appstate.FileEntry): boolean {
   align-items: center;
   gap: 4px;
   width: 96px;
-  padding: 0 4px 6px;
+  padding: 8px 4px 6px;
   margin: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-card);
@@ -120,38 +122,23 @@ function isSel(e: appstate.FileEntry): boolean {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
-/* 顶部操作条：常驻 20px 高留白带（透明），悬停/选中时显示其中控件。
-   图区从本带之下开始，保证 ⋯ 与勾选角标永远不遮挡缩略图/图标。 */
-.gc-top {
-  position: relative;
-  width: 100%;
-  height: 20px;
-  flex: none;
-}
-
-/* 更多按钮：操作带右上角；不透明底 + 描边 */
+/* 更多按钮：浮出卡片右上角外（top/right 负值），无背景框，仅显示图标；
+   box 自身 ≥ 24px 保证命中区域，hover/选中时显现 */
 .gc-more {
   position: absolute;
-  top: 0;
-  right: 0;
+  top: -8px;
+  right: -8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   color: var(--text2);
-  background: var(--surface);
-  border: 1px solid var(--stroke);
-  border-radius: 4px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
   opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
-}
-
-/* 选中标记：lucide square-check 为描边勾选框，随 accent 着色，放操作带左上角 */
-.gc-check {
-  position: absolute;
-  top: 2px;
-  left: 4px;
+  transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
 .gc:hover .gc-more,
@@ -161,8 +148,26 @@ function isSel(e: appstate.FileEntry): boolean {
 }
 
 .gc-more:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--accent);
+}
+
+/* 选中徽章：浮出卡片左上角外；18px 圆形 accent 底 + 白色对勾图标 */
+.gc-check {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 50%;
+  z-index: 2;
+}
+
+.gc-check-ic {
+  color: #fff;
 }
 
 /* 图标位：96px 视窗内容 96×64 图区（Python iconSize 96 的扁化） */
