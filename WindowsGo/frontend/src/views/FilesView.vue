@@ -467,7 +467,7 @@ function confirmDlg(payload: string | boolean) {
                 @dblclick="e.isDir && enterDir(e)"
                 @contextmenu.prevent="openCtx($event, e)"
               >
-                <Icon v-if="isSel(e)" name="check" :size="12" class="row-check" />
+                <Icon v-if="isSel(e)" name="square-check" :size="14" class="row-check" />
                 <Icon :name="kindOfRow(e)" :size="16" class="row-ic" :class="{dir: e.isDir}" />
                 <span class="row-name" :title="e.display">{{ e.display }}</span>
                 <span class="row-size">{{ e.isDir ? '文件夹' : fmtSize(e.size) }}</span>
@@ -543,16 +543,11 @@ function confirmDlg(payload: string | boolean) {
   color: var(--text2);
 }
 
-/* 行多选勾选（列表模式） */
+/* 行多选勾选（square-check 图标自带蓝底白勾） */
 .row-check {
   flex: none;
-  width: 16px;
-  height: 16px;
-  padding: 2px;
-  color: var(--text-on-accent);
-  background: var(--accent);
-  border-radius: 50%;
-  box-sizing: border-box;
+  color: var(--accent);
+  margin-right: 2px;
 }
 
 /* ---------------- 多选批量条（>1 项时出现） ---------------- */

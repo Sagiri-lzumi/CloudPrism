@@ -71,7 +71,7 @@ function isSel(e: appstate.FileEntry): boolean {
     @dblclick="emit('open', entry)"
     @contextmenu.prevent="emit('ctx', $event, entry)"
   >
-    <span v-if="isSel(entry)" class="gc-check"><Icon name="check" :size="10" /></span>
+    <Icon v-if="isSel(entry)" name="square-check" :size="16" class="gc-check" />
     <button
       type="button"
       class="gc-more"
@@ -135,20 +135,11 @@ function isSel(e: appstate.FileEntry): boolean {
   transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
-/* 选中标记：左上角纯色对勾（无圆底；选中卡已有 accent-soft 底+边框，勾只作辅助） */
+/* 选中标记：square-check 图标自带蓝底白勾，直接放卡片左上角 */
 .gc-check {
   position: absolute;
-  top: 3px;
-  left: 5px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  color: var(--text-on-accent);
-  background: var(--accent);
-  border-radius: 3px;
-  box-shadow: none;
+  top: 2px;
+  left: 4px;
   z-index: 1;
 }
 
