@@ -1,8 +1,10 @@
 <!--
-  GridCard.vue —— 网格模式条目卡（96px 图标位 + 名称，对照 Python
-  side_panel 网格视图）。图片条目异步请求加密缩略图（/t/ 令牌），退出
-  视口卸载时吊销，防注册表被大量浏览撑满（ErrTooManyTokens）；目录与
-  其余文件显示类别占位图标。key 由父级按 remote 生成：切目录即重建。
+  GridCard.vue —— 网格模式条目卡（header band 22px + 缩略图 110×44 + 名称）。
+  对照 Python side_panel 网格视图。图片条目异步请求加密缩略图（/t/ 令牌），
+  退出视口卸载时吊销，防注册表被大量浏览撑满（ErrTooManyTokens）；目录与其
+  余文件显示类别占位图标。徽章/⋯ 落在 header band 内的空白里，不再压在缩
+  略图上（v14 的 top:2px 把图标贴在缩略图上被吐槽遮挡）。key 由父级按 remote
+  生成：切目录即重建。
 -->
 <script setup lang="ts">
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
@@ -53,7 +55,7 @@ onBeforeUnmount(() => {
   if (thumb.value) void revoke(thumb.value).catch(() => {})
 })
 
-// 图标位内容：目录=folder 大图标；图片=缩略图/加载中/占位；其它=类别图标
+// 图标位内容：目录=folder；图片=缩略图/加载中/占位；其它=类别图标
 const placeholderIcon = computed(() =>
   props.entry.isDir ? 'folder' : KIND_ICON[kindOf(props.entry.display)],
 )
@@ -72,26 +74,28 @@ function isSel(e: appstate.FileEntry): boolean {
     @dblclick="emit('open', entry)"
     @contextmenu.prevent="emit('ctx', {ev: $event, entry})"
   >
-    <!-- 选中徽章：叠在缩略图左上角内（仿 Windows 资源管理器选中态），不会被滚动容器裁剪 -->
-    <span v-if="isSel(entry)" class="gc-check" aria-hidden="true">
-      <Icon name="check" :size="11" class="gc-check-ic" />
-    </span>
-    <!-- 更多按钮：叠在缩略图右上角内，hover 时显半透明底，命中区与图标同尺寸 -->
-    <button
-      type="button"
-      class="gc-more"
-      title="更多操作（与右键菜单一致）"
-      @click.stop="emit('ctx', {ev: $event, entry})"
-    >
-      <Icon name="more" :size="14" />
-    </button>
+    <!-- 顶部操作带 22px：徽章/⋯ 在此，不压缩略图 -->
+    <div class="gc-head">
+      <span v-if="isSel(entry)" class="gc-check" aria-hidden="true">
+        <Icon name="check" :size="11" class="gc-check-ic" />
+      </span>
+      <button
+        type="button"
+        class="gc-more"
+        title="更多操作（与右键菜单一致）"
+        @click.stop="emit('ctx', {ev: $event, entry})"
+      >
+        <Icon name="more" :size="14" />
+      </button>
+    </div>
+    <!-- 缩略图：让位 14px 给 header band，宽 110 高 44 -->
     <div class="thumb">
       <template v-if="entry.isDir">
-        <Icon name="folder" :size="44" class="ic dir" />
+        <Icon name="folder" :size="36" class="ic dir" />
       </template>
       <img v-else-if="thumb" :src="thumb" class="img" alt="" draggable="false" @error="fail = true" />
-      <Icon v-else-if="loading" name="sync" :size="24" class="ic spin" />
-      <Icon v-else :name="placeholderIcon" :size="36" class="ic" :class="{err: fail}" />
+      <Icon v-else-if="loading" name="sync" :size="20" class="ic spin" />
+      <Icon v-else :name="placeholderIcon" :size="32" class="ic" :class="{err: fail}" />
     </div>
     <figcaption class="name" :title="entry.display">{{ entry.display }}</figcaption>
   </figure>
@@ -102,32 +106,61 @@ function isSel(e: appstate.FileEntry): boolean {
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  width: 96px;
-  padding: 4px 4px 6px;
+  align-items: stretch; /* header/thumb/name 撑满宽度 */
+  gap: 2px;
+  width: 110px;
+  padding: 0;
   margin: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-card);
   cursor: default;
   user-select: none;
+  overflow: hidden; /* 圆角裁剪 header 背景 */
 }
 
 .gc:hover {
   background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 
+/* 选中态：accent-soft 背景 + 1px accent 实线 border，强化对比度 */
 .gc.sel {
   background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  border-color: var(--accent);
 }
 
-/* 更多按钮：卡片右上角内 overlay；无背景框、仅图标；
-   box 18×18，hover/选中时显半透明 surface 底（点击更稳） */
+/* 顶部操作带 22px：徽章/⋯ 落在里面，不压在缩略图上 */
+.gc-head {
+  position: relative;
+  flex: none;
+  height: 22px;
+}
+
+/* 选中徽章：绝对定位在 header 左上，圆形 accent 底 + 白对勾 + surface 描边圈
+   防背景穿透（accent-soft 选中态上叠 accent 实色圈辨识度高） */
+.gc-check {
+  position: absolute;
+  top: 3px;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background: var(--accent);
+  border-radius: 50%;
+  z-index: 2;
+  box-shadow: 0 0 0 1.5px var(--surface), 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.gc-check-ic {
+  color: #fff;
+}
+
+/* 更多按钮：header 右上角；hover/选中时显半透 surface 底 */
 .gc-more {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 3px;
+  right: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -153,34 +186,14 @@ function isSel(e: appstate.FileEntry): boolean {
   background: color-mix(in srgb, var(--surface) 85%, transparent);
 }
 
-/* 选中徽章：卡片左上角内 overlay；16px 圆形 accent 底 + 白色对勾图标，
-   仿 Windows 资源管理器选中态角标；不会被 .zone 滚动容器裁剪 */
-.gc-check {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  background: var(--accent);
-  border-radius: 50%;
-  z-index: 2;
-  box-shadow: 0 0 0 1.5px var(--surface);
-}
-
-.gc-check-ic {
-  color: #fff;
-}
-
-/* 图标位：96px 视窗内容 96×64 图区（Python iconSize 96 的扁化） */
+/* 缩略图：让位 22px+2px 给 header band，宽 110 高 44 */
 .thumb {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 96px;
-  height: 64px;
+  width: 100%;
+  height: 44px;
+  padding: 0 6px;
 }
 
 .ic {
@@ -196,8 +209,8 @@ function isSel(e: appstate.FileEntry): boolean {
 }
 
 .img {
-  max-width: 96px;
-  max-height: 64px;
+  max-width: 98px;
+  max-height: 44px;
   object-fit: contain;
 }
 
@@ -211,7 +224,9 @@ function isSel(e: appstate.FileEntry): boolean {
   }
 }
 
+/* 名称：两行截断，6px 底距让卡片呼吸 */
 .name {
+  padding: 0 4px 6px;
   width: 100%;
   max-height: 2.4em; /* 两行截断 */
   font-size: 0.786rem;
