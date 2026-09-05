@@ -135,20 +135,20 @@ function isSel(e: appstate.FileEntry): boolean {
   transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
-/* 选中勾角标：左上角小圆点 + 勾 */
+/* 选中标记：左上角纯色对勾（无圆底；选中卡已有 accent-soft 底+边框，勾只作辅助） */
 .gc-check {
   position: absolute;
-  top: 4px;
-  left: 4px;
+  top: 3px;
+  left: 5px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   color: var(--text-on-accent);
   background: var(--accent);
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px var(--surface);
+  border-radius: 3px;
+  box-shadow: none;
   z-index: 1;
 }
 
