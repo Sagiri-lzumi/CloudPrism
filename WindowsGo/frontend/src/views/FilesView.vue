@@ -476,7 +476,8 @@ function confirmDlg(payload: string | boolean) {
                 @dblclick="e.isDir && enterDir(e)"
                 @contextmenu.prevent="openCtx($event, e)"
               >
-                <Icon v-if="isSel(e)" name="square-check" :size="16" class="row-check" />
+                <!-- 行首勾选：仅多选批量态（≥2 项）显示，单选只靠 .row.sel 高亮 -->
+                <Icon v-if="isSel(e) && hasMulti" name="square-check" :size="16" class="row-check" />
                 <Icon :name="kindOfRow(e)" :size="18" class="row-ic" :class="{dir: e.isDir}" />
                 <span class="row-name" :title="e.display">{{ e.display }}</span>
                 <span class="row-size">{{ e.isDir ? '文件夹' : fmtSize(e.size) }}</span>

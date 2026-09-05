@@ -2,9 +2,10 @@
   GridCard.vue —— 网格模式条目卡（header band 22px + 缩略图 110×44 + 名称）。
   对照 Python side_panel 网格视图。图片条目异步请求加密缩略图（/t/ 令牌），
   退出视口卸载时吊销，防注册表被大量浏览撑满（ErrTooManyTokens）；目录与其
-  余文件显示类别占位图标。徽章/⋯ 落在 header band 内的空白里，不再压在缩
-  略图上（v14 的 top:2px 把图标贴在缩略图上被吐槽遮挡）。key 由父级按 remote
-  生成：切目录即重建。
+  余文件显示类别占位图标。⋯ 与多选勾选角标落在 header band 内的空白里，不
+  再压在缩略图上（v14 的 top:2px 把图标贴在缩略图上被吐槽遮挡；v17 起角标
+  仅多选批量态显示，单选只靠整卡高亮）。key 由父级按 remote 生成：切目录
+  即重建。
 -->
 <script setup lang="ts">
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
@@ -60,10 +61,14 @@ const placeholderIcon = computed(() =>
   props.entry.isDir ? 'folder' : KIND_ICON[kindOf(props.entry.display)],
 )
 
-// 是否处于选择集（普通单选或多选成员都高亮）
+// 是否处于选择集（多选成员或当前单选，决定整卡高亮）
 function isSel(e: appstate.FileEntry): boolean {
   return ui.multi.some((x) => x.remote === e.remote)
 }
+
+// 多选批量态（≥2 项）：此时勾选角标才出现；单选仅靠 .gc.sel 整卡高亮
+//（v17：去掉单选常驻左上角蓝点的观感问题）
+const multiMode = computed(() => ui.multi.length > 1)
 </script>
 
 <template>
@@ -74,9 +79,9 @@ function isSel(e: appstate.FileEntry): boolean {
     @dblclick="emit('open', entry)"
     @contextmenu.prevent="emit('ctx', {ev: $event, entry})"
   >
-    <!-- 顶部操作带 22px：徽章/⋯ 在此，不压缩略图 -->
+    <!-- 顶部操作带 22px：⋯ 在此，不压缩略图；勾选角标仅多选态出现 -->
     <div class="gc-head">
-      <span v-if="isSel(entry)" class="gc-check" aria-hidden="true">
+      <span v-if="isSel(entry) && multiMode" class="gc-check" aria-hidden="true">
         <Icon name="check" :size="11" class="gc-check-ic" />
       </span>
       <button
@@ -135,8 +140,8 @@ function isSel(e: appstate.FileEntry): boolean {
   height: 22px;
 }
 
-/* 选中徽章：绝对定位在 header 左上，圆形 accent 底 + 白对勾 + surface 描边圈
-   防背景穿透（accent-soft 选中态上叠 accent 实色圈辨识度高） */
+/* 选中勾选角标（仅多选批量态显示，见 multiMode）：绝对定位在 header 左上，
+   圆形 accent 底 + 白对勾 + surface 描边圈；单选不显示，靠 .gc.sel 高亮 */
 .gc-check {
   position: absolute;
   top: 3px;
