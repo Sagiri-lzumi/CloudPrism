@@ -260,3 +260,5 @@ WindowsGo/frontend/package.json.md5
 *.exe
 
 .workbuddy/
+
+.gocache/

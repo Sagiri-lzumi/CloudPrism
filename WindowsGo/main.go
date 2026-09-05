@@ -32,12 +32,24 @@ func main() {
 		ensureWebView2Runtime()
 	}
 
+	// 前端产物指纹（内嵌 dist 的 index-<hash>.css/js 文件名）：既用于
+	// UserDataDir 把 hash 编入 UDF 路径强制缓存破坏，也在 App.Version()
+	// 里回显给用户核对。绑定生成阶段拿不到 embed 资源也无妨——该路径
+	// 不会走到 wails.Run。
+	fp := frontendFingerprint()
+
+	// 清理 exe 旁边 data/ 下旧版本 UDF（webview2-*），保留当前 hash 对应的；
+	// 失败静默，不阻断启动。仅运行时清理，绑定生成阶段跳过。
+	if !generatingBindings {
+		win.CleanupStaleUDF(win.UserDataDir(fp))
+	}
+
 	// 构造依赖图（internal/appstate.State + internal/bind 的 5 个域 struct），
 	// 全部注册进 Bind —— 域间互不依赖，避免单个巨型绑定对象撑爆
 	// wailsjs 生成物；宿主 App 只留生命周期钩子与全局操作。
 	app := NewApp()
 
-	if err := wails.Run(runtimeOptions(app)); err != nil {
+	if err := wails.Run(runtimeOptions(app, fp)); err != nil {
 		fatal("CloudPrism 启动失败", err.Error())
 	}
 }
@@ -77,12 +89,14 @@ func fatal(title, text string) {
 
 // runtimeOptions 集中描述窗口与运行时行为，便于与 WindowsPy 的
 // gui/main_window.py 窗口参数逐项对照。
-func runtimeOptions(app *App) *options.App {
+func runtimeOptions(app *App, fingerprint string) *options.App {
 	winOpts := &windows.Options{}
 	if !generatingBindings {
 		// 显式指定 UDF：默认值落在 %AppData%\<exe 名>，与 CloudPrism
-		// 「绿色便携、数据随 exe 走」的约定冲突（详见 win.UserDataDir）
-		winOpts.WebviewUserDataPath = win.UserDataDir()
+		// 「绿色便携、数据随 exe 走」的约定冲突（详见 win.UserDataDir）。
+		// fingerprint 编入目录名：每个前端版本独立 UDF，新版自动从零建
+		// 缓存，杜绝「前端已更新但界面仍显示旧版」的缓存污染。
+		winOpts.WebviewUserDataPath = win.UserDataDir(fingerprint)
 	}
 
 	return &options.App{

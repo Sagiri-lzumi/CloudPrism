@@ -110,6 +110,26 @@ foreach ($doc in @("self_test_guide.md", "ui_polish_v1.md")) {
 # 运行期数据目录占位（UDF/缓存/tmp 均由程序按需 MkdirAll，此处仅留档）
 New-Item -ItemType Directory -Force -Path (Join-Path $dirOut "data\tmp") | Out-Null
 
+# 版本信息.txt：写前端产物文件名 + 排障指引。用户用记事本打开即可核对
+# 跑的 exe 是否带最新前端（对照仓库 frontend/dist/assets/ 实际文件名），
+# 避免「删了 UDF 重启仍看到旧 UI」时无从判断根因（v15/v17 反复出现）。
+$verInfo = @(
+    "CloudPrismGo 构建信息",
+    "====================",
+    "构建时间：$stamp",
+    "标签：$Tag",
+    "前端产物：$($assetHashes -join ' + ')",
+    "对应 dist 目录：WindowsGo/frontend/dist/assets/",
+    "",
+    "排障步骤：",
+    "1. 用资源管理器打开 仓库 WindowsGo/frontend/dist/assets/，对照上面的文件名。",
+    "2. 若一致但 UI 仍显示旧版，关闭所有 CloudPrismGo 进程，",
+    "   删除本目录下 data/webview2-* 所有文件夹后重启。"
+)
+$verInfoPath = Join-Path $dirOut "版本信息.txt"
+$verInfo -join "`r`n" | Out-File -FilePath $verInfoPath -Encoding UTF8
+Write-Host "[release] 已写 $verInfoPath" -ForegroundColor Green
+
 # WebView2 引导安装器（可选附带：本机常见位置有才复制，找不到不失败）
 $bootstraps = @(
     "$env:WEBVIEW2_BOOTSTRAP",

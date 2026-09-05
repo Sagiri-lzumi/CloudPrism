@@ -163,14 +163,19 @@ func runModeLabel() string {
 func (a *App) Ping(token string) string { return "pong:" + token }
 
 // Version 汇总运行时诊断信息（骨架页与「关于」入口展示）。
+//
+// 末尾附内嵌前端产物指纹（index-<hash>.css/js 文件名）：用户在「关于」
+// 即可核对界面实际加载的前端版本，对照 dist/assets/ 目录里的文件名，
+// 一眼判断「跑的 exe 是否带最新前端」（v15/v17 反复出现用户删了 UDF
+// 仍看到旧 UI，根因之一就是无法自助核对前端版本）。
 func (a *App) Version() string {
 	wv := win.RuntimeVersion()
 	if wv == "" {
 		wv = "未检测到"
 	}
-	return fmt.Sprintf("Go %s · WebView2 %s · CGO_ENABLED=%s · %s/%s",
+	return fmt.Sprintf("Go %s · WebView2 %s · CGO_ENABLED=%s · %s/%s · 前端 %s",
 		runtime.Version(), wv, envOr("CGO_ENABLED", "unset"),
-		runtime.GOOS, runtime.GOARCH)
+		runtime.GOOS, runtime.GOARCH, frontendFingerprint())
 }
 
 // Quit 由前端主动退出应用。
