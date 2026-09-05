@@ -141,12 +141,13 @@ const ctxMulti = computed(
 function buildCtxItems(): CtxItem[] {
   const e = ctxEntry.value
   if (ctxMulti.value && e) {
-    // 多选批量菜单：精简版（去掉"复制明文名"歧义项，按主操作 + 危险分组）
+    // 多选批量菜单：精简版（动词领先 + 数量括号；onCtx 索引 0/1/3/4 不变）
+    const n = ui.multi.length
     return [
-      {label: `下载所选 ${ui.multi.length} 项`, icon: 'download'},
-      {label: `解密导出所选 ${ui.multi.length} 项`, icon: 'share'},
+      {label: `下载 (${n})`, icon: 'download'},
+      {label: `导出 (${n})`, icon: 'share'},
       {divider: true},
-      {label: `删除所选 ${ui.multi.length} 项`, icon: 'delete', danger: true},
+      {label: `删除 (${n})`, icon: 'delete', danger: true},
       {label: '取消选择', icon: 'cancel'},
     ]
   }
@@ -161,22 +162,22 @@ function buildCtxItems(): CtxItem[] {
     return [
       {label: '打开', icon: 'folder'},
       {label: '新建子文件夹', icon: 'folder_add'},
-      {label: '上传到此目录', icon: 'send'},
+      {label: '上传', icon: 'send'},
       {divider: true},
-      {label: '下载到本地', icon: 'download'},
+      {label: '下载', icon: 'download'},
       {divider: true},
-      {label: '复制明文路径', icon: 'copy'},
+      {label: '复制路径', icon: 'copy'},
       {divider: true},
       {label: '重命名', icon: 'edit'},
       {label: '删除', icon: 'delete', danger: true},
     ]
   return [
     {label: '打开预览', icon: 'photo'},
-    {label: '下载到本地', icon: 'download'},
-    {label: '解密导出', icon: 'share'},
+    {label: '下载', icon: 'download'},
+    {label: '导出', icon: 'share'},
     {divider: true},
-    {label: '复制明文名', icon: 'copy'},
-    {label: '复制明文路径', icon: 'copy'},
+    {label: '复制名称', icon: 'copy'},
+    {label: '复制路径', icon: 'copy'},
     {divider: true},
     {label: '重命名', icon: 'edit'},
     {label: '删除', icon: 'delete', danger: true},
@@ -475,8 +476,8 @@ function confirmDlg(payload: string | boolean) {
                 @dblclick="e.isDir && enterDir(e)"
                 @contextmenu.prevent="openCtx($event, e)"
               >
-                <Icon v-if="isSel(e)" name="square-check" :size="14" class="row-check" />
-                <Icon :name="kindOfRow(e)" :size="16" class="row-ic" :class="{dir: e.isDir}" />
+                <Icon v-if="isSel(e)" name="square-check" :size="16" class="row-check" />
+                <Icon :name="kindOfRow(e)" :size="18" class="row-ic" :class="{dir: e.isDir}" />
                 <span class="row-name" :title="e.display">{{ e.display }}</span>
                 <span class="row-size">{{ e.isDir ? '文件夹' : fmtSize(e.size) }}</span>
                 <button
@@ -485,7 +486,7 @@ function confirmDlg(payload: string | boolean) {
                   title="更多操作（删除、重命名、下载…）"
                   @click.stop="openCtx($event, e)"
                 >
-                  <Icon name="more" :size="14" />
+                  <Icon name="more" :size="16" />
                 </button>
                 <button
                   v-if="e.isDir"
@@ -494,7 +495,7 @@ function confirmDlg(payload: string | boolean) {
                   title="进入目录"
                   @click.stop="enterDir(e)"
                 >
-                  <Icon name="chevron_right_med" :size="14" />
+                  <Icon name="chevron_right_med" :size="16" />
                 </button>
               </div>
             </div>
@@ -704,10 +705,10 @@ function confirmDlg(payload: string | boolean) {
   color: var(--heading);
 }
 
-/* 网格：固定 96px 卡片自动换行 */
+/* 网格：固定 110px 卡片自动换行（v15 加宽以容纳 header band） */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 96px);
+  grid-template-columns: repeat(auto-fill, 110px);
   justify-content: center;
   gap: 6px;
 }
@@ -723,7 +724,7 @@ function confirmDlg(payload: string | boolean) {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 34px;
+  height: 36px;
   padding: 0 10px;
   border-radius: var(--radius-ctrl);
   user-select: none;
