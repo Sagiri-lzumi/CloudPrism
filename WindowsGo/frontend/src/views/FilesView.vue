@@ -175,17 +175,25 @@ const ctxItems = computed<CtxItem[]>(() => {
   ]
 })
 
-function openCtx(e: MouseEvent, entry: appstate.FileEntry | null) {
+function openCtx(e: MouseEvent | [MouseEvent, appstate.FileEntry], entry?: appstate.FileEntry) {
+  // Vue 3 组件事件内联 handler 名（无括号）= 把整个 emit payload 作为**单参数**
+  // 传 handler。GridCard emit('ctx', ev, entry) → 父级 @ctx="openCtx" 调
+  // openCtx([ev, entry])。Zone 右键 openCtx($event, null) 走单参数分支。
+  // 兼容两种调用形参。
+  const ev: MouseEvent = Array.isArray(e) ? (e[0] as MouseEvent) : e
+  const ent: appstate.FileEntry | null = Array.isArray(e)
+    ? (e[1] as appstate.FileEntry | undefined) ?? null
+    : (entry ?? null)
   // 右键目标在集合内则保留多选，否则单选该目标
-  if (entry) {
-    if (!(hasMulti.value && ui.multi.some((x) => x.remote === entry!.remote))) {
-      selectEntry(entry)
+  if (ent) {
+    if (!(hasMulti.value && ui.multi.some((x) => x.remote === ent!.remote))) {
+      selectEntry(ent)
     }
   }
-  ctxEntry.value = entry
+  ctxEntry.value = ent
   // 菜单跟随光标弹出：记录鼠标坐标（RoundMenu position 优先于元素锚点）
-  ctxPos.value = {x: e.clientX, y: e.clientY}
-  const el = (e.currentTarget ?? e.target) as HTMLElement | null
+  ctxPos.value = {x: ev.clientX, y: ev.clientY}
+  const el = (ev.currentTarget ?? ev.target) as HTMLElement | null
   ctxAnchor.value = el
   ctxOpen.value = false
   ctxOpen.value = true
@@ -414,7 +422,7 @@ function confirmDlg(payload: string | boolean) {
           <div
             class="zone"
             @click.self="clearMulti"
-            @contextmenu.prevent="openCtx($event, null)"
+            @contextmenu.prevent="openCtx($event, undefined)"
           >
             <!-- 加载 -->
             <div v-if="ui.loading && !ui.entries" class="center">
