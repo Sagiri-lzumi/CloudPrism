@@ -71,7 +71,7 @@ defineExpose({focus: () => input.value?.focus(), select: () => input.value?.sele
       tabindex="-1"
       @click="reveal = !reveal"
     >
-      <Icon :name="reveal ? 'hide' : 'view'" :size="14" />
+      <Icon :name="reveal ? 'hide' : 'eye'" :size="14" />
     </button>
     <button
       v-else-if="clearable && modelValue"

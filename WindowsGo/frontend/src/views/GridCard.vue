@@ -16,7 +16,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  select: [e: appstate.FileEntry]
+  select: [ev: MouseEvent, e: appstate.FileEntry]
   open: [e: appstate.FileEntry]
   ctx: [e: MouseEvent, entry: appstate.FileEntry]
 }>()
@@ -56,16 +56,22 @@ onBeforeUnmount(() => {
 const placeholderIcon = computed(() =>
   props.entry.isDir ? 'folder' : KIND_ICON[kindOf(props.entry.display)],
 )
+
+// 是否处于选择集（普通单选或多选成员都高亮）
+function isSel(e: appstate.FileEntry): boolean {
+  return ui.multi.some((x) => x.remote === e.remote)
+}
 </script>
 
 <template>
   <figure
     class="gc"
-    :class="{sel: ui.sel?.remote === entry.remote}"
-    @click="emit('select', entry)"
+    :class="{sel: isSel(entry)}"
+    @click="emit('select', $event, entry)"
     @dblclick="emit('open', entry)"
     @contextmenu.prevent="emit('ctx', $event, entry)"
   >
+    <span v-if="isSel(entry)" class="gc-check"><Icon name="check" :size="10" /></span>
     <button
       type="button"
       class="gc-more"
@@ -127,6 +133,23 @@ const placeholderIcon = computed(() =>
   border-radius: 4px;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+/* 选中勾角标：左上角小圆点 + 勾 */
+.gc-check {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--surface);
+  z-index: 1;
 }
 
 .gc:hover .gc-more,

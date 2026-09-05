@@ -54,8 +54,10 @@ interface Ui {
   loadError: string
   /** 代际：目录切换后旧请求结果丢弃（对照 side_panel.py _grid_seq） */
   seq: number
-  /** 选中条目（文件或目录；remote path 唯一键） */
+  /** 选中条目（文件或目录；remote path 唯一键）——最后点击的主条目，预览/单条操作使用 */
   sel: appstate.FileEntry | null
+  /** 多选集合（remote path 唯一键；长度 >1 时工具栏/右键呈批量操作）。sel 恒为该集合最后一个 */
+  multi: appstate.FileEntry[]
   /** 明文导航链（面包屑）：每次受管进入目录时 push，返回/跳转时截断 */
   crumbs: Crumb[]
 
@@ -77,6 +79,7 @@ export const ui = reactive<Ui>({
   loadError: '',
   seq: 0,
   sel: null,
+  multi: [],
   crumbs: [],
   settings: {},
 })
@@ -240,6 +243,7 @@ export async function listDir(remote: string, opts: {silent?: boolean} = {}) {
     ui.loading = true
     ui.loadError = ''
     ui.sel = null
+    ui.multi = []
   }
   try {
     const entries = await Files.List(remote)
@@ -250,6 +254,10 @@ export async function listDir(remote: string, opts: {silent?: boolean} = {}) {
         ui.entries = entries
         if (ui.sel && !entries.some((e) => e.remote === ui.sel!.remote)) {
           ui.sel = null
+          ui.multi = []
+        } else {
+          // 多选集合也按条目存活过滤（被删除/移动的 remote 移出）
+          ui.multi = ui.multi.filter((m) => entries.some((e) => e.remote === m.remote))
         }
       }
     } else {
@@ -296,13 +304,51 @@ function resetBrowse() {
   ui.remote = ''
   ui.entries = null
   ui.sel = null
+  ui.multi = []
   ui.crumbs = []
   ui.seq++
 }
 
-/** 选中条目（列表单击；grid 单击同语义）。 */
+/** 单选（普通单击 / 右键目标）：sel 与 multi 同步为该项，长度=1 即非批量态。 */
 export function selectEntry(e: appstate.FileEntry | null) {
   ui.sel = e
+  ui.multi = e ? [e] : []
+}
+
+/** 切换多选（Ctrl/Shift+单击）：在集合中加入/移除，sel 恒指向集合最后项。 */
+export function toggleMulti(e: appstate.FileEntry) {
+  const i = ui.multi.findIndex((x) => x.remote === e.remote)
+  if (i >= 0) {
+    ui.multi.splice(i, 1) // 取消勾选
+  } else {
+    ui.multi.push(e)
+  }
+  ui.sel = ui.multi.length ? ui.multi[ui.multi.length - 1] : null
+}
+
+/** 范围多选：把 entries 中 [anchorRemote, e.remote] 区间全部加入集合。 */
+export function rangeMulti(e: appstate.FileEntry, anchorRemote: string | null, entries: appstate.FileEntry[]) {
+  const a = anchorRemote ? entries.findIndex((x) => x.remote === anchorRemote) : -1
+  const b = entries.findIndex((x) => x.remote === e.remote)
+  const lo = a >= 0 && a < b ? a : b
+  const hi = a >= 0 && a > b ? a : b === a ? (b < entries.length - 1 ? b + 1 : b) : b
+  const set = new Map(ui.multi.map((x) => [x.remote, x]))
+  for (let i = Math.min(lo, hi); i <= Math.max(lo, hi); i++) {
+    set.set(entries[i].remote, entries[i])
+  }
+  ui.multi = [...set.values()]
+  ui.sel = ui.multi.length ? ui.multi[ui.multi.length - 1] : null
+}
+
+/** 清空选择（切换目录/全不选时）。 */
+export function clearMulti() {
+  ui.sel = null
+  ui.multi = []
+}
+
+/** 当前批量选择集（multi；空时为空数组）。 */
+export function selEntries(): appstate.FileEntry[] {
+  return ui.multi
 }
 
 /** 进入目录（双击网格/列表中的目录行）。 */
@@ -353,15 +399,20 @@ export async function uploadPaths(localPaths: string[], remoteDir: string = ui.r
   }
 }
 
-/** 下载选中条目到用户选择目录（选中目录则整体递归由后端处理）。 */
+/** 取当前生效的操作集合：多选 >1 用 multi，否则回退主条目。 */
+function opEntries(): appstate.FileEntry[] {
+  return ui.multi.length > 1 ? ui.multi : ui.sel ? [ui.sel] : []
+}
+
+/** 批量下载选中条目到用户选择目录（目录/文件混合由后端递归处理）。 */
 export async function downloadSel() {
-  const e = ui.sel
-  if (!e) return
+  const list = opEntries()
+  if (!list.length) return
   try {
     const dir = await Transfer.DownloadDialog()
     if (!dir) return // 用户取消
-    await Transfer.Download([e], dir)
-    showInfo(`已开始下载：${e.display}`)
+    await Transfer.Download(list, dir)
+    showInfo(list.length > 1 ? `已开始下载 ${list.length} 项` : `已开始下载：${list[0].display}`)
   } catch (err) {
     showError('下载失败：' + unwrap(err).message)
   }
@@ -450,30 +501,74 @@ export async function renameSel(newDisplay: string) {
   }
 }
 
-/** 删除条目（目录递归）。 */
+/** 删除条目（目录递归）。多选时批量删除全部选中项。 */
 export async function deleteSel() {
-  const e = ui.sel
-  if (!e) return
+  const list = opEntries()
+  if (!list.length) return
   try {
-    await Files.Delete([e.remote])
-    showSuccess(`已删除「${e.display}」`)
-    if (ui.sel?.remote === e.remote) ui.sel = null
+    await Files.Delete(list.map((e) => e.remote))
+    if (list.length > 1) {
+      showSuccess(`已删除 ${list.length} 项`)
+    } else {
+      showSuccess(`已删除「${list[0].display}」`)
+    }
+    ui.sel = null
+    ui.multi = []
     void reloadDir()
   } catch (err) {
     showError('删除失败：' + unwrap(err).message)
   }
 }
 
-/** 导出（解密到本地）：目录框由 Go 弹原生对话框。 */
+/** 导出（解密到本地）：目录框由 Go 弹原生对话框。
+ *  单条走 Files.Export（弹目录后返回落盘路径）；多选复用 Transfer.Download
+ *  （弹一次目录、后端数组逐条解密落盘，语义一致）。 */
 export async function exportSel() {
-  const e = ui.sel
-  if (!e) return
+  const list = opEntries()
+  if (!list.length) return
+  if (list.length === 1) {
+    const e = list[0]
+    try {
+      const dir = await Files.Export(e.remote)
+      if (!dir) return
+      showSuccess(`已导出到 ${dir}`)
+    } catch (err) {
+      showError('导出失败：' + unwrap(err).message)
+    }
+    return
+  }
+  // 多选批量导出
   try {
-    const dir = await Files.Export(e.remote)
+    const dir = await Transfer.DownloadDialog()
     if (!dir) return
-    showSuccess(`已导出到 ${dir}`)
+    await Transfer.Download(list, dir)
+    showInfo(`已开始导出 ${list.length} 项到所选目录`)
   } catch (err) {
-    showError('导出失败：' + unwrap(err).message)
+    showError('批量导出失败：' + unwrap(err).message)
+  }
+}
+
+/** 复制条目明文展示名到剪贴板（右键高级项）。 */
+export async function copyEntryName(e: appstate.FileEntry) {
+  try {
+    const {ClipboardSetText} = await import('../../wailsjs/runtime/runtime')
+    await ClipboardSetText(e.display)
+    showInfo('已复制文件名')
+  } catch {
+    showError('复制失败')
+  }
+}
+
+/** 复制条目明文展示路径到剪贴板（右键高级项；由面包屑明文链拼接）。 */
+export async function copyEntryPath(e: appstate.FileEntry) {
+  try {
+    const {ClipboardSetText} = await import('../../wailsjs/runtime/runtime')
+    const dirs = ui.crumbs.map((c) => c.label)
+    const plain = [...dirs, e.display].join('/')
+    await ClipboardSetText(plain)
+    showInfo('已复制路径')
+  } catch {
+    showError('复制失败')
   }
 }
 
