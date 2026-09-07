@@ -177,11 +177,11 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
           <Icon :name="bigIcon" :size="56" class="dim" />
           <p class="lead2">{{ isDir ? '这是一个文件夹' : '此类型不支持内嵌预览' }}</p>
           <p class="sub2" v-if="!isDir">
-            可直接下载，或解密导出后用本地应用打开。
+            可直接下载，或导出后用本地应用打开。
           </p>
           <div class="actions">
             <Button icon="download" @click="downloadSel">下载</Button>
-            <Button icon="share" @click="exportSel">解密导出</Button>
+            <Button icon="share" @click="exportSel">导出</Button>
           </div>
         </div>
 
@@ -201,7 +201,7 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
   min-width: 0;
   min-height: 0;
   background: var(--bg-page);
-  border-left: none;
+  border-left: 1px solid var(--divider);
 }
 
 /* ---- 欢迎态 ---- */
@@ -210,7 +210,7 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
   height: 100%;
   padding: 24px;
   text-align: center;
@@ -219,8 +219,9 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
 
 .welcome p {
   margin: 0;
-  font-size: 1.2rem;
-  color: var(--muted);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--heading);
 }
 
 .welcome span {
@@ -231,9 +232,10 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
 .head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 56px;
-  padding: 8px 16px;
+  gap: 14px;
+  min-height: 64px;
+  padding: 12px 18px;
+  background: var(--surface);
   border-bottom: 1px solid var(--divider);
 }
 
@@ -242,20 +244,21 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 36px;
-  height: 36px;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-radius: 6px;
+  width: 42px;
+  height: 42px;
+  color: #fff;
+  background: var(--accent-grad);
+  border-radius: 11px;
 }
 
 .head-text {
   min-width: 0;
+  flex: 1;
 }
 
 .name {
   margin: 0;
-  font-size: 0.929rem; /* 13px */
+  font-size: 0.96rem; /* ~14.4px @15 */
   font-weight: 600;
   color: var(--heading);
   white-space: nowrap;
@@ -264,8 +267,8 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
 }
 
 .meta {
-  margin: 2px 0 0;
-  font-size: 0.786rem;
+  margin: 3px 0 0;
+  font-size: 0.78rem;
   color: var(--text2);
   white-space: nowrap;
   overflow: hidden;
@@ -288,13 +291,13 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 16px;
+  gap: 12px;
+  padding: 24px;
   overflow: auto;
 }
 
 .center .ring {
-  width: 160px;
+  width: 180px;
 }
 
 .img {
@@ -302,6 +305,8 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
   max-height: 100%;
   object-fit: contain;
   user-select: none;
+  border-radius: var(--r-card-sm);
+  box-shadow: var(--shadow-card);
 }
 
 .dim {
@@ -334,7 +339,7 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
 }
 
 .err-line p {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   overflow-wrap: anywhere;
   text-align: center;
 }
@@ -352,7 +357,7 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
 .txt {
   flex: 1;
   margin: 0;
-  padding: 14px 16px;
+  padding: 16px 18px;
   font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
   font-size: 0.857rem;
   line-height: 1.6;

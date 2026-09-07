@@ -1,127 +1,186 @@
 /*
- * theme.css —— Fluent 明暗主题 token（对照 WindowsPy/gui/theme.py）。
+ * theme.css —— v21 现代云盘风设计 token。
  *
- * 取值口径：
- *  - 强调色 / 语义色 / 字体链逐字对译 theme.py:37-67；
- *  - 表面色分层与圆角阴影参照 qfluentwidgets 默认（浅色窗口 #f3f3f3、
- *    卡片 #ffffff；深色窗口 #202020、卡片 #292929），偏差点注释标注；
- *  - 字号一律 px 语义（theme.py:115-119 记录过 pt 在 96DPI 放大 33% 的
- *    事故）：正文以 1rem = 设置字号（默认 14px），标题用 rem 等比缩放，
- *    与 Qt 的 app.setPixelSize 全局字号行为一致；间距/圆角固定 px。
+ * 设计取向（对照 docs/ui-redesign/v21-mock.html 已验收）：
+ *  - 品牌蓝保留并提亮为 #0b6bcb 系，配渐变 --accent-grad；
+ *  - 浅色去灰提亮：bg #f4f6f8 微冷灰白 / surface 纯白；
+ *  - 卡片大圆角 14px + 柔和投影，hover 加深 + 浮起（由组件 scoped 配合）；
+ *  - 字号基准 14→15px（设置页字号档位仍 12/14/16/18，直接覆盖 --font-size）；
+ *  - 深色表面改 rgba 半透 + backdrop-blur 亚克力。
  *
- * 模式切换：html[data-theme="dark"] 覆盖深色；未设置时为浅色。
- * 首屏内联脚本（index.html）按 localStorage 缓存提前设 data-theme，
- * 避免加载完成前闪白/闪黑。
+ * 兼容：保留全部旧 token 名（accent/accent-soft/bg-page/surface/text/
+ * text2/stroke/stroke-card/divider/radius-card/radius-ctrl/radius-round/
+ * shadow-card/shadow-pop/font-family/font-size/dur/dur-fast/ease 等），
+ * 仅改值 + 新增（accent-2/accent-grad/accent-soft-2/surface-2/fill-quiet/
+ * type-* 文件类型色/shadow-card-hover/r-card-sm/r-nav/shadow-nav），
+ * 避免改 token 名导致全仓 scoped 样式失配。
+ *
+ * 模式：html[data-theme="dark"] 覆盖深色；auto 经媒体查询。首屏内联脚本
+ * （index.html）按 localStorage 缓存提前设 data-theme，避免闪白/闪黑。
  */
 
 :root {
-    /* ---- 强调色（theme.py:37 THEME_COLOR） ---- */
-    --accent: #0067b8;
-    --accent-hover: #0f6cbd;        /* hover 微提亮（按压由 --accent 压暗） */
-    --accent-pressed: #005a9e;
-    --accent-soft: rgba(0, 103, 184, .10); /* 选中/悬停条目底色 */
+    /* ---- 强调色（v21 提亮蓝 + 渐变） ---- */
+    --accent: #0b6bcb;
+    --accent-hover: #2b8aef;
+    --accent-pressed: #0a5fb5;
+    --accent-2: #2b8aef;
+    --accent-grad: linear-gradient(135deg, #0b6bcb 0%, #2b8aef 100%);
+    --accent-soft: rgba(11, 107, 203, .10);      /* 选中/悬停条目底色 */
+    --accent-soft-2: rgba(11, 107, 203, .16);    /* hover 描边/底色加深 */
 
-    /* ---- 语义色（theme.py:50-67 _SEMANTIC_COLORS.light） ---- */
-    --ok: #2e7d32;
-    --err: #c62828;
-    --warn: #ef6c00;
-    --muted: #5c5c5c;
-    --link: #0067b8;
-    --heading: #1a1a1a;
+    /* ---- 语义色 ---- */
+    --ok: #1f9d55;
+    --err: #e5484d;
+    --warn: #f5a623;
+    --muted: #6b7280;
+    --link: #0b6bcb;
+    --heading: #0d1626;
 
-    /* ---- 表面色分层（qfluentwidgets 浅色） ---- */
-    --bg-page: #f3f3f3;        /* 窗口底色 */
+    /* ---- 表面（浅色：微冷灰白底 + 纯白卡） ---- */
+    --bg-page: #f4f6f8;        /* 窗口底色 */
+    --bg-page-2: #eef1f5;      /* 次级背景（占位/空态） */
     --surface: #ffffff;        /* 卡片/输入面 */
-    --surface-hover: #f6f6f6;  /* 条目 hover */
-    --surface-pressed: #f0f0f0;
-    --fill-quiet: #f5f5f5;     /* 图标钮/条目的安静底 */
-    --stroke: rgba(0, 0, 0, .08);       /* 控件描边（qfw 用 8% 黑） */
-    --stroke-card: rgba(0, 0, 0, .06);  /* 卡片描边 */
-    --divider: rgba(0, 0, 0, .06);      /* 分隔线 */
+    --surface-2: #fafbfc;      /* 缩略图区等次级表面 */
+    --surface-hover: #f3f6fb;  /* 条目 hover（微带蓝） */
+    --surface-pressed: #e9edf3;
+    --fill-quiet: #f3f5f9;     /* 图标钮/安静底 */
+    --stroke: rgba(13, 22, 38, .08);       /* 控件描边 */
+    --stroke-card: rgba(13, 22, 38, .06);  /* 卡片描边 */
+    --divider: rgba(13, 22, 38, .07);      /* 分隔线 */
 
-    /* ---- 文字色（qfw 浅色近似） ---- */
-    --text: #242424;
-    --text2: #616161;   /* 次级内容 */
+    /* ---- 文字色 ---- */
+    --text: #1a2233;
+    --text2: #5c6577;
     --text-on-accent: #ffffff;
 
-    /* ---- 字体（theme.py:41-43 FONT_FAMILIES 逐字对译） ---- */
+    /* ---- 字体 ---- */
     --font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI",
                    "Microsoft YaHei", sans-serif;
-    --font-size: 14px; /* 设置页字号 12/14/16/18 直接写此变量（html 根） */
+    --font-size: 15px; /* v21 基准 15px（设置页 12/14/16/18 覆盖此变量） */
 
-    /* ---- 圆角 / 阴影（qfw：卡片 8px、控件 4px） ---- */
-    --radius-card: 8px;
-    --radius-ctrl: 4px;
+    /* ---- 圆角（加大） ---- */
+    --radius-card: 14px;
+    --r-card-sm: 10px;        /* 次级卡（图片/缩略图内层） */
+    --radius-ctrl: 8px;
     --radius-round: 999px;
-    --shadow-card: 0 2px 8px rgba(0, 0, 0, .08);
-    --shadow-pop: 0 8px 24px rgba(0, 0, 0, .16); /* 菜单/对话框 */
+    /* 旧 --radius-* 名仍被多处引用，保留为别名口径一致 */
+    --r-card: var(--radius-card);
+    --r-ctrl: var(--radius-ctrl);
+    --r-pill: var(--radius-round);
 
-    /* 亚克力近似 token 已删除：全仓无消费点（死代码），详见 docs/ARCHITECTURE.md 差异 #13 */
+    /* ---- 阴影（柔和 + 悬浮加深） ---- */
+    --shadow-card: 0 1px 2px rgba(13, 22, 38, .04), 0 2px 8px rgba(13, 22, 38, .05);
+    --shadow-card-hover: 0 4px 12px rgba(11, 107, 203, .12), 0 8px 24px rgba(13, 22, 38, .08);
+    --shadow-pop: 0 8px 32px rgba(13, 22, 38, .16);
+    --shadow-nav: 0 1px 0 rgba(13, 22, 38, .06);
 
-    /* ---- 动效（Windows 11 标准缓动） ---- */
+    /* ---- 文件类型彩色（v21 网格卡/列表行图标底） ---- */
+    --type-image: linear-gradient(135deg, #a78bfa, #8b5cf6);  /* 图片 紫 */
+    --type-video: linear-gradient(135deg, #f87171, #ef4444);  /* 视频 红 */
+    --type-audio: linear-gradient(135deg, #34d399, #10b981);  /* 音频 绿 */
+    --type-text:  linear-gradient(135deg, #60a5fa, #3b82f6);   /* 文本 蓝 */
+    --type-dir:   linear-gradient(135deg, #fbbf24, #f59e0b);   /* 目录 黄橙 */
+    --type-other: linear-gradient(135deg, #9ca3af, #6b7280);  /* 其它 灰 */
+    /* 用纯色回退（部分位置需要纯色而非渐变） */
+    --type-image-solid: #8b5cf6;
+    --type-video-solid: #ef4444;
+    --type-audio-solid: #10b981;
+    --type-text-solid:  #3b82f6;
+    --type-dir-solid:   #f59e0b;
+    --type-other-solid: #6b7280;
+
+    /* ---- 动效（Windows 11 标准缓动 + 弹性） ---- */
     --dur: 180ms;
     --dur-fast: 120ms;
     --ease: cubic-bezier(.33, 0, .2, 1);
+    --ease-spring: cubic-bezier(.34, 1.3, .5, 1);
 
-    /* ---- 布局常量（对照 main_window.py / side_panel.py 实测值） ---- */
-    --page-pad: 24px 16px 24px 24px;
-    --card-gap: 12px;
+    /* ---- 布局常量 ---- */
+    --page-pad: 24px 20px 24px 24px;
+    --card-gap: 14px;
+    --topbar-h: 56px;
+    --page-head-h: 52px;
+    --statusbar-h: 32px;
 }
 
-/* 深色：覆盖语义色与表面分层；文字继承暗色层级 */
+/* 深色：亚克力半透表面 + 提亮强调 */
 html[data-theme="dark"] {
-    --accent: #0067b8; /* 品牌色不随明暗变化 */
-    --accent-hover: #1986d7;
-    --accent-pressed: #0b5f9e;
-    --accent-soft: rgba(0, 103, 184, .22);
+    --accent: #4cc2ff;
+    --accent-hover: #6dd0ff;
+    --accent-pressed: #2da3e0;
+    --accent-2: #2b8aef;
+    --accent-grad: linear-gradient(135deg, #2b8aef 0%, #4cc2ff 100%);
+    --accent-soft: rgba(76, 194, 255, .14);
+    --accent-soft-2: rgba(76, 194, 255, .22);
 
-    --ok: #66bb6a;
-    --err: #ef5350;
-    --warn: #ffb74d;
-    --muted: #9e9e9e;
-    --link: #64b5f6;
-    /* heading 不覆盖（theme.py:65 深色为空串：控件继承主题文字色） */
+    --ok: #4ade80;
+    --err: #ff6b6b;
+    --warn: #fbbf24;
+    --muted: #8b94a5;
+    --link: #4cc2ff;
+    --heading: #f2f5fa;
 
-    --bg-page: #202020;
-    --surface: #292929;
-    --surface-hover: #2e2e2e;
-    --surface-pressed: #343434;
-    --fill-quiet: #313131;
+    --bg-page: #15171c;
+    --bg-page-2: #1a1d24;
+    --surface: rgba(32, 35, 42, .72);
+    --surface-2: rgba(40, 44, 52, .6);
+    --surface-hover: rgba(76, 194, 255, .08);
+    --surface-pressed: rgba(76, 194, 255, .12);
+    --fill-quiet: rgba(255, 255, 255, .04);
     --stroke: rgba(255, 255, 255, .08);
-    --stroke-card: rgba(255, 255, 255, .06);
+    --stroke-card: rgba(255, 255, 255, .07);
     --divider: rgba(255, 255, 255, .08);
 
-    --text: #f2f2f2;
-    --text2: #c4c4c4;
-    --text-on-accent: #ffffff;
+    --text: #e8ecf2;
+    --text2: #9ba3b3;
+    --text-on-accent: #0d1626;
 
-    --shadow-card: 0 2px 8px rgba(0, 0, 0, .4);
-    --shadow-pop: 0 8px 24px rgba(0, 0, 0, .5);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .28);
+    --shadow-card-hover: 0 6px 20px rgba(76, 194, 255, .18), 0 10px 32px rgba(0, 0, 0, .4);
+    --shadow-pop: 0 12px 40px rgba(0, 0, 0, .6);
+    --shadow-nav: 0 1px 0 rgba(0, 0, 0, .4);
+
+    /* 深色下类型色稍提亮 */
+    --type-image: linear-gradient(135deg, #a78bfa, #8b5cf6);
+    --type-video: linear-gradient(135deg, #f87171, #ef4444);
+    --type-audio: linear-gradient(135deg, #34d399, #10b981);
+    --type-text:  linear-gradient(135deg, #60a5fa, #3b82f6);
+    --type-dir:   linear-gradient(135deg, #fbbf24, #f59e0b);
+    --type-other: linear-gradient(135deg, #9ca3af, #6b7280);
 }
 
-/* 跟随系统：dark 偏好时套深色（html[data-theme="auto"] 由脚本移除，
-   直接依赖媒体查询；浅色分支无需声明，根默认即浅色） */
+/* 跟随系统：dark 偏好时套深色 */
 @media (prefers-color-scheme: dark) {
     html[data-theme="auto"] {
-        --ok: #66bb6a;
-        --err: #ef5350;
-        --warn: #ffb74d;
-        --muted: #9e9e9e;
-        --link: #64b5f6;
-        --accent-hover: #1986d7;
-        --accent-pressed: #0b5f9e;
-        --accent-soft: rgba(0, 103, 184, .22);
-        --bg-page: #202020;
-        --surface: #292929;
-        --surface-hover: #2e2e2e;
-        --surface-pressed: #343434;
-        --fill-quiet: #313131;
+        --accent: #4cc2ff;
+        --accent-hover: #6dd0ff;
+        --accent-pressed: #2da3e0;
+        --accent-2: #2b8aef;
+        --accent-grad: linear-gradient(135deg, #2b8aef 0%, #4cc2ff 100%);
+        --accent-soft: rgba(76, 194, 255, .14);
+        --accent-soft-2: rgba(76, 194, 255, .22);
+        --ok: #4ade80;
+        --err: #ff6b6b;
+        --warn: #fbbf24;
+        --muted: #8b94a5;
+        --link: #4cc2ff;
+        --heading: #f2f5fa;
+        --bg-page: #15171c;
+        --bg-page-2: #1a1d24;
+        --surface: rgba(32, 35, 42, .72);
+        --surface-2: rgba(40, 44, 52, .6);
+        --surface-hover: rgba(76, 194, 255, .08);
+        --surface-pressed: rgba(76, 194, 255, .12);
+        --fill-quiet: rgba(255, 255, 255, .04);
         --stroke: rgba(255, 255, 255, .08);
-        --stroke-card: rgba(255, 255, 255, .06);
+        --stroke-card: rgba(255, 255, 255, .07);
         --divider: rgba(255, 255, 255, .08);
-        --text: #f2f2f2;
-        --text2: #c4c4c4;
-        --shadow-card: 0 2px 8px rgba(0, 0, 0, .4);
-        --shadow-pop: 0 8px 24px rgba(0, 0, 0, .5);
+        --text: #e8ecf2;
+        --text2: #9ba3b3;
+        --shadow-card: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .28);
+        --shadow-card-hover: 0 6px 20px rgba(76, 194, 255, .18), 0 10px 32px rgba(0, 0, 0, .4);
+        --shadow-pop: 0 12px 40px rgba(0, 0, 0, .6);
+        --shadow-nav: 0 1px 0 rgba(0, 0, 0, .4);
     }
 }

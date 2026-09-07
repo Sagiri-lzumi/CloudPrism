@@ -50,7 +50,7 @@ const emit = defineEmits<{click: []}>()
 
 .clickable:hover {
   background: var(--surface-hover);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .clickable:active {

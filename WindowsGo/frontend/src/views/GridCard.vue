@@ -1,11 +1,13 @@
 <!--
-  GridCard.vue —— 网格模式条目卡（header band 22px + 缩略图 110×44 + 名称）。
-  对照 Python side_panel 网格视图。图片条目异步请求加密缩略图（/t/ 令牌），
-  退出视口卸载时吊销，防注册表被大量浏览撑满（ErrTooManyTokens）；目录与其
-  余文件显示类别占位图标。⋯ 与多选勾选角标落在 header band 内的空白里，不
-  再压在缩略图上（v14 的 top:2px 把图标贴在缩略图上被吐槽遮挡；v17 起角标
-  仅多选批量态显示，单选只靠整卡高亮）。key 由父级按 remote 生成：切目录
-  即重建。
+  GridCard.vue —— v21 网格模式条目卡。
+  对照 docs/ui-redesign/v21-mock.html：132px 卡宽、112px 缩略图、彩色文件
+  类型图标（图片紫/视频红/音频绿/文本蓝/目录黄橙）、hover 整卡浮起、选中
+  accent 描边 + 渐变徽章。图片条目异步请求加密缩略图（/t/ 令牌），退出视口
+  卸载时吊销，防注册表被大量浏览撑满（ErrTooManyTokens）；目录与其余文件
+  显示彩色类别图标占位。⋯ 与多选勾选角标落在 header band 内的空白里，不
+  再压在缩略图上（v14 起验证：header band 独立在 .thumb 上方，几何不重叠）；
+  v17 起角标仅多选批量态显示，单选只靠整卡高亮。key 由父级按 remote 生成：
+  切目录即重建。
 -->
 <script setup lang="ts">
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
@@ -61,13 +63,17 @@ const placeholderIcon = computed(() =>
   props.entry.isDir ? 'folder' : KIND_ICON[kindOf(props.entry.display)],
 )
 
+// 彩色类型块类：目录/类别 → t-*
+const typeClass = computed(() =>
+  props.entry.isDir ? 't-dir' : `t-${kindOf(props.entry.display)}`,
+)
+
 // 是否处于选择集（多选成员或当前单选，决定整卡高亮）
 function isSel(e: appstate.FileEntry): boolean {
   return ui.multi.some((x) => x.remote === e.remote)
 }
 
 // 多选批量态（≥2 项）：此时勾选角标才出现；单选仅靠 .gc.sel 整卡高亮
-//（v17：去掉单选常驻左上角蓝点的观感问题）
 const multiMode = computed(() => ui.multi.length > 1)
 </script>
 
@@ -79,7 +85,7 @@ const multiMode = computed(() => ui.multi.length > 1)
     @dblclick="emit('open', entry)"
     @contextmenu.prevent="emit('ctx', {ev: $event, entry})"
   >
-    <!-- 顶部操作带 22px：⋯ 在此，不压缩略图；勾选角标仅多选态出现 -->
+    <!-- 顶部操作带 24px：⋯ 在此，不压缩略图；勾选角标仅多选态出现 -->
     <div class="gc-head">
       <span v-if="isSel(entry) && multiMode" class="gc-check" aria-hidden="true">
         <Icon name="check" :size="11" class="gc-check-ic" />
@@ -93,14 +99,16 @@ const multiMode = computed(() => ui.multi.length > 1)
         <Icon name="more" :size="14" />
       </button>
     </div>
-    <!-- 缩略图：96px 与 Python side_panel iconSize 对齐，header band 在上方独立不挤压此区 -->
+    <!-- 缩略图：112px；header band 在上方独立不挤压此区 -->
     <div class="thumb">
       <template v-if="entry.isDir">
-        <Icon name="folder" :size="56" class="ic dir" />
+        <span class="type-ic t-dir"><Icon name="folder" :size="28" /></span>
       </template>
       <img v-else-if="thumb" :src="thumb" class="img" alt="" draggable="false" @error="fail = true" />
-      <Icon v-else-if="loading" name="sync" :size="28" class="ic spin" />
-      <Icon v-else :name="placeholderIcon" :size="48" class="ic" :class="{err: fail}" />
+      <Icon v-else-if="loading" name="sync" :size="28" class="spin" />
+      <span v-else class="type-ic" :class="[typeClass, {err: fail}]">
+        <Icon :name="placeholderIcon" :size="28" />
+      </span>
     </div>
     <figcaption class="name" :title="entry.display">{{ entry.display }}</figcaption>
   </figure>
@@ -111,50 +119,57 @@ const multiMode = computed(() => ui.multi.length > 1)
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: stretch; /* header/thumb/name 撑满宽度 */
+  align-items: stretch;
   gap: 2px;
-  width: 110px;
+  width: 132px;
   padding: 0;
   margin: 0;
-  border: 1px solid transparent;
+  background: var(--surface);
+  border: 1px solid var(--stroke-card);
   border-radius: var(--radius-card);
   cursor: default;
   user-select: none;
-  overflow: hidden; /* 圆角裁剪 header 背景 */
+  overflow: hidden;
+  transition: transform var(--dur) var(--ease-spring), box-shadow var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
 }
 
 .gc:hover {
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-card-hover);
+  border-color: var(--accent-soft-2);
 }
 
-/* 选中态：accent-soft 背景 + 1px accent 实线 border，强化对比度 */
+/* 选中态：accent 描边 + 浮起 + accent-soft 底 */
 .gc.sel {
-  background: var(--accent-soft);
+  background: var(--surface);
   border-color: var(--accent);
+  border-width: 1.5px;
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-card-hover);
 }
 
-/* 顶部操作带 22px：徽章/⋯ 落在里面，不压在缩略图上 */
+/* 顶部操作带 24px：徽章/⋯ 落在里面，不压在缩略图上 */
 .gc-head {
   position: relative;
   flex: none;
-  height: 22px;
+  height: 24px;
 }
 
-/* 选中勾选角标（仅多选批量态显示，见 multiMode）：绝对定位在 header 左上，
-   圆形 accent 底 + 白对勾 + surface 描边圈；单选不显示，靠 .gc.sel 高亮 */
+/* 选中勾选角标（仅多选批量态显示，见 multiMode）：accent 渐变实色圈 +
+   surface 描边圈 + 投影 */
 .gc-check {
   position: absolute;
-  top: 3px;
+  top: 4px;
   left: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  background: var(--accent);
+  width: 18px;
+  height: 18px;
+  background: var(--accent-grad);
   border-radius: 50%;
   z-index: 2;
-  box-shadow: 0 0 0 1.5px var(--surface), 0 1px 2px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 0 0 2px var(--surface), 0 2px 6px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .gc-check-ic {
@@ -165,12 +180,12 @@ const multiMode = computed(() => ui.multi.length > 1)
 .gc-more {
   position: absolute;
   top: 3px;
-  right: 6px;
+  right: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   color: var(--text2);
   background: transparent;
   border: none;
@@ -188,39 +203,52 @@ const multiMode = computed(() => ui.multi.length > 1)
 
 .gc-more:hover {
   color: var(--accent);
-  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  background: var(--surface-hover);
 }
 
-/* 缩略图：96px 与 Python side_panel iconSize 对齐；header band 独立在上方不挤压此区 */
+/* 缩略图：112px；header band 独立在上方不挤压此区 */
 .thumb {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 96px;
-  padding: 0 6px;
-}
-
-.ic {
-  color: var(--text2);
-}
-
-.ic.dir {
-  color: var(--accent);
-}
-
-.ic.err {
-  color: var(--err);
+  height: 112px;
+  background: var(--surface-2);
 }
 
 .img {
-  max-width: 98px;
-  max-height: 96px;
+  max-width: 120px;
+  max-height: 108px;
   object-fit: contain;
+  border-radius: var(--r-card-sm);
+}
+
+/* 彩色类型图标块（56px 渐变底 + 白图标） */
+.type-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  color: #fff;
+}
+
+.type-ic.t-image { background: var(--type-image); }
+.type-ic.t-video { background: var(--type-video); }
+.type-ic.t-audio { background: var(--type-audio); }
+.type-ic.t-text  { background: var(--type-text); }
+.type-ic.t-dir   { background: var(--type-dir); }
+.type-ic.t-other { background: var(--type-other); }
+
+.type-ic.err {
+  filter: grayscale(0.4);
+  opacity: 0.7;
 }
 
 .spin {
   animation: gcspin 1.2s linear infinite;
+  color: var(--text2);
 }
 
 @keyframes gcspin {
@@ -229,13 +257,13 @@ const multiMode = computed(() => ui.multi.length > 1)
   }
 }
 
-/* 名称：两行截断，6px 底距让卡片呼吸 */
+/* 名称：两行截断，呼吸间距 */
 .name {
-  padding: 0 4px 6px;
+  padding: 8px 8px 10px;
   width: 100%;
-  max-height: 2.4em; /* 两行截断 */
-  font-size: 0.786rem;
-  line-height: 1.2;
+  max-height: 2.4em;
+  font-size: 0.8rem;
+  line-height: 1.3;
   color: var(--text);
   text-align: center;
   overflow: hidden;
