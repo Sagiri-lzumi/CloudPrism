@@ -69,9 +69,9 @@
     --r-ctrl: var(--radius-ctrl);
     --r-pill: var(--radius-round);
 
-    /* ---- 阴影（柔和 + 悬浮加深） ---- */
-    --shadow-card: 0 1px 2px rgba(13, 22, 38, .04), 0 2px 8px rgba(13, 22, 38, .05);
-    --shadow-card-hover: 0 4px 12px rgba(11, 107, 203, .12), 0 8px 24px rgba(13, 22, 38, .08);
+    /* ---- 阴影（柔和 + 悬浮加深；v22 收敛扩散，防 hover 遮相邻卡） ---- */
+    --shadow-card: 0 1px 2px rgba(13, 22, 38, .04), 0 2px 6px rgba(13, 22, 38, .05);
+    --shadow-card-hover: 0 2px 8px rgba(11, 107, 203, .12), 0 6px 16px rgba(13, 22, 38, .08);
     --shadow-pop: 0 8px 32px rgba(13, 22, 38, .16);
     --shadow-nav: 0 1px 0 rgba(13, 22, 38, .06);
 

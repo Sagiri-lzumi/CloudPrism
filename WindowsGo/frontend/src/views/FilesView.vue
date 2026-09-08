@@ -730,12 +730,12 @@ function confirmDlg(payload: string | boolean) {
   color: var(--heading);
 }
 
-/* 网格：132px 卡片自动换行（v21 加大，配合 GridCard 重做） */
+/* 网格：132px 卡片自动换行（v21 加大）；gap 18px 容纳 hover 浮起投影不盖邻卡 */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, 132px);
   justify-content: start;
-  gap: 14px;
+  gap: 18px;
 }
 
 /* 列表：行式条目 */
