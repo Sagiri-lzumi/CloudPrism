@@ -407,7 +407,7 @@ function confirmDlg(payload: string | boolean) {
       <!-- 多选批量条：>1 项时展示，一键下载/导出/删除/取消 -->
       <Transition name="fade">
         <div v-if="hasMulti" class="multi-bar">
-          <Icon name="square-check" :size="15" class="mb-check" />
+          <Icon name="check" :size="15" class="mb-check" />
           <span class="mb-text">已选 {{ multiSel.length }} 项</span>
           <span class="mb-actions">
             <Button icon="download" :disabled="!connected" @click="downloadSel">下载</Button>
