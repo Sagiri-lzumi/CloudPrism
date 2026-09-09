@@ -171,13 +171,16 @@ const multiMode = computed(() => ui.multi.length > 1)
   border-radius: var(--r-card-sm);
 }
 
-/* 彩色类型图标块（56px 渐变底 + 白图标） */
+/* 彩色类型图标块（56px 渐变底 + 白图标）；
+   overflow visible + border-box 固定尺寸，防 WebView2 渲染下被裁切 */
 .type-ic {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 56px;
   height: 56px;
+  box-sizing: border-box;
+  overflow: visible;
   border-radius: 14px;
   color: #fff;
 }

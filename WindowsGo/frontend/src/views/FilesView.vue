@@ -742,14 +742,14 @@ function confirmDlg(payload: string | boolean) {
 .list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .row {
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 44px;
+  height: 48px;
   padding: 0 14px;
   border-radius: var(--radius-ctrl);
   user-select: none;
@@ -770,7 +770,8 @@ function confirmDlg(payload: string | boolean) {
   color: var(--accent);
 }
 
-/* 行类型图标块：彩色渐变底（与网格卡一致） */
+/* 行类型图标块：彩色渐变底（与网格卡一致）；
+   overflow visible + border-box 固定尺寸，防 WebView2 渲染下被裁切 */
 .row-ic {
   flex: none;
   display: inline-flex;
@@ -778,8 +779,17 @@ function confirmDlg(payload: string | boolean) {
   justify-content: center;
   width: 32px;
   height: 32px;
+  box-sizing: border-box;
+  overflow: visible;
   color: #fff;
   border-radius: 8px;
+}
+
+/* Icon span 也固定尺寸，防 svg 撑出 span 边界 */
+.row-ic :deep(.fluent-icon) {
+  width: 16px;
+  height: 16px;
+  overflow: visible;
 }
 
 .row-ic.t-image { background: var(--type-image); }
