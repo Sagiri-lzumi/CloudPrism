@@ -64,7 +64,9 @@ function pick(i: number) {
         @click="open = !open"
       >
         <span class="combo-text">{{ current }}</span>
-        <Icon name="chevron_down_med" :size="12" />
+        <span class="combo-chev" aria-hidden="true">
+          <Icon name="chevron_down_med" :size="12" />
+        </span>
       </button>
     </div>
     <RoundMenu :open="open" :anchor="btn ?? null" :items="items" @select="pick" @close="open = false" />
@@ -72,15 +74,20 @@ function pick(i: number) {
 </template>
 
 <style scoped>
-/* 下拉钮内倒三角垂直居中：line-height:1 防 svg 被文字行高拉偏；
-   .set-combo 是本组件模板元素直接覆盖；:deep(.fluent-icon) 穿透到
-   Icon 子组件根，去掉 baseline 偏移确保 svg 与文字同中心 */
+/* 下拉钮：line-height:1 防行高影响子元素基线 */
 .set-combo {
   line-height: 1;
 }
-:deep(.fluent-icon) {
-  line-height: 0;
-  vertical-align: middle;
+
+/* 倒三角容器：固定 14px flex 容器强制 svg 几何居中，防靠下；
+   之前 Icon 直接做 flex 子元素实测仍偏下，包一层固定容器最稳 */
+.combo-chev {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
 }
 
 .combo-text {
