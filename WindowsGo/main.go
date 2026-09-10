@@ -108,6 +108,13 @@ func runtimeOptions(app *App, fingerprint string) *options.App {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
+		// 文件拖放：EnableFileDrop 让 OnFileDrop 拿到本地路径（转发给前端
+		// onDropped 发起上传）；DisableWebViewDrop 禁用 WebView 默认的
+		// 拖放下载行为（缺它则拖入文件被当浏览器下载）。
+		DragAndDrop: &options.DragAndDrop{
+			EnableFileDrop:    true,
+			DisableWebViewDrop: true,
+		},
 		// 前端挂载前的底色，取 Fluent 浅色主题的应用背景，避免启动瞬间
 		// 闪白/闪黑（阶段 6 落地主题后与 CSS 变量对齐）
 		BackgroundColour: &options.RGBA{R: 0xFA, G: 0xFA, B: 0xFA, A: 0xFF},
