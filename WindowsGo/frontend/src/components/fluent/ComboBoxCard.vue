@@ -72,6 +72,17 @@ function pick(i: number) {
 </template>
 
 <style scoped>
+/* 下拉钮内倒三角垂直居中：line-height:1 防 svg 被文字行高拉偏；
+   .set-combo 是本组件模板元素直接覆盖；:deep(.fluent-icon) 穿透到
+   Icon 子组件根，去掉 baseline 偏移确保 svg 与文字同中心 */
+.set-combo {
+  line-height: 1;
+}
+:deep(.fluent-icon) {
+  line-height: 0;
+  vertical-align: middle;
+}
+
 .combo-text {
   max-width: 180px;
   white-space: nowrap;

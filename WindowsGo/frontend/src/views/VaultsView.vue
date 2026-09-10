@@ -336,7 +336,7 @@ async function onOtherConfirm(payload: string | boolean) {
     <template v-if="!connected">
       <div class="welcome">
         <div class="hero">
-          <span class="hero-ic"><Icon name="cloud" :size="44" /></span>
+          <span class="hero-ic"><Icon name="cloud" :size="52" /></span>
           <h2>欢迎使用 CloudPrism</h2>
           <p>文件加密后存入本地文件夹或云盘；连接密库后即可浏览与播放，全程端到端解密。</p>
           <div class="hero-actions">
