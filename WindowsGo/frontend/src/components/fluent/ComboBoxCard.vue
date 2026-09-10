@@ -65,7 +65,9 @@ function pick(i: number) {
       >
         <span class="combo-text">{{ current }}</span>
         <span class="combo-chev" aria-hidden="true">
-          <Icon name="chevron_down_med" :size="12" />
+          <svg class="combo-chev-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
         </span>
       </button>
     </div>
@@ -79,15 +81,23 @@ function pick(i: number) {
   line-height: 1;
 }
 
-/* 倒三角容器：固定 14px flex 容器强制 svg 几何居中，防靠下；
-   之前 Icon 直接做 flex 子元素实测仍偏下，包一层固定容器最稳 */
+/* 倒三角容器：固定 16px flex 容器，强制 svg 几何居中。
+   v27 起 chevron 用内联 svg（绕开 Icon 组件 normalize/双源机制，
+   WebView2 真实渲染下 100% 可控）。*/
 .combo-chev {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
+  overflow: visible;
+}
+
+.combo-chev-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
 }
 
 .combo-text {
