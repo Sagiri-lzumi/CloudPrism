@@ -166,47 +166,40 @@ const menuStyle = computed(() => ({left: pos.value.left + 'px', top: pos.value.t
 .cp-menu {
   position: fixed;
   z-index: 1000;
-  min-width: 200px;
-  padding: 6px;
+  min-width: 140px;
+  padding: 4px;
   background: var(--surface);
   border: 1px solid var(--stroke-card);
-  border-radius: var(--radius-card); /* 14px */
+  border-radius: var(--radius-card); /* 与卡片/弹层圆角口径一致 */
   box-shadow: var(--shadow-pop);
-  backdrop-filter: blur(20px);
 }
 
 .item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  height: 36px;
-  padding: 0 12px;
+  height: 32px;
+  padding: 0 10px;
   font-family: inherit;
-  font-size: 0.85rem;
+  font-size: 0.857rem;
   color: var(--text);
   background: transparent;
   border: none;
-  border-radius: var(--radius-ctrl); /* 8px */
+  border-radius: 4px;
   text-align: left;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease);
 }
 
 .item:hover:not(:disabled) {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .item:active:not(:disabled) {
-  background: var(--accent-soft-2);
+  background: color-mix(in srgb, var(--text) 12%, transparent);
 }
 
 .item.danger {
-  color: var(--err);
-}
-
-.item.danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--err) 10%, transparent);
   color: var(--err);
 }
 
@@ -216,10 +209,6 @@ const menuStyle = computed(() => ({left: pos.value.left + 'px', top: pos.value.t
 
 .item-icon {
   color: var(--text); /* v15 加深：text2→text，菜单图标对比度更高 */
-}
-
-.item:hover:not(:disabled) .item-icon {
-  color: var(--accent);
 }
 
 .item.danger .item-icon {

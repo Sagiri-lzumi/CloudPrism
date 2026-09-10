@@ -38,28 +38,29 @@ const emit = defineEmits<{click: [e: MouseEvent]}>()
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  height: 34px;
-  min-width: 34px;
+  gap: 6px;
+  height: 32px;
+  min-width: 32px;
   padding: 0 16px;
   font-family: inherit;
-  font-size: 0.85rem;
+  font-size: 0.857rem;
   font-weight: 600;
   color: var(--text-on-accent);
-  background: var(--accent-grad);
+  background: var(--accent);
   border: none;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-ctrl);
   cursor: default;
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 28%, transparent);
-  transition: filter var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease);
 }
 
 .cp-btn-primary:hover:not(:disabled) {
-  filter: brightness(1.06);
+  background: var(--accent-hover);
 }
 
 .cp-btn-primary:active:not(:disabled) {
-  transform: scale(0.97);
+  background: var(--accent-pressed);
+  transform: scale(0.98);
+  transition: transform var(--dur-fast) var(--ease);
 }
 
 .cp-btn-primary:disabled {
@@ -67,11 +68,7 @@ const emit = defineEmits<{click: [e: MouseEvent]}>()
 }
 
 .icon-only {
-  width: 34px;
+  width: 32px;
   padding: 0;
-}
-
-.label {
-  white-space: nowrap;
 }
 </style>

@@ -1,72 +1,49 @@
 /*
- * layout.css —— v21 应用级布局骨架。
+ * layout.css —— 应用级布局骨架：三栏网格、底栏、工具栏通用样式。
  *
- * 信息架构重排（对照 docs/ui-redesign/v21-mock.html）：
- *  - 顶部 56px 水平导航栏（Logo + 页签 + 右侧操作）替代左侧 48px 图标轨；
- *  - 文件页 = 页头(大标题+面包屑+主操作) + 文件区 | 预览面板（Splitter）；
- *  - 底部分别是传输条（仅活动时占位）与状态条。
- *
- * 根网格 = 1fr 列 × 56px顶栏 | 1fr内容 | TransferBar(可无) | StatusBar。
+ * 对照 main_window.py 的动态布局：文件页 = 文件视图 + 预览面板
+ * （Splitter 分隔，初始 400:800 由 JS 记忆在 localStorage）；其余页
+ * 中栏全宽。根网格 = 48px 导航轨 | 内容区；底部分别是传输条（仅活动
+ * 时占位）与状态条。
  */
 
 .app-shell {
   display: grid;
-  grid-template-columns: 1fr;            /* 单列：顶栏/内容/底栏全部通栏 */
-  grid-template-rows: var(--topbar-h) 1fr auto auto; /* 顶栏 | 内容 | TransferBar | StatusBar */
+  grid-template-columns: 48px 1fr; /* NavRail | 内容 */
+  grid-template-rows: 1fr auto auto; /* 内容 | TransferBar(可无) | StatusBar */
   height: 100%;
   background: var(--bg-page);
 }
 
-/* ---- 顶部导航栏 ---- */
-.app-topbar {
-  grid-row: 1;
+.app-nav {
+  grid-row: 1 / 4; /* 导航轨贯通到底（qfw ActivityBar 语义） */
   grid-column: 1;
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  height: var(--topbar-h);
-  padding: 0 20px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--divider);
-  backdrop-filter: blur(20px);
-  z-index: 50;
-  box-shadow: var(--shadow-nav);
 }
 
 .app-main {
-  grid-row: 2;
-  grid-column: 1;
+  grid-row: 1;
+  grid-column: 2;
   min-width: 0;
   min-height: 0; /* 允许内部滚动区收缩 */
   overflow: hidden;
 }
 
 .app-transfer {
-  grid-row: 3;
-  grid-column: 1;
+  grid-row: 2;
+  grid-column: 2;
 }
 
 .app-status {
-  grid-row: 4;
-  grid-column: 1;
+  grid-row: 3;
+  grid-column: 2;
 }
 
-/* ---- 文件页页头（大标题 + 面包屑 + 主操作） ---- */
-.page-head {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-height: var(--page-head-h);
-  padding: 0 20px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--divider);
-  flex: none;
-}
-
-/* ---- 文件页双栏（视图 + 预览），列宽由 Splitter 写 CSS 变量 ---- */
+/* ---- 文件页双栏（视图 + 预览），列宽由 Splitter 写 CSS 变量 ----
+   纵向拉伸由 FilesView.vue scoped .files-shell 的 flex:1/min-height:0 负责，
+   这里只声明横向三列骨架，避免 height:100% 与 flex 子项重复控制高度。 */
 .files-shell {
   display: grid;
-  grid-template-columns: var(--split-l, 460px) 4px 1fr;
+  grid-template-columns: var(--split-l, 400px) 4px 1fr;
 }
 
 /* 分隔拖柄：hover/拖动时高亮 */
@@ -89,15 +66,14 @@
   cursor: col-resize;
 }
 
-/* ---- 页面级工具栏（兼容保留：非文件页仍可复用） ---- */
+/* ---- 页面级工具栏（文件视图顶部动作行共用） ---- */
 .cp-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 52px;
-  padding: 0 20px;
+  gap: 4px;
+  min-height: 44px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--divider);
-  background: var(--surface);
 }
 
 .cp-toolbar .spacer {
@@ -127,7 +103,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 10px;
   height: 100%;
   padding: 24px;
   text-align: center;
@@ -142,8 +118,8 @@
 .empty-state .sub {
   font-size: 0.857rem;
   color: var(--text2);
-  max-width: 440px;
-  line-height: 1.6;
+  max-width: 420px;
+  line-height: 1.5;
 }
 
 /* ---- 视图切换动画容器（base.css 的 .page-* 配合） ---- */

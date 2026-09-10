@@ -59,11 +59,6 @@ function kindOfRow(e: appstate.FileEntry): string {
   return e.isDir ? 'folder' : KIND_ICON[kindOf(e.display)]
 }
 
-/** 行类型彩色块类：目录/类别 → t-*（网格卡/列表行彩色图标底共用口径） */
-function rowTypeClass(e: appstate.FileEntry): string {
-  return e.isDir ? 't-dir' : `t-${kindOf(e.display)}`
-}
-
 /* -------------------------------------------------- 点击/多选交互 */
 
 // shift 连选锚点：最近一次「普通单击」的主条目 remote（无则取列表首项）
@@ -336,8 +331,8 @@ function confirmDlg(payload: string | boolean) {
     </div>
 
     <template v-else>
-      <!-- 页头：大标题 + 面包屑 + 主操作（v21 重排：替代原 cp-toolbar） -->
-      <div class="page-head">
+      <!-- 工具行：导航/动作/视图模式 -->
+      <div class="cp-toolbar">
         <Button
           iconOnly
           icon="up"
@@ -345,69 +340,56 @@ function confirmDlg(payload: string | boolean) {
           :disabled="!crumbs.length || ui.loading"
           @click="goUp"
         />
-        <span class="page-title">我的密库</span>
-        <nav class="crumbs" aria-label="路径">
-          <button
-            type="button"
-            class="crumb root"
-            :class="{on: !crumbs.length}"
-            title="密库根目录"
-            @click="crumbTo(-1)"
-          >
-            <Icon name="home" :size="13" />
-          </button>
-          <template v-for="(c, i) in crumbs" :key="c.remote">
-            <Icon name="chevron_right_med" :size="12" class="arrow" />
-            <button
-              type="button"
-              class="crumb"
-              :class="{on: i === crumbs.length - 1}"
-              :title="c.label"
-              @click="crumbTo(i)"
-            >
-              {{ c.label }}
-            </button>
-          </template>
-        </nav>
-        <div class="head-actions">
-          <Button iconOnly icon="update" title="刷新（F5）" @click="reloadDir" />
-          <Button iconOnly icon="folder_add" title="新建文件夹" @click="openMsg('newFolder')" />
-          <Button icon="send" @click="pickUpload()">上传</Button>
+        <Button iconOnly icon="update" title="刷新（F5）" @click="reloadDir" />
+        <span class="sep" />
+        <Button iconOnly icon="folder_add" title="新建文件夹" @click="openMsg('newFolder')" />
+        <Button iconOnly icon="send" title="上传文件到当前目录" @click="pickUpload()" />
+        <Button
+          iconOnly
+          icon="download"
+          :title="hasMulti ? `下载所选 ${multiSel.length} 项` : '下载选中项'"
+          :disabled="!multiSel.length"
+          @click="downloadSel"
+        />
+        <Button
+          iconOnly
+          icon="share"
+          :title="hasMulti ? `解密导出所选 ${multiSel.length} 项` : '解密导出选中文件'"
+          :disabled="!multiSel.length"
+          @click="exportSel"
+        />
+        <span class="spacer" />
+        <Button
+          v-if="multiSel.length > 1"
+          iconOnly
+          icon="cancel"
+          title="取消多选"
+          @click="clearMulti"
+        />
+        <span class="mode">
           <Button
-            icon="download"
-            :disabled="!multiSel.length"
-            @click="downloadSel"
-          >下载</Button>
+            iconOnly
+            icon="list"
+            class="toolbar-mode"
+            :class="{on: ui.viewMode === 'list'}"
+            title="列表视图"
+            @click="setViewMode('list')"
+          />
           <Button
-            icon="share"
-            :disabled="!multiSel.length"
-            @click="exportSel"
-          >导出</Button>
-          <span class="view-toggle">
-            <Button
-              iconOnly
-              icon="list"
-              class="toolbar-mode"
-              :class="{on: ui.viewMode === 'list'}"
-              title="列表视图"
-              @click="setViewMode('list')"
-            />
-            <Button
-              iconOnly
-              icon="tiles"
-              class="toolbar-mode"
-              :class="{on: ui.viewMode === 'grid'}"
-              title="网格视图"
-              @click="setViewMode('grid')"
-            />
-          </span>
-        </div>
+            iconOnly
+            icon="tiles"
+            class="toolbar-mode"
+            :class="{on: ui.viewMode === 'grid'}"
+            title="网格视图"
+            @click="setViewMode('grid')"
+          />
+        </span>
       </div>
 
       <!-- 多选批量条：>1 项时展示，一键下载/导出/删除/取消 -->
       <Transition name="fade">
         <div v-if="hasMulti" class="multi-bar">
-          <Icon name="check" :size="15" class="mb-check" />
+          <Icon name="square-check" :size="15" class="mb-check" />
           <span class="mb-text">已选 {{ multiSel.length }} 项</span>
           <span class="mb-actions">
             <Button icon="download" :disabled="!connected" @click="downloadSel">下载</Button>
@@ -418,9 +400,33 @@ function confirmDlg(payload: string | boolean) {
         </div>
       </Transition>
 
-      <!-- 双栏：浏览（条目区） | Splitter | 预览 -->
+      <!-- 双栏：浏览（面包屑+条目） | Splitter | 预览 -->
       <div class="files-shell" :style="{'--split-l': splitL + 'px'}">
         <section class="browse">
+          <nav class="crumbs" aria-label="路径">
+            <button
+              type="button"
+              class="crumb root"
+              :class="{on: !crumbs.length}"
+              title="密库根目录"
+              @click="crumbTo(-1)"
+            >
+              <Icon name="home" :size="13" />
+            </button>
+            <template v-for="(c, i) in crumbs" :key="c.remote">
+              <Icon name="chevron_right_med" :size="12" class="arrow" />
+              <button
+                type="button"
+                class="crumb"
+                :class="{on: i === crumbs.length - 1}"
+                :title="c.label"
+                @click="crumbTo(i)"
+              >
+                {{ c.label }}
+              </button>
+            </template>
+          </nav>
+
           <!-- 条目区：右键空白=上下文菜单；加载/错误/空态分流 -->
           <div
             class="zone"
@@ -471,10 +477,8 @@ function confirmDlg(payload: string | boolean) {
                 @contextmenu.prevent="openCtx($event, e)"
               >
                 <!-- 行首勾选：仅多选批量态（≥2 项）显示，单选只靠 .row.sel 高亮 -->
-                <Icon v-if="isSel(e) && hasMulti" name="check" :size="16" class="row-check" />
-                <span class="row-ic" :class="rowTypeClass(e)">
-                  <Icon :name="kindOfRow(e)" :size="16" />
-                </span>
+                <Icon v-if="isSel(e) && hasMulti" name="square-check" :size="16" class="row-check" />
+                <Icon :name="kindOfRow(e)" :size="18" class="row-ic" :class="{dir: e.isDir}" />
                 <span class="row-name" :title="e.display">{{ e.display }}</span>
                 <span class="row-size">{{ e.isDir ? '文件夹' : fmtSize(e.size) }}</span>
                 <button
@@ -557,90 +561,11 @@ function confirmDlg(payload: string | boolean) {
   color: var(--text2);
 }
 
-/* ---------------- 页头（v21 重排：大标题 + 面包屑 + 主操作） ---------------- */
-.page-title {
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: var(--heading);
-  white-space: nowrap;
+/* 行多选勾选（lucide square-check：描边勾选框，随 accent 着色） */
+.row-check {
   flex: none;
-}
-
-.crumbs {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: thin;
-}
-
-.crumb {
-  display: inline-flex;
-  align-items: center;
-  flex: none;
-  height: 28px;
-  max-width: 200px;
-  padding: 0 8px;
-  font-family: inherit;
-  font-size: 0.82rem;
-  color: var(--text2);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-ctrl);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
-}
-
-.crumb:hover {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-
-.crumb.on {
   color: var(--accent);
-  font-weight: 600;
-}
-
-.arrow {
-  flex: none;
-  color: var(--text2);
-  opacity: 0.5;
-}
-
-.head-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-}
-
-/* 视图切换钮组：胶囊容器 */
-.view-toggle {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  background: var(--fill-quiet);
-  border-radius: var(--radius-round);
-}
-
-.view-toggle :deep(.toolbar-mode) {
-  height: 28px;
-  width: 28px;
-  min-width: 28px;
-  color: var(--text2);
-  background: transparent;
-  border: none;
-  box-shadow: none;
-}
-
-.view-toggle :deep(.toolbar-mode.on) {
-  background: var(--surface);
-  color: var(--accent);
-  box-shadow: var(--shadow-card);
+  margin-right: 2px;
 }
 
 /* ---------------- 多选批量条（>1 项时出现） ---------------- */
@@ -648,9 +573,9 @@ function confirmDlg(payload: string | boolean) {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 48px;
-  padding: 0 18px;
-  margin: 0 16px 8px;
+  min-height: 40px;
+  padding: 0 14px;
+  margin: 0 12px 8px;
   background: var(--surface);
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-card);
@@ -662,7 +587,7 @@ function confirmDlg(payload: string | boolean) {
 }
 
 .mb-text {
-  font-size: 0.9rem;
+  font-size: 0.857rem;
   font-weight: 600;
   color: var(--heading);
 }
@@ -671,6 +596,12 @@ function confirmDlg(payload: string | boolean) {
   display: inline-flex;
   gap: 8px;
   margin-left: auto;
+}
+
+/* ---------------- 模式钮组（view/tiles 二选一） ---------------- */
+.mode {
+  display: inline-flex;
+  gap: 2px;
 }
 
 /* ---------------- 浏览区（files-shell 左栏） ---------------- */
@@ -683,12 +614,57 @@ function confirmDlg(payload: string | boolean) {
   background: var(--bg-page);
 }
 
+/* 面包屑：根图标 + 明文段（后端 remote 是密文，不可直接展示） */
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 8px;
+  overflow-x: auto;
+  flex: none;
+  border-bottom: 1px solid var(--divider);
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 26px;
+  max-width: 180px;
+  padding: 0 8px;
+  font-family: inherit;
+  font-size: 0.786rem;
+  color: var(--text2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-ctrl);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crumb:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.crumb.on {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.arrow {
+  flex: none;
+  color: var(--text2);
+  opacity: 0.6;
+}
+
 /* ---------------- 条目区 ---------------- */
 .zone {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 18px;
+  padding: 10px;
 }
 
 .center {
@@ -698,12 +674,12 @@ function confirmDlg(payload: string | boolean) {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   text-align: center;
 }
 
 .loading-bar {
-  width: 200px;
+  width: 180px;
 }
 
 .hint {
@@ -730,79 +706,56 @@ function confirmDlg(payload: string | boolean) {
   color: var(--heading);
 }
 
-/* 网格：132px 卡片自动换行（v21 加大）；gap 18px 容纳 hover 浮起投影不盖邻卡 */
+/* 网格：固定 110px 卡片自动换行（v15 加宽以容纳 header band） */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 132px);
-  justify-content: start;
-  gap: 18px;
+  grid-template-columns: repeat(auto-fill, 110px);
+  justify-content: center;
+  gap: 6px;
 }
 
 /* 列表：行式条目 */
 .list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 1px;
 }
 
 .row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  height: 48px;
-  padding: 0 14px;
+  gap: 10px;
+  height: 36px;
+  padding: 0 10px;
   border-radius: var(--radius-ctrl);
   user-select: none;
-  transition: background var(--dur-fast) var(--ease);
 }
 
 .row:hover {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 
 .row.sel {
   background: var(--accent-soft);
 }
 
-/* 行多选勾选（随 accent 着色） */
-.row-check {
-  flex: none;
-  color: var(--accent);
-}
-
-/* 行类型图标块：彩色渐变底（与网格卡一致）；
+/* 行类型图标（裸 Icon，随 accent/text2 着色）；
    overflow visible + border-box 固定尺寸，防 WebView2 渲染下被裁切 */
 .row-ic {
   flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
+  color: var(--text2);
+  overflow: visible;
   box-sizing: border-box;
-  overflow: visible;
-  color: #fff;
-  border-radius: 8px;
 }
 
-/* Icon span 也固定尺寸，防 svg 撑出 span 边界 */
-.row-ic :deep(.fluent-icon) {
-  width: 16px;
-  height: 16px;
-  overflow: visible;
+.row-ic.dir {
+  color: var(--accent);
 }
-
-.row-ic.t-image { background: var(--type-image); }
-.row-ic.t-video { background: var(--type-video); }
-.row-ic.t-audio { background: var(--type-audio); }
-.row-ic.t-text  { background: var(--type-text); }
-.row-ic.t-dir   { background: var(--type-dir); }
-.row-ic.t-other { background: var(--type-other); }
 
 .row-name {
   flex: 1;
   min-width: 0;
-  font-size: 0.88rem;
+  font-size: 0.857rem;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -811,8 +764,8 @@ function confirmDlg(payload: string | boolean) {
 
 .row-size {
   flex: none;
-  min-width: 60px;
-  font-size: 0.78rem;
+  min-width: 56px;
+  font-size: 0.786rem;
   color: var(--text2);
   text-align: right;
 }
@@ -822,24 +775,16 @@ function confirmDlg(payload: string | boolean) {
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   color: var(--text2);
   background: transparent;
   border: none;
-  border-radius: 50%;
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
-}
-
-.row:hover .open,
-.row.sel .open,
-.open:focus-visible {
-  opacity: 1;
+  border-radius: var(--radius-ctrl);
 }
 
 .open:hover {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--accent);
 }
 
@@ -849,13 +794,13 @@ function confirmDlg(payload: string | boolean) {
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   margin-left: 2px;
   color: var(--text2);
   background: transparent;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-ctrl);
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
@@ -867,7 +812,7 @@ function confirmDlg(payload: string | boolean) {
 }
 
 .more:hover {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--accent);
 }
 </style>
