@@ -5,7 +5,6 @@
 -->
 <script setup lang="ts">
 import {ref} from 'vue'
-import Icon from './Icon.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -78,10 +77,14 @@ defineExpose({commit})
     <span v-if="suffix" class="suffix">{{ suffix }}</span>
     <span class="steppers">
       <button type="button" tabindex="-1" :disabled="disabled" @click="stepBy(1)">
-        <Icon name="care_up_solid" :size="8" />
+        <svg class="step-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m18 15-6-6-6 6" />
+        </svg>
       </button>
       <button type="button" tabindex="-1" :disabled="disabled" @click="stepBy(-1)">
-        <Icon name="care_down_solid" :size="8" />
+        <svg class="step-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m6 9 6 6 6-6" />
+        </svg>
       </button>
     </span>
   </div>
@@ -154,5 +157,12 @@ defineExpose({commit})
 
 .steppers button:disabled {
   opacity: 0.4;
+}
+
+/* 步进图标：内联 svg 撑满 button，flex center 已保证居中（绕开 Icon 组件） */
+.step-ic {
+  width: 10px;
+  height: 10px;
+  overflow: visible;
 }
 </style>
