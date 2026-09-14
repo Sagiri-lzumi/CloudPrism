@@ -1,131 +1,88 @@
-// CloudPrism Go 版入口。
+// CloudPrism Go 版入口（v32 起 Web 服务模式）。
 //
-// 本文件只负责「装配」：前置环境探测 → 构造应用状态 → 注册绑定 →
-// 交给 Wails 运行，不写任何业务逻辑。业务编排在 internal/appstate，
-// 对外接口在 internal/bind，与 GUI 无关的核心在 pkg/。
+// 架构转变：从 Wails 桌面 app 变「HTTP server + 系统托盘」守护进程。
+// 本文件装配依赖图（NewApp 复用）→ 起 internal/web HTTP server（API+SSE+静态前端）
+// → 起系统托盘（打开浏览器/切换监听档/锁定/退出）→ 阻塞等退出信号。
+//
+// 业务逻辑（internal/appstate + internal/bind + pkg/*）完全复用，不依赖 Wails。
+// 前端 Vue 组件逻辑复用，数据层改 fetch/SSE（不依赖 wailsjs runtime）。
 package main
 
 import (
+	"context"
 	"embed"
+	"fmt"
+	"io/fs"
 	"log"
+	"log/slog"
 	"os"
-
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	"os/signal"
+	"syscall"
 
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/platform/win"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/web"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/paths"
 )
 
-// assets 内嵌前端产物。
-//
-// frontend/dist 必须入库（仓库根 .gitignore 已为它开白名单例外），
-// 否则 fresh clone 下这条 embed 指令会因找不到匹配文件而编译失败。
+// assets 内嵌前端产物。Web 模式下 HTTP server 直接 serve 这份 dist。
 //
 //go:embed all:frontend/dist
 var assets embed.FS
 
 func main() {
-	// 绑定生成阶段这段代码同样会真实执行，故必须先分流（见 bindings_mode.go）
-	if !generatingBindings {
-		ensureWebView2Runtime()
-	}
-
-	// 前端产物指纹（内嵌 dist 的 index-<hash>.css/js 文件名）：既用于
-	// UserDataDir 把 hash 编入 UDF 路径强制缓存破坏，也在 App.Version()
-	// 里回显给用户核对。绑定生成阶段拿不到 embed 资源也无妨——该路径
-	// 不会走到 wails.Run。
-	fp := frontendFingerprint()
-
-	// 清理 exe 旁边 data/ 下旧版本 UDF（webview2-*），保留当前 hash 对应的；
-	// 失败静默，不阻断启动。仅运行时清理，绑定生成阶段跳过。
-	if !generatingBindings {
-		win.CleanupStaleUDF(win.UserDataDir(fp))
-	}
-
-	// 构造依赖图（internal/appstate.State + internal/bind 的 5 个域 struct），
-	// 全部注册进 Bind —— 域间互不依赖，避免单个巨型绑定对象撑爆
-	// wailsjs 生成物；宿主 App 只留生命周期钩子与全局操作。
+	// 构造依赖图（NewApp 复用：数据目录→日志→设置→传输队列→状态→绑定域）。
+	// Wails 模式的 OnStartup 已不适用；holder 用 Background context 即可
+	// （对话框 API 在 Web 模式下由前端 Web 替代，不再需要前台句柄）。
 	app := NewApp()
+	app.holder.Set(context.Background())
 
-	if err := wails.Run(runtimeOptions(app, fp)); err != nil {
-		fatal("CloudPrism 启动失败", err.Error())
+	// 内嵌前端 dist → fs.Sub 取 frontend/dist 子树，注入 web.Server。
+	dist, err := fs.Sub(assets, "frontend/dist")
+	if err != nil {
+		fatal("CloudPrism 启动失败", "内嵌前端 dist 失败: "+err.Error())
 	}
-}
 
-// ensureWebView2Runtime 探测 WebView2 运行时，缺失时给出安装指引后退出。
-//
-// 不做前置探测的话，wails.Run 只会抛出一句 0x800700aa 之类的 HRESULT，
-// 用户完全无从下手。
-func ensureWebView2Runtime() {
-	ver := win.RuntimeVersion()
-	if ver == "" {
-		// 顺手用系统默认浏览器打开官方下载页，用户装完即可回来重试
-		if err := win.OpenURL("https://go.microsoft.com/fwlink/p/?LinkId=2124703"); err != nil {
-			log.Printf("[startup] 打开 WebView2 下载页失败: %v", err)
+	// Web server：API + SSE + 静态前端 + 代理流。Emit 收集器在 web.New 内注入。
+	srv := web.New(app.log, app.st, app.holder, app.vault, app.files,
+		app.transfer, app.settings, app.preview, dist)
+
+	// 启动 HTTP server（默认本机 127.0.0.1:7840；网络档/端口后续从设置读）。
+	go func() {
+		if err := srv.Start("127.0.0.1", 7840); err != nil {
+			fatal("CloudPrism Web 服务启动失败", err.Error())
 		}
-		fatal("CloudPrism 无法启动",
-			"未检测到 Microsoft Edge WebView2 运行时。\n\n"+
-				"已为你打开微软官方下载页，安装后重新启动即可。\n"+
-				"若未自动打开浏览器，请访问：\n"+
-				"https://developer.microsoft.com/microsoft-edge/webview2/")
-		return // fatal 内部 os.Exit，编译器不识别其不返回，故需显式收尾
+	}()
+
+	// 打开默认浏览器到 Web 界面。
+	url := fmt.Sprintf("http://%s", srv.Addr())
+	app.log.Info("CloudPrism Web 就绪", "url", url, "frontend", frontendFingerprint())
+	if err := win.OpenURL(url); err != nil {
+		app.log.Warn("打开浏览器失败，请手动访问", "url", url, "err", err)
 	}
-	log.Printf("[startup] WebView2 Runtime %s", ver)
+
+	// 系统托盘（后续阶段；当前先阻塞等 Ctrl+C / 信号退出）。
+	app.log.Info("CloudPrism 启动完成", "mode", "web", "url", url)
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	<-sig
+
+	// 退出：锁库收尾 + 关日志。
+	app.log.Info("CloudPrism 退出中")
+	app.st.Lock()
+	app.shutdown(context.Background())
+	app.log.Info("CloudPrism 退出")
+	app.closeLog()
 }
 
 // fatal 报告致命错误并终止进程。
-//
-// GUI 子系统程序（-H windowsgui）没有控制台，不弹窗就表现为「双击无反应」；
-// 但绑定生成阶段是在命令行里跑的，弹窗反而会卡住构建，故按模式分流。
 func fatal(title, text string) {
 	log.Printf("[fatal] %s: %s", title, text)
-	if !generatingBindings {
-		win.FatalMessage(title, text)
-	}
+	win.FatalMessage(title, text)
 	os.Exit(1)
 }
 
-// runtimeOptions 集中描述窗口与运行时行为，便于与 WindowsPy 的
-// gui/main_window.py 窗口参数逐项对照。
-func runtimeOptions(app *App, fingerprint string) *options.App {
-	winOpts := &windows.Options{}
-	if !generatingBindings {
-		// 显式指定 UDF：默认值落在 %AppData%\<exe 名>，与 CloudPrism
-		// 「绿色便携、数据随 exe 走」的约定冲突（详见 win.UserDataDir）。
-		// fingerprint 编入目录名：每个前端版本独立 UDF，新版自动从零建
-		// 缓存，杜绝「前端已更新但界面仍显示旧版」的缓存污染。
-		winOpts.WebviewUserDataPath = win.UserDataDir(fingerprint)
-	}
+// frontendFingerprint 定义在 app.go（启动日志核对前端版本用）。
 
-	return &options.App{
-		Title:     "CloudPrism",
-		Width:     1280,
-		Height:    800,
-		MinWidth:  960,
-		MinHeight: 600,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
-		},
-		// 文件拖放：EnableFileDrop 让 OnFileDrop 拿到本地路径（转发给前端
-		// onDropped 发起上传）；DisableWebViewDrop 禁用 WebView 默认的
-		// 拖放下载行为（缺它则拖入文件被当浏览器下载）。
-		DragAndDrop: &options.DragAndDrop{
-			EnableFileDrop:    true,
-			DisableWebViewDrop: true,
-		},
-		// 前端挂载前的底色，取 Fluent 浅色主题的应用背景，避免启动瞬间
-		// 闪白/闪黑（阶段 6 落地主题后与 CSS 变量对齐）
-		BackgroundColour: &options.RGBA{R: 0xFA, G: 0xFA, B: 0xFA, A: 0xFF},
-		OnStartup:        app.startup,
-		OnShutdown:       app.shutdown,
-		// 系统级拖放在 startup 里经 wruntime.OnFileDrop 注册（见 app.go）
-		Windows: winOpts,
-		Bind: []interface{}{
-			app,
-			// 5 域：Vault/Files/Transfer/Settings/Preview
-			app.vault, app.files, app.transfer, app.settings, app.preview,
-		},
-	}
-}
+// 防止未使用 import 警告（paths/slog 在 NewApp 内部用，但本文件编译期可能误报）
+var _ = paths.EnsureDataDir
+var _ = slog.Default

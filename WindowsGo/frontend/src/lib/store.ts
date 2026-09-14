@@ -1,18 +1,16 @@
-// store.ts —— 前端唯一响应式全局状态（不引 Pinia：页面级状态足够少）。
+// store.ts —— 前端唯一响应式全局状态（v32 起 Web 服务模式）。
 //
-// 数据流：Wails st:frame 事件（10Hz 合帧）→ 快照/任务写入 ui；
-// 视图层动作（列目录/上传/下载/建夹/改名/删除…）经 bind 域调用，
+// 数据流：SSE /api/events（st:frame 10Hz 合帧等）→ 快照/任务写入 ui；
+// 视图层动作（列目录/上传/下载/建夹/改名/删除…）经 fetch /api/* 调用，
 // 错误统一 unwrap 成 ApiError，按 code 分流提示。
 //
 // op（长操作忙碌态）约定：后端只发 st:op-progress，没有终态事件；
 // busy 复位由每个 op 调用方在 finally 里调 endOp()，另有 onFrame 兜底
-// （快照 connected false→true 瞬间自动清）防事件缺失卡死。新增 op 入口
-// 时两处都别漏；Go 侧注释同指向本文件（双向指针）。
+// （快照 connected false→true 瞬间自动清）防事件缺失卡死。
 //
 // 模块单例：App.vue onMounted 调 start()，onBeforeUnmount 调 stop()。
 
 import {reactive} from 'vue'
-import {EventsOff, EventsOn} from '../../wailsjs/runtime/runtime'
 import type {appstate} from '../../wailsjs/go/models'
 import {ApiCode, App, Files, Preview, Settings, Transfer, Vault, unwrap} from './api'
 import * as evt from './events'
@@ -170,16 +168,21 @@ function onDropped(paths: unknown) {
   void uploadPaths(list)
 }
 
-/** 订阅后端事件（幂等：重复 start 不重复注册）。 */
+/* ------------------------------------------------------------ 事件订阅（SSE） */
+
+let eventSource: EventSource | null = null
+
+/** 订阅后端事件（SSE）。幂等：重复 start 不重复注册。 */
 export function start() {
   if (started) return
   started = true
-  EventsOn(evt.EvtFrame, onFrame)
-  EventsOn(evt.EvtOpProgress, onOpProgress)
-  EventsOn(evt.EvtOpDone, onOpDone)
-  EventsOn(evt.EvtOpError, onOpError)
-  EventsOn(evt.EvtLocked, onLocked)
-  EventsOn(evt.EvtDropped, onDropped)
+  eventSource = new EventSource('/api/events')
+  eventSource.addEventListener(evt.EvtFrame, (ev) => onFrame(JSON.parse(ev.data)))
+  eventSource.addEventListener(evt.EvtOpProgress, (ev) => onOpProgress(JSON.parse(ev.data)))
+  eventSource.addEventListener(evt.EvtOpDone, (ev) => onOpDone(JSON.parse(ev.data)))
+  eventSource.addEventListener(evt.EvtOpError, (ev) => onOpError(JSON.parse(ev.data)))
+  eventSource.addEventListener(evt.EvtLocked, () => onLocked())
+  eventSource.addEventListener(evt.EvtDropped, (ev) => onDropped(JSON.parse(ev.data)))
   if (!pollTimer) pollTimer = setInterval(pollTick, POLL_MS)
   void boot()
 }
@@ -188,12 +191,8 @@ export function start() {
 export function stop() {
   if (!started) return
   started = false
-  EventsOff(evt.EvtFrame)
-  EventsOff(evt.EvtOpProgress)
-  EventsOff(evt.EvtOpDone)
-  EventsOff(evt.EvtOpError)
-  EventsOff(evt.EvtLocked)
-  EventsOff(evt.EvtDropped)
+  eventSource?.close()
+  eventSource = null
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
@@ -551,8 +550,7 @@ export async function exportSel() {
 /** 复制条目明文展示名到剪贴板（右键高级项）。 */
 export async function copyEntryName(e: appstate.FileEntry) {
   try {
-    const {ClipboardSetText} = await import('../../wailsjs/runtime/runtime')
-    await ClipboardSetText(e.display)
+    await navigator.clipboard.writeText(e.display)
     showInfo('已复制文件名')
   } catch {
     showError('复制失败')
@@ -562,10 +560,9 @@ export async function copyEntryName(e: appstate.FileEntry) {
 /** 复制条目明文展示路径到剪贴板（右键高级项；由面包屑明文链拼接）。 */
 export async function copyEntryPath(e: appstate.FileEntry) {
   try {
-    const {ClipboardSetText} = await import('../../wailsjs/runtime/runtime')
     const dirs = ui.crumbs.map((c) => c.label)
     const plain = [...dirs, e.display].join('/')
-    await ClipboardSetText(plain)
+    await navigator.clipboard.writeText(plain)
     showInfo('已复制路径')
   } catch {
     showError('复制失败')
