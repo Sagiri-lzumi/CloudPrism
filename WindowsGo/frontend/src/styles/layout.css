@@ -38,13 +38,8 @@
   grid-column: 2;
 }
 
-/* ---- 文件页双栏（视图 + 预览），列宽由 Splitter 写 CSS 变量 ----
-   纵向拉伸由 FilesView.vue scoped .files-shell 的 flex:1/min-height:0 负责，
-   这里只声明横向三列骨架，避免 height:100% 与 flex 子项重复控制高度。 */
-.files-shell {
-  display: grid;
-  grid-template-columns: var(--split-l, 400px) 4px 1fr;
-}
+/* ---- 文件页三栏（目录树 | 文件列表 | 预览），列宽由 FilesView scoped
+   的 .files-shell 显式 grid-template-columns 接管（v31 起三栏）---- */
 
 /* 分隔拖柄：hover/拖动时高亮 */
 .split-handle {

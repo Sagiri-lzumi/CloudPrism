@@ -596,7 +596,8 @@ function confirmDlg(payload: string | boolean) {
   height: 100%;
 }
 
-/* 三栏（E 方案双栏抽屉）：目录树 | 拖柄1 | 文件列表 | 拖柄2 | 预览（大头） */
+/* 三栏（E 方案双栏抽屉）：目录树 | 拖柄1 | 文件列表 | 拖柄2 | 预览（大头）
+   覆盖 layout.css 的全局双栏规则，显式设三栏 grid */
 .files-shell {
   flex: 1;
   min-height: 0;
