@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-scheme="d" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CloudPrism · 4 方案结构对比</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body { font-family: "Segoe UI Variable","Segoe UI","Microsoft YaHei UI","Microsoft YaHei",sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; user-select: none; }
+button { font-family: inherit; cursor: pointer; border: none; background: transparent; color: inherit; }
+:focus { outline: none; }
+:root {
+  --accent: #4cc2ff; --accent-2: #2b8aef; --accent-grad: linear-gradient(135deg,#2b8aef,#4cc2ff);
+  --accent-soft: rgba(76,194,255,.14); --accent-soft-2: rgba(76,194,255,.22);
+  --ok: #4ade80; --err: #ff6b6b; --muted: #6b7280;
+  --text: #d4dae4; --text2: #8b94a5; --heading: #f2f5fa;
+  --r-card: 12px; --r-ctrl: 8px; --r-pill: 999px;
+  --shadow-card: 0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.3);
+  --shadow-hover: 0 6px 20px rgba(76,194,255,.14), 0 10px 32px rgba(0,0,0,.5);
+  --shadow-pop: 0 12px 40px rgba(0,0,0,.7);
+}
+[data-theme="light"] {
+  --accent: #0b6bcb; --accent-2: #2b8aef; --accent-grad: linear-gradient(135deg,#0b6bcb,#2b8aef);
+  --accent-soft: rgba(11,107,203,.1); --accent-soft-2: rgba(11,107,203,.16);
+  --ok: #1f9d55; --err: #e5484d; --muted: #6b7280;
+  --text: #1a2233; --text2: #5c6577; --heading: #0d1626;
+  --shadow-card: 0 1px 2px rgba(13,22,38,.05),0 2px 8px rgba(13,22,38,.06);
+  --shadow-hover: 0 4px 12px rgba(11,107,203,.12),0 8px 24px rgba(13,22,38,.08);
+  --shadow-pop: 0 8px 32px rgba(13,22,38,.16);
+}
+
+/* 通用按钮/图标 */
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; font-size: .85rem; color: var(--text); background: transparent; border: 1px solid transparent; border-radius: var(--r-ctrl); transition: background .12s; }
+.btn:hover { background: var(--accent-soft); }
+.btn.icon-only { width: 32px; padding: 0; justify-content: center; }
+.btn svg { width: 16px; height: 16px; }
+.btn-primary { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; font-size: .85rem; font-weight: 600; color: #fff; background: var(--accent-grad); border: none; border-radius: var(--r-pill); box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 28%, transparent); }
+.btn-primary svg { width: 16px; height: 16px; }
+.chip { padding: 2px 10px; font-size: .72rem; border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent); }
+.type-ic { display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; color: #fff; }
+.type-ic svg { width: 22px; height: 22px; }
+.t-image { background: linear-gradient(135deg,#a78bfa,#8b5cf6); }
+.t-video { background: linear-gradient(135deg,#f87171,#ef4444); }
+.t-audio { background: linear-gradient(135deg,#34d399,#10b981); }
+.t-text { background: linear-gradient(135deg,#60a5fa,#3b82f6); }
+.t-dir { background: linear-gradient(135deg,#fbbf24,#f59e0b); }
+.t-other { background: linear-gradient(135deg,#9ca3af,#6b7280); }
+
+/* 方案切换条 */
+.scheme-bar { position: fixed; top: 10px; right: 16px; z-index: 300; display: flex; gap: 4px; padding: 4px; background: var(--bg-bar,rgba(22,25,31,.8)); border: 1px solid rgba(255,255,255,.08); border-radius: var(--r-pill); box-shadow: var(--shadow-pop); backdrop-filter: blur(20px); }
+.scheme-bar button { height: 30px; padding: 0 14px; border-radius: var(--r-pill); font-size: .78rem; color: var(--text2); font-weight: 600; }
+.scheme-bar button.on { background: var(--accent-grad); color: #fff; }
+.scheme-bar .theme-btn { width: 30px; padding: 0; }
+
+.demo-bar { position: fixed; bottom: 16px; right: 16px; z-index: 300; display: flex; gap: 6px; padding: 6px; background: rgba(22,25,31,.8); border: 1px solid rgba(255,255,255,.08); border-radius: var(--r-pill); box-shadow: var(--shadow-pop); backdrop-filter: blur(20px); }
+.demo-bar button { height: 28px; padding: 0 12px; border-radius: var(--r-pill); font-size: .74rem; color: var(--text2); }
+.demo-bar button:hover { background: var(--accent-soft); color: var(--accent); }
+
+/* 方案容器 */
+.scheme { display: none; height: 100vh; }
+.scheme.on { display: block; }
+
+/* ============================================================
+   方案 D：无边框卡片网格（深色玻璃、无导航轨、顶栏极简胶囊）
+   ============================================================ */
+[data-scheme="d"] body { background: #0d0f14; color: var(--text); }
+.scheme-d {
+  --bg-page: #0d0f14; --surface: rgba(22,25,31,.6); --surface-2: rgba(28,31,38,.5);
+  --stroke: rgba(255,255,255,.06); --divider: rgba(255,255,255,.06);
+  background: radial-gradient(ellipse at top, #1a1f2e 0%, #0d0f14 60%);
+}
+.scheme-d .d-topbar {
+  display: flex; align-items: center; gap: 16px; height: 56px; padding: 0 24px;
+  background: rgba(22,25,31,.5); backdrop-filter: blur(24px); border-bottom: 1px solid var(--divider);
+}
+.scheme-d .d-brand { font-size: 1rem; font-weight: 700; color: var(--heading); display: flex; align-items: center; gap: 8px; }
+.scheme-d .d-brand-logo { width: 28px; height: 28px; background: var(--accent-grad); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; }
+.scheme-d .d-brand-logo svg { width: 16px; height: 16px; }
+.scheme-d .d-tabs { display: flex; gap: 2px; padding: 3px; background: rgba(255,255,255,.04); border-radius: var(--r-pill); }
+.scheme-d .d-tab { padding: 6px 14px; border-radius: var(--r-pill); font-size: .82rem; color: var(--text2); font-weight: 500; }
+.scheme-d .d-tab.on { background: var(--accent-grad); color: #fff; }
+.scheme-d .d-right { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--text2); font-size: .8rem; }
+.scheme-d .d-content { padding: 32px 48px; height: calc(100vh - 56px); overflow: auto; }
+.scheme-d .d-pagehead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 24px; }
+.scheme-d .d-pagetitle { font-size: 1.6rem; font-weight: 700; color: var(--heading); }
+.scheme-d .d-crumb { font-size: .85rem; color: var(--text2); }
+.scheme-d .d-actions { margin-left: auto; display: flex; gap: 8px; }
+.scheme-d .d-shell { display: grid; grid-template-columns: 1fr 380px; gap: 24px; }
+.scheme-d .d-grid { display: grid; grid-template-columns: repeat(auto-fill, 160px); gap: 16px; }
+.scheme-d .d-card {
+  background: var(--surface); border: 1px solid var(--stroke); border-radius: var(--r-card);
+  backdrop-filter: blur(20px); overflow: hidden; transition: transform .2s, box-shadow .2s, border-color .2s;
+}
+.scheme-d .d-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-hover); border-color: var(--accent-soft-2); }
+.scheme-d .d-card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-hover); }
+.scheme-d .d-card-thumb { height: 120px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.2); }
+.scheme-d .d-card-thumb .type-ic { width: 56px; height: 56px; }
+.scheme-d .d-card-name { padding: 10px 12px; font-size: .82rem; color: var(--text); }
+.scheme-d .d-prev { background: var(--surface); border: 1px solid var(--stroke); border-radius: var(--r-card); backdrop-filter: blur(20px); padding: 20px; }
+.scheme-d .d-prev-title { font-size: 1rem; font-weight: 600; color: var(--heading); margin-bottom: 4px; }
+.scheme-d .d-prev-meta { font-size: .78rem; color: var(--text2); margin-bottom: 16px; }
+.scheme-d .d-prev-body { height: 200px; border-radius: 8px; background: linear-gradient(135deg,#a78bfa,#8b5cf6); margin-bottom: 16px; }
+
+/* ============================================================
+   方案 E：双栏抽屉（类 Finder，左目录树 + 中文件 + 右预览）
+   ============================================================ */
+.scheme-e {
+  --bg-page: #f3f5f8; --surface: #fff; --surface-2: #f6f8fa; --stroke: rgba(0,0,0,.08); --divider: rgba(0,0,0,.06);
+  --text: #1a2233; --text2: #5c6577; --heading: #0d1626;
+}
+[data-theme="dark"] .scheme-e {
+  --bg-page: #1a1d24; --surface: #23272f; --surface-2: #2a2e37; --stroke: rgba(255,255,255,.08); --divider: rgba(255,255,255,.07);
+  --text: #e8ecf2; --text2: #9ba3b3; --heading: #f2f5fa;
+}
+.scheme-e .e-shell { display: grid; grid-template-columns: 200px 1fr 360px; height: 100vh; background: var(--bg-page); }
+.scheme-e .e-tree { border-right: 1px solid var(--divider); background: var(--surface); padding: 16px 8px; overflow: auto; }
+.scheme-e .e-tree-title { font-size: .72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 4px 12px 8px; }
+.scheme-e .e-tree-item { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: var(--r-ctrl); font-size: .85rem; color: var(--text); cursor: pointer; }
+.scheme-e .e-tree-item:hover { background: var(--surface-2); }
+.scheme-e .e-tree-item.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.scheme-e .e-tree-item svg { width: 16px; height: 16px; color: var(--text2); }
+.scheme-e .e-tree-item.on svg { color: var(--accent); }
+.scheme-e .e-tree-sub { padding-left: 20px; }
+.scheme-e .e-main { display: flex; flex-direction: column; min-width: 0; }
+.scheme-e .e-toolbar { display: flex; align-items: center; gap: 6px; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--divider); background: var(--surface); }
+.scheme-e .e-path { font-size: .85rem; color: var(--text2); flex: 1; }
+.scheme-e .e-path b { color: var(--heading); font-weight: 600; }
+.scheme-e .e-zone { flex: 1; overflow: auto; padding: 16px; background: var(--bg-page); }
+.scheme-e .e-list { display: flex; flex-direction: column; }
+.scheme-e .e-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: var(--r-ctrl); cursor: pointer; }
+.scheme-e .e-row:hover { background: var(--surface-2); }
+.scheme-e .e-row.sel { background: var(--accent-soft); }
+.scheme-e .e-row-ic { width: 28px; height: 28px; }
+.scheme-e .e-row-ic .type-ic { width: 28px; height: 28px; }
+.scheme-e .e-row-ic .type-ic svg { width: 15px; height: 15px; }
+.scheme-e .e-row-name { flex: 1; font-size: .86rem; color: var(--text); }
+.scheme-e .e-row-meta { font-size: .76rem; color: var(--text2); }
+.scheme-e .e-prev { border-left: 1px solid var(--divider); background: var(--surface); padding: 20px; display: flex; flex-direction: column; }
+.scheme-e .e-prev-title { font-size: .95rem; font-weight: 600; color: var(--heading); }
+.scheme-e .e-prev-meta { font-size: .76rem; color: var(--text2); margin: 4px 0 16px; }
+.scheme-e .e-prev-body { flex: 1; border-radius: 8px; background: linear-gradient(135deg,#a78bfa,#8b5cf6); margin-bottom: 16px; }
+
+/* ============================================================
+   方案 F：顶栏卡片化（顶部大卡导航 + 内容卡片，类 Notion）
+   ============================================================ */
+.scheme-f {
+  --bg-page: #f5f6f8; --surface: #fff; --stroke: rgba(0,0,0,.07); --divider: rgba(0,0,0,.06);
+  --text: #1a2233; --text2: #5c6577; --heading: #0d1626;
+}
+[data-theme="dark"] .scheme-f { --bg-page: #16181d; --surface: #1e2128; --stroke: rgba(255,255,255,.07); --divider: rgba(255,255,255,.06); --text: #e8ecf2; --text2: #9ba3b3; --heading: #f2f5fa; }
+.scheme-f .f-shell { display: flex; flex-direction: column; height: 100vh; background: var(--bg-page); }
+.scheme-f .f-topnav { display: flex; align-items: center; gap: 24px; padding: 20px 32px 0; }
+.scheme-f .f-brand { font-size: 1.3rem; font-weight: 800; color: var(--heading); letter-spacing: -.02em; }
+.scheme-f .f-navcards { display: flex; gap: 8px; flex: 1; }
+.scheme-f .f-navcard {
+  flex: 1; max-width: 140px; padding: 12px 16px; background: var(--surface); border: 1px solid var(--stroke);
+  border-radius: var(--r-card); cursor: pointer; transition: border-color .12s, box-shadow .12s;
+}
+.scheme-f .f-navcard:hover { border-color: var(--accent-soft-2); box-shadow: var(--shadow-card); }
+.scheme-f .f-navcard.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.scheme-f .f-navcard-ic { width: 32px; height: 32px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
+.scheme-f .f-navcard-ic svg { width: 16px; height: 16px; }
+.scheme-f .f-navcard-title { font-size: .82rem; font-weight: 600; color: var(--heading); }
+.scheme-f .f-navcard-sub { font-size: .68rem; color: var(--text2); margin-top: 2px; }
+.scheme-f .f-content { flex: 1; overflow: auto; padding: 24px 32px; }
+.scheme-f .f-pagehead { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+.scheme-f .f-pagetitle { font-size: 1.4rem; font-weight: 700; color: var(--heading); }
+.scheme-f .f-actions { margin-left: auto; display: flex; gap: 8px; }
+.scheme-f .f-grid { display: grid; grid-template-columns: repeat(auto-fill, 150px); gap: 16px; }
+.scheme-f .f-card { background: var(--surface); border: 1px solid var(--stroke); border-radius: var(--r-card); overflow: hidden; cursor: pointer; transition: box-shadow .12s; }
+.scheme-f .f-card:hover { box-shadow: var(--shadow-card); }
+.scheme-f .f-card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.scheme-f .f-card-thumb { height: 110px; display: flex; align-items: center; justify-content: center; background: var(--surface); }
+.scheme-f .f-card-thumb .type-ic { width: 52px; height: 52px; }
+.scheme-f .f-card-name { padding: 8px 10px; font-size: .8rem; color: var(--text); }
+
+/* ============================================================
+   方案 G：极简留白（纯色无边框、大字号、极疏间距，类 Arc/Things）
+   ============================================================ */
+.scheme-g {
+  --bg-page: #fafafa; --text: #1a1a1a; --text2: #6b7280; --heading: #000;
+}
+[data-theme="dark"] .scheme-g { --bg-page: #0a0a0a; --text: #ededed; --text2: #6b7280; --heading: #fff; }
+.scheme-g .g-shell { height: 100vh; background: var(--bg-page); display: flex; flex-direction: column; }
+.scheme-g .g-top { display: flex; align-items: center; padding: 32px 48px 0; }
+.scheme-g .g-brand { font-size: 1.1rem; font-weight: 600; color: var(--heading); }
+.scheme-g .g-nav { display: flex; gap: 24px; margin-left: 48px; }
+.scheme-g .g-navtab { font-size: .95rem; color: var(--text2); padding: 4px 0; border-bottom: 2px solid transparent; }
+.scheme-g .g-navtab.on { color: var(--heading); border-bottom-color: var(--heading); }
+.scheme-g .g-right { margin-left: auto; color: var(--text2); font-size: .85rem; }
+.scheme-g .g-content { flex: 1; overflow: auto; padding: 48px 48px 32px; }
+.scheme-g .g-pagehead { margin-bottom: 40px; }
+.scheme-g .g-pagetitle { font-size: 2rem; font-weight: 700; color: var(--heading); letter-spacing: -.02em; }
+.scheme-g .g-pagesub { font-size: .9rem; color: var(--text2); margin-top: 8px; }
+.scheme-g .g-actions { margin-top: 20px; display: flex; gap: 12px; }
+.scheme-g .g-btn { padding: 8px 16px; font-size: .85rem; color: var(--text); border: 1px solid var(--text2); border-radius: var(--r-pill); }
+.scheme-g .g-btn:hover { background: rgba(0,0,0,.04); }
+[data-theme="dark"] .g-btn:hover { background: rgba(255,255,255,.06); }
+.scheme-g .g-btn-primary { background: var(--heading); color: var(--bg-page); border-color: var(--heading); }
+.scheme-g .g-list { display: flex; flex-direction: column; }
+.scheme-g .g-row { display: flex; align-items: center; gap: 16px; padding: 14px 4px; border-bottom: 1px solid rgba(128,128,128,.12); cursor: pointer; }
+.scheme-g .g-row:hover { background: rgba(0,0,0,.02); }
+[data-theme="dark"] .g-row:hover { background: rgba(255,255,255,.03); }
+.scheme-g .g-row-ic { width: 24px; height: 24px; color: var(--text2); }
+.scheme-g .g-row-ic svg { width: 20px; height: 20px; }
+.scheme-g .g-row-name { flex: 1; font-size: 1rem; color: var(--text); }
+.scheme-g .g-row-meta { font-size: .82rem; color: var(--text2); }
+</style>
+</head>
+<body>
+
+<div class="scheme-bar">
+  <button class="on" onclick="setScheme('d')">D · 无边框卡片</button>
+  <button onclick="setScheme('e')">E · 双栏抽屉</button>
+  <button onclick="setScheme('f')">F · 顶栏卡片</button>
+  <button onclick="setScheme('g')">G · 极简留白</button>
+  <button class="theme-btn" onclick="toggleTheme()">🌓</button>
+</div>
+<div class="demo-bar">
+  <button onclick="alert('在各方案内直接操作即可')">演示条已内嵌</button>
+</div>
+
+<!-- 方案 D：无边框卡片网格（深色玻璃） -->
+<div class="scheme scheme-d on" id="scheme-d">
+  <div class="d-topbar">
+    <div class="d-brand"><span class="d-brand-logo"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7l7-4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span>CloudPrism</div>
+    <div class="d-tabs">
+      <div class="d-tab on">文件</div><div class="d-tab">传输</div><div class="d-tab">密库</div><div class="d-tab">设置</div>
+    </div>
+    <div class="d-right"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block"></span> 已连接 · 2 个任务</div>
+  </div>
+  <div class="d-content">
+    <div class="d-pagehead">
+      <div class="d-pagetitle">2026 春节</div>
+      <div class="d-crumb">根目录 › 照片 › 2026 春节</div>
+      <div class="d-actions">
+        <button class="btn icon-only"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+        <button class="btn">上传</button>
+        <button class="btn-primary"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>导出</button>
+      </div>
+    </div>
+    <div class="d-shell">
+      <div class="d-grid" id="d-grid"></div>
+      <div class="d-prev">
+        <div class="d-prev-title">IMG_20260210.jpg</div>
+        <div class="d-prev-meta">图片 · 4.2 MB · 4032×3024</div>
+        <div class="d-prev-body"></div>
+        <div style="display:flex;gap:8px"><button class="btn">下载</button><button class="btn-primary">导出</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 方案 E：双栏抽屉（类 Finder） -->
+<div class="scheme scheme-e" id="scheme-e">
+  <div class="e-shell">
+    <aside class="e-tree">
+      <div class="e-tree-title">收藏夹</div>
+      <div class="e-tree-item on"><svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="1.6"/></svg>我的密库</div>
+      <div class="e-tree-item"><svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="1.6"/></svg>最近</div>
+      <div class="e-tree-item"><svg viewBox="0 0 24 24" fill="none"><path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>共享给我</div>
+      <div class="e-tree-title" style="margin-top:16px">目录</div>
+      <div class="e-tree-item"><svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="1.6"/></svg>照片</div>
+      <div class="e-tree-item e-tree-sub"><svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="1.6"/></svg>2026 春节</div>
+      <div class="e-tree-item e-tree-sub"><svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="1.6"/></svg>2025 国庆</div>
+      <div class="e-tree-item"><svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="1.6"/></svg>文档</div>
+      <div class="e-tree-item"><svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="1.6"/></svg>视频</div>
+    </aside>
+    <main class="e-main">
+      <div class="e-toolbar">
+        <button class="btn icon-only"><svg viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="e-path">我的密库 › <b>照片</b> › <b>2026 春节</b></div>
+        <button class="btn icon-only"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0114-5.3M20 12a8 8 0 01-14 5.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+        <button class="btn icon-only"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+      </div>
+      <div class="e-zone">
+        <div class="e-list" id="e-list"></div>
+      </div>
+    </main>
+    <aside class="e-prev">
+      <div class="e-prev-title">IMG_20260210.jpg</div>
+      <div class="e-prev-meta">图片 · 4.2 MB</div>
+      <div class="e-prev-body"></div>
+      <div style="display:flex;gap:8px"><button class="btn">下载</button><button class="btn-primary">导出</button></div>
+    </aside>
+  </div>
+</div>
+
+<!-- 方案 F：顶栏卡片化 -->
+<div class="scheme scheme-f" id="scheme-f">
+  <div class="f-shell">
+    <div class="f-topnav">
+      <div class="f-brand">CloudPrism</div>
+      <div class="f-navcards">
+        <div class="f-navcard on"><div class="f-navcard-ic"><svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="1.8"/></svg></div><div class="f-navcard-title">文件</div><div class="f-navcard-sub">浏览密库</div></div>
+        <div class="f-navcard"><div class="f-navcard-ic"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0114-5.3M20 12a8 8 0 01-14 5.3" stroke="currentColor" stroke-width="1.8"/></svg></div><div class="f-navcard-title">传输</div><div class="f-navcard-sub">2 进行中</div></div>
+        <div class="f-navcard"><div class="f-navcard-ic"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="2" stroke="currentColor" stroke-width="1.8"/></svg></div><div class="f-navcard-title">密库</div><div class="f-navcard-sub">连接管理</div></div>
+        <div class="f-navcard"><div class="f-navcard-ic"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/></svg></div><div class="f-navcard-title">设置</div><div class="f-navcard-sub">偏好</div></div>
+      </div>
+    </div>
+    <div class="f-content">
+      <div class="f-pagehead">
+        <div><div class="f-pagetitle">2026 春节</div><div style="font-size:.8rem;color:var(--text2);margin-top:4px">根目录 › 照片 › 2026 春节</div></div>
+        <div class="f-actions"><button class="btn">上传</button><button class="btn-primary">导出</button></div>
+      </div>
+      <div class="f-grid" id="f-grid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 方案 G：极简留白 -->
+<div class="scheme scheme-g" id="scheme-g">
+  <div class="g-shell">
+    <div class="g-top">
+      <div class="g-brand">CloudPrism</div>
+      <nav class="g-nav"><span class="g-navtab on">文件</span><span class="g-navtab">传输</span><span class="g-navtab">密库</span><span class="g-navtab">设置</span></nav>
+      <div class="g-right">已连接</div>
+    </div>
+    <div class="g-content">
+      <div class="g-pagehead">
+        <div class="g-pagetitle">2026 春节</div>
+        <div class="g-pagesub">7 个项目 · 根目录 › 照片 › 2026 春节</div>
+        <div class="g-actions"><button class="g-btn">上传</button><button class="g-btn g-btn-primary">导出</button></div>
+      </div>
+      <div class="g-list" id="g-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+function setScheme(s){
+  document.documentElement.dataset.scheme=s;
+  document.querySelectorAll('.scheme').forEach(x=>x.classList.remove('on'));
+  document.getElementById('scheme-'+s).classList.add('on');
+  document.querySelectorAll('.scheme-bar button').forEach((b,i)=>{ if(i<4) b.classList.toggle('on', ['d','e','f','g'][i]===s); });
+}
+function toggleTheme(){ document.documentElement.dataset.theme = document.documentElement.dataset.theme==='dark'?'light':'dark'; }
+
+const IC={
+  image:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="9" r="2" stroke="currentColor" stroke-width="1.8"/><path d="M21 15l-5-5L5 21" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  video:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M17 9l4-2v10l-4-2" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  audio:'<svg viewBox="0 0 24 24" fill="none"><path d="M9 18V6l10-2v12" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="7" cy="18" r="2" stroke="currentColor" stroke-width="1.8"/></svg>',
+  text:'<svg viewBox="0 0 24 24" fill="none"><path d="M7 3h7l5 5v13H7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="currentColor" stroke-width="1.6"/></svg>',
+  dir:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  other:'<svg viewBox="0 0 24 24" fill="none"><path d="M14 3v5h5M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+};
+const E=[
+  {n:'IMG_20260210.jpg',k:'image',t:'t-image',s:'4.2 MB',sel:1},
+  {n:'春节联欢.mp4',k:'video',t:'t-video',s:'128 MB',sel:1},
+  {n:'拜年歌.m4a',k:'audio',t:'t-audio',s:'8.1 MB'},
+  {n:'烟花攻略.txt',k:'text',t:'t-text',s:'2 KB'},
+  {n:'团圆饭',k:'dir',t:'t-dir',s:'文件夹'},
+  {n:'IMG_20260211.jpg',k:'image',t:'t-image',s:'5.1 MB'},
+  {n:'压岁钱.xlsx',k:'other',t:'t-other',s:'45 KB'},
+];
+// D 方案网格
+document.getElementById('d-grid').innerHTML = E.map(e=>`<div class="d-card ${e.sel?'sel':''}"><div class="d-card-thumb"><span class="type-ic ${e.t}">${IC[e.k]}</span></div><div class="d-card-name">${e.n}</div></div>`).join('');
+// E 方案列表
+document.getElementById('e-list').innerHTML = E.map(e=>`<div class="e-row ${e.sel?'sel':''}"><span class="e-row-ic"><span class="type-ic ${e.t}">${IC[e.k]}</span></span><span class="e-row-name">${e.n}</span><span class="e-row-meta">${e.s}</span></div>`).join('');
+// F 方案网格
+document.getElementById('f-grid').innerHTML = E.map(e=>`<div class="f-card ${e.sel?'sel':''}"><div class="f-card-thumb"><span class="type-ic ${e.t}">${IC[e.k]}</span></div><div class="f-card-name">${e.n}</div></div>`).join('');
+// G 方案列表（极简，无背景块图标）
+document.getElementById('g-list').innerHTML = E.map(e=>`<div class="g-row ${e.sel?'sel':''}"><span class="g-row-ic">${IC[e.k]}</span><span class="g-row-name">${e.n}</span><span class="g-row-meta">${e.s}</span></div>`).join('');
+</script>
+</body>
+</html>

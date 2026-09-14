@@ -39,6 +39,7 @@ import MessageBox from '../components/fluent/MessageBox.vue'
 import ProgressBar from '../components/fluent/ProgressBar.vue'
 import GridCard from './GridCard.vue'
 import PreviewPanel from './PreviewPanel.vue'
+import DirTree from '../components/DirTree.vue'
 
 /* ------------------------------------------------------------- 派生 */
 
@@ -84,13 +85,39 @@ function onCardCtx(p: {ev: MouseEvent; entry: appstate.FileEntry}) {
   openCtx(p.ev, p.entry)
 }
 
-/* -------------------------------------------------------- Splitter */
+/* -------------------------------------------------------- Splitter（三栏两个拖柄） */
 
 const SPLIT_KEY = 'cp-split-l'
+const TREE_KEY = 'cp-tree-w'
 const viewEl = ref<HTMLElement>()
-const splitL = ref(Number(localStorage.getItem(SPLIT_KEY)) || 400)
+// 文件列表宽度（中栏，窄默认 280px，用户要列表窄 + 预览大头）
+const splitL = ref(Number(localStorage.getItem(SPLIT_KEY)) || 280)
+// 目录树宽度（左栏，默认 200px）
+const treeW = ref(Number(localStorage.getItem(TREE_KEY)) || 200)
 const dragging = ref(false)
+const draggingTree = ref(false)
 
+// 拖柄1：目录树/文件列表
+function splitTreeDown(e: PointerEvent) {
+  e.preventDefault()
+  draggingTree.value = true
+  window.addEventListener('pointermove', splitTreeMove)
+  window.addEventListener('pointerup', splitTreeEnd, {once: true})
+}
+
+function splitTreeMove(e: PointerEvent) {
+  const left = viewEl.value!.getBoundingClientRect().left
+  // 目录树宽度钳制：140px ~ 320px
+  treeW.value = Math.min(Math.max(e.clientX - left, 140), 320)
+}
+
+function splitTreeEnd() {
+  draggingTree.value = false
+  window.removeEventListener('pointermove', splitTreeMove)
+  localStorage.setItem(TREE_KEY, String(treeW.value))
+}
+
+// 拖柄2：文件列表/预览（拖动调的是中栏文件列表宽度）
 function splitDown(e: PointerEvent) {
   e.preventDefault()
   dragging.value = true
@@ -99,10 +126,11 @@ function splitDown(e: PointerEvent) {
 }
 
 function splitMove(e: PointerEvent) {
-  const left = viewEl.value!.getBoundingClientRect().left
-  // 浏览区宽度钳制：240px（图标列可见）~ 窗口宽 3/4
-  const max = Math.max(240, window.innerWidth * 0.75 - left)
-  splitL.value = Math.min(Math.max(e.clientX - left, 240), max)
+  // 中栏左缘 = 目录树宽 + 拖柄1宽(4px) + 左栏内边距偏移
+  const left = viewEl.value!.getBoundingClientRect().left + treeW.value + 4
+  // 中栏宽度钳制：180px（文件名可见）~ 窗口宽 50%（预览至少占一半）
+  const max = Math.max(180, window.innerWidth * 0.5 - left)
+  splitL.value = Math.min(Math.max(e.clientX - left, 180), max)
 }
 
 function splitEnd() {
@@ -354,7 +382,7 @@ function confirmDlg(payload: string | boolean) {
         <Button
           iconOnly
           icon="share"
-          :title="hasMulti ? `解密导出所选 ${multiSel.length} 项` : '解密导出选中文件'"
+          :title="hasMulti ? `导出所选 ${multiSel.length} 项` : '导出选中文件'"
           :disabled="!multiSel.length"
           @click="exportSel"
         />
@@ -389,7 +417,7 @@ function confirmDlg(payload: string | boolean) {
       <!-- 多选批量条：>1 项时展示，一键下载/导出/删除/取消 -->
       <Transition name="fade">
         <div v-if="hasMulti" class="multi-bar">
-          <Icon name="square-check" :size="15" class="mb-check" />
+          <Icon name="check" :size="15" class="mb-check" />
           <span class="mb-text">已选 {{ multiSel.length }} 项</span>
           <span class="mb-actions">
             <Button icon="download" :disabled="!connected" @click="downloadSel">下载</Button>
@@ -400,8 +428,26 @@ function confirmDlg(payload: string | boolean) {
         </div>
       </Transition>
 
-      <!-- 双栏：浏览（面包屑+条目） | Splitter | 预览 -->
-      <div class="files-shell" :style="{'--split-l': splitL + 'px'}">
+      <!-- 三栏：目录树抽屉 | 文件列表 | 预览（大头，E 方案双栏抽屉） -->
+      <div
+        class="files-shell"
+        :style="{'--tree-w': treeW + 'px', '--split-l': splitL + 'px'}"
+      >
+        <!-- 左栏：目录树（懒加载，展开时拉子目录） -->
+        <aside class="dirtree-col">
+          <DirTree />
+        </aside>
+
+        <!-- 拖柄1：目录树/文件列表 -->
+        <div
+          class="split-handle tree-split"
+          :class="{dragging: draggingTree}"
+          role="separator"
+          aria-orientation="vertical"
+          @pointerdown="splitTreeDown"
+        ></div>
+
+        <!-- 中栏：面包屑 + 文件列表（窄） -->
         <section class="browse">
           <nav class="crumbs" aria-label="路径">
             <button
@@ -477,7 +523,7 @@ function confirmDlg(payload: string | boolean) {
                 @contextmenu.prevent="openCtx($event, e)"
               >
                 <!-- 行首勾选：仅多选批量态（≥2 项）显示，单选只靠 .row.sel 高亮 -->
-                <Icon v-if="isSel(e) && hasMulti" name="square-check" :size="16" class="row-check" />
+                <Icon v-if="isSel(e) && hasMulti" name="check" :size="16" class="row-check" />
                 <Icon :name="kindOfRow(e)" :size="18" class="row-ic" :class="{dir: e.isDir}" />
                 <span class="row-name" :title="e.display">{{ e.display }}</span>
                 <span class="row-size">{{ e.isDir ? '文件夹' : fmtSize(e.size) }}</span>
@@ -503,7 +549,7 @@ function confirmDlg(payload: string | boolean) {
           </div>
         </section>
 
-        <!-- 拖柄：hover/拖动高亮，宽度记忆 localStorage -->
+        <!-- 拖柄2：文件列表/预览 -->
         <div
           class="split-handle"
           :class="{dragging}"
@@ -511,8 +557,9 @@ function confirmDlg(payload: string | boolean) {
           aria-orientation="vertical"
           @pointerdown="splitDown"
         ></div>
-        <div v-if="dragging" class="split-mask"></div>
+        <div v-if="dragging || draggingTree" class="split-mask"></div>
 
+        <!-- 右栏：预览面板（占大头） -->
         <PreviewPanel class="preview" />
       </div>
     </template>
@@ -549,12 +596,20 @@ function confirmDlg(payload: string | boolean) {
   height: 100%;
 }
 
-/* 双栏（grid 骨架在 layout.css）：作为 flex 子项用 flex 拉伸，勿再用 height:100%，
-   否则多选批量条出现时内容区会被顶出视口 */
+/* 三栏（E 方案双栏抽屉）：目录树 | 拖柄1 | 文件列表 | 拖柄2 | 预览（大头） */
 .files-shell {
   flex: 1;
   min-height: 0;
   min-width: 0;
+  display: grid;
+  grid-template-columns: var(--tree-w, 200px) 4px var(--split-l, 280px) 4px 1fr;
+}
+
+/* 左栏：目录树抽屉 */
+.dirtree-col {
+  grid-column: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .dim {
@@ -604,14 +659,31 @@ function confirmDlg(payload: string | boolean) {
   gap: 2px;
 }
 
-/* ---------------- 浏览区（files-shell 左栏） ---------------- */
+/* ---------------- 浏览区（三栏中栏：文件列表） ---------------- */
 .browse {
-  grid-column: 1;
+  grid-column: 3;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   background: var(--bg-page);
+}
+
+/* 拖柄1（目录树/文件列表）：column 2 */
+.tree-split {
+  grid-column: 2;
+}
+
+/* 拖柄2（文件列表/预览）：column 4（覆盖 layout.css 全局 .split-handle 的 column 2） */
+.files-shell > .split-handle {
+  grid-column: 4;
+}
+
+/* 预览面板（三栏右栏，占大头 1fr）：column 5 */
+.preview {
+  grid-column: 5;
+  min-height: 0;
+  min-width: 0;
 }
 
 /* 面包屑：根图标 + 明文段（后端 remote 是密文，不可直接展示） */
