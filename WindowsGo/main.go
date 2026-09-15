@@ -46,19 +46,25 @@ func main() {
 	srv := web.New(app.log, app.st, app.holder, app.vault, app.files,
 		app.transfer, app.settings, app.preview, dist)
 
-	// 启动 HTTP server（默认本机 127.0.0.1:7840；网络档/端口后续从设置读）。
-	go func() {
-		if err := srv.Start("127.0.0.1", 7840); err != nil {
-			fatal("CloudPrism Web 服务启动失败", err.Error())
-		}
-	}()
+	// 先同步 Listen 拿实际地址（避免 goroutine 竞态读到空 addr），再开浏览器。
+	addr, err := srv.Listen("127.0.0.1", 7840)
+	if err != nil {
+		fatal("CloudPrism Web 服务启动失败", err.Error())
+	}
+	url := fmt.Sprintf("http://%s", addr)
+	app.log.Info("CloudPrism Web 就绪", "url", url, "frontend", frontendFingerprint())
 
 	// 打开默认浏览器到 Web 界面。
-	url := fmt.Sprintf("http://%s", srv.Addr())
-	app.log.Info("CloudPrism Web 就绪", "url", url, "frontend", frontendFingerprint())
 	if err := win.OpenURL(url); err != nil {
 		app.log.Warn("打开浏览器失败，请手动访问", "url", url, "err", err)
 	}
+
+	// goroutine 里开始服务（阻塞直到 Shutdown）。
+	go func() {
+		if err := srv.Serve(); err != nil {
+			app.log.Error("Web 服务异常退出", "err", err)
+		}
+	}()
 
 	// 系统托盘（后续阶段；当前先阻塞等 Ctrl+C / 信号退出）。
 	app.log.Info("CloudPrism 启动完成", "mode", "web", "url", url)

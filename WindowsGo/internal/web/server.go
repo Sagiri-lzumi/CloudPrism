@@ -85,7 +85,8 @@ func (s *Server) SetStreaming(sess *session.Session, backend storage.Backend) {
 }
 
 // Start 启动 HTTP server（阻塞直到 Shutdown）。
-func (s *Server) Start(host string, port int) error {
+// Listen 同步建立监听并返回地址（供 main 在启动浏览器前拿到完整 URL）。
+func (s *Server) Listen(host string, port int) (string, error) {
 	mux := http.NewServeMux()
 	s.registerAPI(mux)
 	s.registerStatic(mux)
@@ -94,12 +95,25 @@ func (s *Server) Start(host string, port int) error {
 	s.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
-		return fmt.Errorf("监听 %s:%d 失败: %w", host, port, err)
+		return "", fmt.Errorf("监听 %s:%d 失败: %w", host, port, err)
 	}
 	s.ln = ln
 	s.addr = ln.Addr().String()
 	s.log.Info("Web 服务启动", "addr", s.addr)
-	return s.srv.Serve(ln)
+	return s.addr, nil
+}
+
+// Serve 开始服务（阻塞直到 Shutdown）。Listen 后调用。
+func (s *Server) Serve() error {
+	return s.srv.Serve(s.ln)
+}
+
+// Start 兼容旧入口：Listen + Serve（goroutine 内调用时主线程应立即读 Addr 则竞态，请用 Listen + Serve 分开）。
+func (s *Server) Start(host string, port int) error {
+	if _, err := s.Listen(host, port); err != nil {
+		return err
+	}
+	return s.Serve()
 }
 
 // Addr 返回实际监听地址。
