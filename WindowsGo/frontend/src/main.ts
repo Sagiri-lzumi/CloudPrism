@@ -12,4 +12,9 @@ import {initTheme} from './lib/theme'
 
 initTheme()
 
-createApp(App).mount('#app')
+const app = createApp(App)
+app.mount('#app')
+
+// 挂载成功后隐藏加载占位（index.html 的 #boot-loading）
+const loading = document.getElementById('boot-loading')
+if (loading) loading.remove()
