@@ -47,7 +47,9 @@ func main() {
 		app.transfer, app.settings, app.preview, dist)
 
 	// 先同步 Listen 拿实际地址（避免 goroutine 竞态读到空 addr），再开浏览器。
-	addr, err := srv.Listen("127.0.0.1", 7840)
+	// 绑 localhost（Go 解析为 127.0.0.1，仅本机），让 Edge 访问 localhost/127.0.0.1 都通；
+	// 若绑 127.0.0.1，Edge 可能把 localhost 解析到 IPv6 ::1 导致访问失败。
+	addr, err := srv.Listen("localhost", 7840)
 	if err != nil {
 		fatal("CloudPrism Web 服务启动失败", err.Error())
 	}
