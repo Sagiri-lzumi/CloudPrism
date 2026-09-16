@@ -11,7 +11,6 @@ package main
 import (
 	"context"
 	"embed"
-	"fmt"
 	"io/fs"
 	"log"
 	"log/slog"
@@ -47,13 +46,13 @@ func main() {
 		app.transfer, app.settings, app.preview, dist)
 
 	// 先同步 Listen 拿实际地址（避免 goroutine 竞态读到空 addr），再开浏览器。
-	// 绑 localhost（Go 解析为 127.0.0.1，仅本机），让 Edge 访问 localhost/127.0.0.1 都通；
-	// 若绑 127.0.0.1，Edge 可能把 localhost 解析到 IPv6 ::1 导致访问失败。
-	addr, err := srv.Listen("localhost", 7840)
-	if err != nil {
+	// 绑 "::"（IPv6 通配，Windows dual-stack 同时接受 IPv4 + IPv6），让 Edge 访问
+	// localhost/127.0.0.1/::1 都通。局域网暴露问题下轮通过网络档解决。
+	if _, err := srv.Listen("::", 7840); err != nil {
 		fatal("CloudPrism Web 服务启动失败", err.Error())
 	}
-	url := fmt.Sprintf("http://%s", addr)
+	// url 用 127.0.0.1（强制 IPv4，避免 Edge 显示 localhost 导致解析问题）。
+	url := "http://127.0.0.1:7840"
 	app.log.Info("CloudPrism Web 就绪", "url", url, "frontend", frontendFingerprint())
 
 	// 打开默认浏览器到 Web 界面。
