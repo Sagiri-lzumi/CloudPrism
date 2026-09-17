@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/cache"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/cryptox"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/session"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/settings"
@@ -66,6 +67,10 @@ type connState struct {
 	engine *vault.SyncEngine // 文件夹同步引擎（随连接创建）
 
 	cache *thumb.Cache // 缩略图加密缓存（会话绑定，锁库时丢弃）
+
+	// mediaCache 是大文件分块读缓存（<缓存根>/media/<scope>），装配失败
+	// 时为 nil —— 读取链路自动退回直连远端，不影响功能。
+	mediaCache *cache.Store
 
 	proxy *streaming.Server // 流式解密代理（127.0.0.1 动态端口）
 

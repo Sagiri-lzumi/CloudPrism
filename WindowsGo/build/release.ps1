@@ -1,18 +1,22 @@
-﻿# CloudPrism WindowsGo 双形态发布打包脚本。
+﻿# CloudPrism WindowsGo Web 模式发布打包脚本。
 #
 # 用法：
-#   powershell -ExecutionPolicy Bypass -File build\release.ps1 [-Tag <tag>]
+#   powershell -ExecutionPolicy Bypass -File build\release.ps1 [-Tag <tag>] [-Clean]
 # 默认 Tag=v1；产物落在仓库根 Release\<yyyy-MM-dd>-<Tag>-Go-{dir,exe}/：
 #   -dir：CloudPrismGo.exe + assets\{icon.ico,baidu_guide.md}（随包资源，
 #         便于日后替换/增补）+ data\tmp\（运行期临时数据目录占位）+
-#         WebView2 引导安装器（本机有才附带，可选）+ README-便携版.txt
-#   -exe：仅 CloudPrismGo.exe（WebView2 用 Evergreen 运行时，exe 启动时
-#         自行探测缺失并打开官方下载页引导安装）
+#         README-便携版.txt
+#   -exe：仅 CloudPrismGo.exe（Web 模式，浏览器打开界面，无需 WebView2）
+#
+# -Clean：打包前先清空旧产物 —— 清掉仓库根 Release\ 下的全部内容，以及
+#   WindowsGo\ 下历史遗留的 Release* 临时发布目录，只留本次新包。
+#   不指定该开关时行为与历史版本完全一致（不删任何东西）。
 #
 # 全部路径用 $PSScriptRoot 相对定位（不写任何绝对路径，风格对齐
 # WindowsPy/build/_package.ps1）；任一步失败立即退出并给出非 0 码。
 param(
-    [string]$Tag = "v1"
+    [string]$Tag = "v1",
+    [switch]$Clean
 )
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -31,13 +35,31 @@ function Fail([string]$msg) {
 }
 function Step([string]$msg) { Write-Host "[release] $msg" -ForegroundColor Cyan }
 
-# ---------- 1. 工具链（新开的 shell 不带 Go/wails 的 PATH） ----------
+# ---------- 0. 可选清理（-Clean） ----------
+# 放在工具链检查之前：清理由用户显式要求，不应因 Go/npm 缺失而跳过。
+if ($Clean) {
+    Step "[0/4] 清理旧产物（-Clean）"
+    if (Test-Path $relRoot) {
+        Get-ChildItem $relRoot -Force | ForEach-Object {
+            Remove-Item $_.FullName -Recurse -Force
+        }
+    } else {
+        New-Item -ItemType Directory -Force -Path $relRoot | Out-Null
+    }
+    # WindowsGo\ 下历史遗留的临时发布目录（Release / Release-v33test 之类），
+    # 易与正式产物混淆，一并清掉；按 Release* 通配以免写死具体版本号。
+    Get-ChildItem $root -Directory -Filter "Release*" -Force | ForEach-Object {
+        Write-Host "[release] 清理源码树临时目录 $($_.Name)" -ForegroundColor DarkGray
+        Remove-Item $_.FullName -Recurse -Force
+    }
+    Write-Host "[release] 旧产物已清空" -ForegroundColor Green
+}
+
+# ---------- 1. 工具链（新开的 shell 不带 Go 的 PATH） ----------
 $env:Path = "C:\Program Files\Go\bin;$env:USERPROFILE\go\bin;" + $env:Path
 $env:CGO_ENABLED = "0"
 go version | Out-Null
 if ($LASTEXITCODE -ne 0) { Fail "go 不可用（请先安装 Go 1.24+）" }
-wails version | Out-Null
-if ($LASTEXITCODE -ne 0) { Fail "wails CLI 不可用（go install github.com/wailsapp/wails/v2/cmd/wails@latest）" }
 
 # GOPROXY 探测失败时切国内镜像（go env 本身失败说明环境异常）
 go env GOPROXY | Out-Null
@@ -53,13 +75,12 @@ if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "npm run build 失败" }
 Pop-Location
 
 # ---------- 3. Go 编译 ----------
-# -webview2 browser：不把 ~150MB 的 Evergreen 安装器 embed 进 exe；
-# -ldflags "-s -w"：去符号表/调试信息减体积（不用 UPX：压缩后
-# WebView2Loader 加载失败且杀软误报率高）
-Step "[2/4] wails build"
+# -H windowsgui：托盘守护进程无控制台窗口（Web 模式形态）；
+# -ldflags "-s -w"：去符号表/调试信息减体积。
+Step "[2/4] go build"
 Push-Location $root
-wails build -platform windows/amd64 -clean -webview2 browser -ldflags "-s -w" | Out-Host
-if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "wails build 失败" }
+go build -ldflags "-s -w -H windowsgui" -o "build\bin\CloudPrismGo.exe" .
+if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "go build 失败" }
 Pop-Location
 
 $exe = Join-Path $root "build\bin\CloudPrismGo.exe"
@@ -76,7 +97,7 @@ if (-not $assetHashes) { Fail "dist/index.html 未解析到产物文件名，S1 
 $exeBytes = [IO.File]::ReadAllBytes($exe)
 $exeText = [Text.Encoding]::UTF8.GetString($exeBytes)
 foreach ($h in $assetHashes) {
-    if (-not $exeText.Contains($h)) { Fail "前端产物 $h 未嵌入 exe（dist 与 exe 不一致），请重新 wails build" }
+    if (-not $exeText.Contains($h)) { Fail "前端产物 $h 未嵌入 exe（dist 与 exe 不一致），请重新 go build" }
 }
 Write-Host "[release] S1 通过：exe 已嵌入前端产物 $($assetHashes -join ' + ')" -ForegroundColor Green
 
@@ -123,27 +144,11 @@ $verInfo = @(
     "",
     "排障步骤：",
     "1. 用资源管理器打开 仓库 WindowsGo/frontend/dist/assets/，对照上面的文件名。",
-    "2. 若一致但 UI 仍显示旧版，关闭所有 CloudPrismGo 进程，",
-    "   删除本目录下 data/webview2-* 所有文件夹后重启。"
+    "2. 若打不开界面（页面报错/无法访问），查看 exe 旁边 data/logs/cloudprism.log。"
 )
 $verInfoPath = Join-Path $dirOut "版本信息.txt"
 $verInfo -join "`r`n" | Out-File -FilePath $verInfoPath -Encoding UTF8
 Write-Host "[release] 已写 $verInfoPath" -ForegroundColor Green
-
-# WebView2 引导安装器（可选附带：本机常见位置有才复制，找不到不失败）
-$bootstraps = @(
-    "$env:WEBVIEW2_BOOTSTRAP",
-    (Join-Path $env:TEMP "MicrosoftEdgeWebview2Setup.exe"),
-    (Join-Path $env:USERPROFILE "Downloads\MicrosoftEdgeWebview2Setup.exe")
-) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-if ($bootstraps) {
-    $wvDir = Join-Path $dirOut "WebView2"
-    New-Item -ItemType Directory -Force -Path $wvDir | Out-Null
-    Copy-Item $bootstraps (Join-Path $wvDir "MicrosoftEdgeWebview2Setup.exe")
-    Write-Host "[release] 已附带 WebView2 引导安装器" -ForegroundColor Yellow
-} else {
-    Write-Host "[release] 提示：本机未找到 WebView2 引导安装器（可选），未附带" -ForegroundColor Yellow
-}
 
 # 便携版说明（无 BOM 读取时中文可能乱码，故源文件内直接用单行段落）
 $readme = @"
@@ -155,19 +160,19 @@ CloudPrism 便携版（Go 版）说明
     百度网盘，全程密钥不出本机。
 
 运行前提
-    1. Windows 10 / 11（64 位）。
-    2. 系统需装有 Microsoft Edge WebView2 运行时（Win11 自带）。
-       缺失时程序会自动打开微软官方下载页引导安装。
+    Windows 10 / 11（64 位）。界面在浏览器中打开（无需 WebView2）。
+    启动后自动打开默认浏览器；若未自动打开，请手动访问
+    http://127.0.0.1:7840 （程序托盘图标可随时重新打开界面）。
 
 目录结构
-    CloudPrismGo.exe        主程序（单文件，无安装）
+    CloudPrismGo.exe        主程序（单文件，无安装，常驻系统托盘）
     assets\icon.ico         应用图标（随包资源）
     assets\baidu_guide.md   百度网盘开放平台凭证获取教程
     assets\self_test_guide.md 加密链路自测指南（新建库→上传→验证解密→续传）
     assets\ui_polish_v1.md  UI 视觉对照表（对照 Python 版，含待确认项）
-    data\                   运行期数据（UDF/日志/缓存/临时文件，可整目录删除，
+    data\                   运行期数据（日志/缓存/临时文件，可整目录删除，
                             不影响云端密库数据）
-    WebView2\               可选：WebView2 引导安装器（未装运行时的机器用）
+    data\logs\              日志（cloudprism.log，排障用）
 
 数据与隐私
     密库本体在云端（本地后端则为所选目录）；本机 data\ 只存设置、

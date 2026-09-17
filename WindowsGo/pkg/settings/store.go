@@ -30,8 +30,14 @@ const (
 	KeyFontSize   = "appearance/font_size"   // 默认 14
 
 	// 缓存
-	KeyCacheLimitMB = "cache/limit_mb" // 默认 512
-	KeyCachePath    = "cache/path"     // 空 = 默认临时目录
+	KeyCacheLimitMB = "cache/limit_mb" // 默认 512（媒体分块缓存上限）
+	KeyCachePath    = "cache/path"     // 空 = 程序目录旁 data/cache（便携）
+	// KeyCacheChunkMB 是大文件分块读缓存的分块大小（MB）。
+	//
+	// 该值同时充当「是否分块」的阈值：小于它整存为单独文件，大于等于它
+	// 切成 原名-1 / 原名-2 … 收进以原名命名的子文件夹（用户明确要求两者
+	// 用同一个值，不做两个旋钮）。默认 50。
+	KeyCacheChunkMB = "cache/chunk_mb"
 
 	// 传输 / 性能 / 安全
 	KeyChunkIndex       = "transfer/chunk_index"     // 0=256KB 1=512KB 2=1MB 3=4MB

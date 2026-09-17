@@ -1,9 +1,12 @@
 package bind
 
 import (
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"errors"
 
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/appstate"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/platform/win"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/cache"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/paths"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/settings"
 )
 
@@ -29,6 +32,7 @@ func (s *Settings) Get() map[string]any {
 		"fontSize":      store.Int(settings.KeyFontSize, 14),
 		"cacheLimitMb":  store.Int(settings.KeyCacheLimitMB, 512),
 		"cachePath":     store.Get(settings.KeyCachePath, ""),
+		"chunkSizeMb":   store.Int(settings.KeyCacheChunkMB, cache.DefaultChunkMB),
 		"chunkIndex":    store.Int(settings.KeyChunkIndex, 1),
 		"concurrent":    store.Int(settings.KeyConcurrent, 2),
 		"syncDir":       store.Get(settings.KeySyncLocalDir, ""),
@@ -51,12 +55,47 @@ func (s *Settings) SetFontSize(px int) error {
 	return s.putInt(settings.KeyFontSize, px)
 }
 
-// SetCache 设置缩略图缓存上限（MB）与目录；path 空串 = 默认临时目录。
+// SetCache 设置缓存上限（MB）与缓存根目录；path 空串 = 程序目录旁默认位置。
+//
+// 路径校验是本项目「缓存绝不写系统盘位置」红线的一道闸门：用户若把缓存
+// 目录指到 %TEMP% / %APPDATA% / Program Files 等系统位置，这里直接拒绝
+// 并返回可读原因，而不是等运行时悄悄写满系统盘。
 func (s *Settings) SetCache(limitMB int, path string) error {
+	if path != "" {
+		if why := paths.ForbiddenCacheDir(path); why != "" {
+			return Wrap(errors.New(why))
+		}
+	}
 	store := s.st.Store()
 	store.SetInt(settings.KeyCacheLimitMB, limitMB)
 	store.Set(settings.KeyCachePath, path)
 	return wrapSync(store.Sync())
+}
+
+// SetChunkSize 设置大文件分块读缓存的分块大小（MB）。
+//
+// 该值同时是「是否分块」的阈值（用户明确要求只保留一个旋钮）：小于它
+// 整存为单独文件，大于等于它切成 原名-1 / 原名-2 … 收进原名子文件夹。
+// 对**后续新建的缓存条目**生效；已有条目在下次访问时按布局不兼容重建。
+func (s *Settings) SetChunkSize(mb int) error {
+	if mb < cache.MinChunkMB {
+		mb = cache.MinChunkMB
+	}
+	if mb > cache.MaxChunkMB {
+		mb = cache.MaxChunkMB
+	}
+	return s.putInt(settings.KeyCacheChunkMB, mb)
+}
+
+// CacheInfo 返回缓存目录、占用与生效分块大小（设置页展示）。
+func (s *Settings) CacheInfo() appstate.CacheInfo { return s.st.CacheInfo() }
+
+// PurgeCache 清空本地缓存（缩略图 + 媒体分块），返回清空后的状态。
+func (s *Settings) PurgeCache() (appstate.CacheInfo, error) {
+	if err := s.st.PurgeCache(); err != nil {
+		return appstate.CacheInfo{}, Wrap(err)
+	}
+	return s.st.CacheInfo(), nil
 }
 
 // SetTransfer 分块档位与并发任务数，立即应用到后续任务。
@@ -112,23 +151,17 @@ func (s *Settings) SyncNow() (int, error) {
 
 // ChooseSyncDir 弹目录选择框返回同步目录；取消返回空串（非错误）。
 func (s *Settings) ChooseSyncDir() (string, error) {
-	dir, err := wruntime.OpenDirectoryDialog(s.ctx.Context(), wruntime.OpenDialogOptions{
-		Title:                "选择要同步的本地目录",
-		CanCreateDirectories: true,
-	})
+	dir, err := win.PickFolder("选择要同步的本地目录")
 	if err != nil {
 		return "", Wrap(err)
 	}
 	return dir, nil
 }
 
-// ChooseCacheDir 弹目录选择框返回缩略图缓存目录；取消返回空串（非错误）。
+// ChooseCacheDir 弹目录选择框返回缓存根目录；取消返回空串（非错误）。
 // 与 ChooseSyncDir 的「同步目录」语义区分，避免设置页误用。
 func (s *Settings) ChooseCacheDir() (string, error) {
-	dir, err := wruntime.OpenDirectoryDialog(s.ctx.Context(), wruntime.OpenDialogOptions{
-		Title:                "选择缩略图缓存目录",
-		CanCreateDirectories: true,
-	})
+	dir, err := win.PickFolder("选择缓存目录（请勿选择系统盘的用户目录）")
 	if err != nil {
 		return "", Wrap(err)
 	}

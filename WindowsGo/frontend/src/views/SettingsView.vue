@@ -1,9 +1,12 @@
 <!--
   SettingsView.vue —— 设置页。
   对照 Python side_panel.SettingsPage 分组：外观（主题/字号）→ 缓存
-  （上限/目录）→ 传输（分块/并发）→ 安全（自动锁定）→ 百度网盘
-  （凭证表单 + 授权流程，与向导内嵌表单同链路）→ 性能（加密核心数）
-  → 关于（运行时版本）。
+  （分块大小 / 目录 / 上限 / 清空）→ 传输（分块/并发）→ 安全（自动锁定）
+  → 百度网盘（凭证表单 + 授权流程，与向导内嵌表单同链路）→ 性能
+  （加密核心数）→ 关于（运行时版本）。
+  注意两个「分块」不是同一件事：缓存组的「分块大小」是大文件本地分块
+  读缓存的分块粒度（同时是是否分块的阈值，Go 键 cache/chunk_mb）；传输组
+  的「分块大小」是上传/下载单次传输块（transfer/chunk_index）。
   差异说明：Python 设置页的「连接信息/文件夹同步/恢复码」在 Go 端由
   密库页（VaultsView）承担（同步、恢复码均依赖连接态快照）；此处仅保留
   纯偏好类设置。全部写入即落盘（Go 设置 Store 每次 Set 即 Sync）。
@@ -13,6 +16,7 @@ import {computed, onMounted, reactive, ref} from 'vue'
 import {ui} from '../lib/store'
 import {applyFontSize} from '../lib/store'
 import {App, Settings, Vault, unwrap} from '../lib/api'
+import type {CacheInfo} from '../lib/api'
 import {MODE_LABELS, applyThemeIndex} from '../lib/theme'
 import {showError, showInfo, showSuccess, showWarning} from '../lib/toast'
 import Button from '../components/fluent/Button.vue'
@@ -29,6 +33,10 @@ const FONT_PX = [12, 14, 16, 18]
 const FONT_LABELS = ['小 (12px)', '中 (14px)', '大 (16px)', '特大 (18px)']
 // 分块档位：索引与 Go 端 transfer/chunk_index 一致（0=256KB … 3=4MB）
 const CHUNK_LABELS = ['256 KB', '512 KB', '1 MB', '4 MB']
+// 大文件分块读缓存的分块大小（MB）：与 Go 端 cache/chunk_mb 同值域，
+// 同时充当「是否分块」的阈值（小于它整存为单独文件）
+const CHUNK_SIZE_MB = [8, 16, 32, 50, 64, 128, 256, 512]
+const CHUNK_SIZE_LABELS = CHUNK_SIZE_MB.map((mb) => `${mb} MB`)
 // 自动锁定：0=从不 1/2/3 = 5/15/30 分钟
 const AUTOLOCK_LABELS = ['从不', '5 分钟', '15 分钟', '30 分钟']
 
@@ -55,6 +63,19 @@ const concurrent = computed(() => num(ui.settings.concurrent, 2))
 const cacheLimit = computed(() => num(ui.settings.cacheLimitMb, 512))
 const cachePath = computed(() => String(ui.settings.cachePath ?? ''))
 const cachePathSet = computed(() => cachePath.value !== '')
+// 分块大小：命中预设档位取下标，自定义值（如配置文件手改）回退到最接近档位
+const chunkSizeMb = computed(() => num(ui.settings.chunkSizeMb, 50))
+const chunkSizeIdx = computed(() => {
+  const i = CHUNK_SIZE_MB.indexOf(chunkSizeMb.value)
+  if (i >= 0) return i
+  let best = 0
+  CHUNK_SIZE_MB.forEach((mb, idx) => {
+    if (mb <= chunkSizeMb.value) best = idx
+  })
+  return best
+})
+// 缓存运行时信息（占用/生效目录），挂载时拉一次、清理后再拉
+const cacheInfo = ref<CacheInfo | null>(null)
 const maxCores = computed(() => num(ui.settings.maxCores, 0))
 const autoLockIdx = computed(() => num(ui.settings.autoLockIndex, 0))
 const syncDir = computed(() => String(ui.settings.syncDir ?? ''))
@@ -119,22 +140,70 @@ async function browseCacheDir() {
     if (!dir) return // 用户取消
     ui.settings.cachePath = dir
     await Settings.SetCache(cacheLimit.value, dir)
-    showSuccess('缩略图缓存目录已更新')
+    showSuccess('缓存目录已更新')
+    await refreshCacheInfo()
   } catch (e) {
     onErr(e)
   }
 }
 
-/** 清除自定义缓存目录（回退系统临时目录）。 */
+/** 清除自定义缓存目录（回退程序目录旁的默认位置）。 */
 async function resetCacheDir() {
   ui.settings.cachePath = ''
   try {
     await Settings.SetCache(cacheLimit.value, '')
-    showInfo('已恢复默认缓存目录（系统临时目录）')
+    showInfo('已恢复默认缓存目录（程序目录旁 data/cache）')
+    await refreshCacheInfo()
   } catch (e) {
     onErr(e)
   }
 }
+
+/** 修改分块大小（= 分块阈值），对后续新建的缓存条目生效。 */
+async function onChunkSize(i: number) {
+  const mb = CHUNK_SIZE_MB[i] ?? 50
+  ui.settings.chunkSizeMb = mb
+  try {
+    await Settings.SetChunkSize(mb)
+    showInfo(`分块大小已设为 ${mb} MB（${mb} MB 以上的文件将按块缓存）`)
+    await refreshCacheInfo()
+  } catch (e) {
+    onErr(e)
+  }
+}
+
+/** 拉取缓存占用/生效目录；失败静默（展示型信息，不打断设置操作）。 */
+async function refreshCacheInfo() {
+  try {
+    cacheInfo.value = await Settings.CacheInfo()
+  } catch {
+    cacheInfo.value = null
+  }
+}
+
+/** 清空本地缓存（缩略图 + 媒体分块），不影响云端数据。 */
+const cacheBusy = ref(false)
+async function purgeCache() {
+  if (cacheBusy.value) return
+  cacheBusy.value = true
+  try {
+    cacheInfo.value = await Settings.PurgeCache()
+    showSuccess('本地缓存已清空')
+  } catch (e) {
+    onErr(e)
+  } finally {
+    cacheBusy.value = false
+  }
+}
+
+/** 缓存占用的人类可读文本。 */
+const cacheUsageText = computed(() => {
+  const info = cacheInfo.value
+  if (!info) return ''
+  const mb = info.bytes / (1024 * 1024)
+  const size = mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`
+  return `已占用 ${size} · ${info.entries} 个条目`
+})
 
 async function onMaxCores(n: number) {
   ui.settings.maxCores = n
@@ -235,6 +304,7 @@ async function refreshBaidu() {
 
 onMounted(() => {
   void refreshBaidu()
+  void refreshCacheInfo()
   void App.Version().then((v) => (version.value = v)).catch(() => {})
 })
 
@@ -358,30 +428,20 @@ const version = ref('读取运行时信息…')
 
         <!-- ===================== 缓存 ===================== -->
         <div class="group-title">缓存</div>
-        <div class="set-card">
-          <span class="set-icon"><Icon name="history" :size="17" /></span>
-          <div class="set-body">
-            <div class="set-title">缓存大小上限</div>
-            <div class="set-content">缩略图缓存占用磁盘的上限（64–4096 MB）</div>
-          </div>
-          <div class="set-right">
-            <SpinBox
-              :model-value="cacheLimit"
-              :min="64"
-              :max="4096"
-              :step="16"
-              suffix=" MB"
-              :width="96"
-              @change="onCacheLimit"
-            />
-          </div>
-        </div>
+        <ComboBoxCard
+          icon="library"
+          title="分块大小"
+          content="大于等于该值的文件按块缓存：切成「原名-1 / 原名-2 …」存进同名子文件夹；小于该值的文件整存为单独文件。按块读取，视频无需等整文件下载完即可播放"
+          :options="[...CHUNK_SIZE_LABELS]"
+          :model-value="chunkSizeIdx"
+          @change="onChunkSize"
+        />
         <div class="set-card">
           <span class="set-icon"><Icon name="folder" :size="17" /></span>
           <div class="set-body">
             <div class="set-title">缓存目录</div>
             <div class="set-content" :title="cachePath">
-              {{ cachePathSet ? cachePath : '默认：系统临时目录（%TEMP% 下 cloudprism_cache）' }}
+              {{ cachePathSet ? cachePath : '默认：程序目录旁 data/cache（便携，不写系统目录）' }}
             </div>
           </div>
           <div class="set-right">
@@ -394,6 +454,29 @@ const version = ref('读取运行时信息…')
               @click="resetCacheDir"
             />
             <Button icon="folder_add" :disabled="baiduBusy" @click="browseCacheDir">浏览…</Button>
+          </div>
+        </div>
+        <div class="set-card">
+          <span class="set-icon"><Icon name="history" :size="17" /></span>
+          <div class="set-body">
+            <div class="set-title">缓存大小上限</div>
+            <div class="set-content">
+              媒体分块缓存占用磁盘的上限（64–4096 MB）<template v-if="cacheUsageText">
+                · {{ cacheUsageText }}</template
+              >
+            </div>
+          </div>
+          <div class="set-right">
+            <SpinBox
+              :model-value="cacheLimit"
+              :min="64"
+              :max="4096"
+              :step="16"
+              suffix=" MB"
+              :width="96"
+              @change="onCacheLimit"
+            />
+            <Button icon="delete" :disabled="cacheBusy" @click="purgeCache">清空缓存</Button>
           </div>
         </div>
 

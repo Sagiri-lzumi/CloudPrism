@@ -17,6 +17,7 @@ package paths
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // DataDirEnv 是数据目录覆盖的环境变量名（开发态专用，见包注释）。
@@ -83,4 +84,93 @@ func TempDir(create bool) (dir string, ok bool) {
 		}
 	}
 	return d, true
+}
+
+// ---------------------------------------------------------------------------
+// 缓存目录（大文件分块读缓存 / 缩略图缓存）
+// ---------------------------------------------------------------------------
+
+// DefaultCacheDir 返回缓存根目录的默认值：程序目录旁 data/cache。
+//
+// 便携化语义与 DataDir 一致 —— 绿色版把程序目录拷到哪，缓存就跟到哪；
+// 拷到 D 盘就落 D 盘，拷走即整体迁移。
+//
+// **红线**：本函数是缓存目录的唯一默认来源，绝不回退系统 %TEMP% /
+// %APPDATA% / %LOCALAPPDATA%。历史实现（Python 端与 Go 端早期版本）在
+// 未配置时把缩略图缓存写进 %TEMP%\cloudprism_cache，会持续吃满系统盘，
+// 这正是本次改造要根除的行为。
+func DefaultCacheDir() string {
+	return filepath.Join(DataDir(), "cache")
+}
+
+// EnsureCacheDir 尽力创建缓存根目录；成功返回路径，失败返回 ok=false。
+//
+// 失败时调用方应**降级为不缓存**，而不是改投系统临时目录 —— 见
+// DefaultCacheDir 的红线说明。
+func EnsureCacheDir(root string) (string, bool) {
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return root, false
+	}
+	return root, true
+}
+
+// ThumbCacheDir 返回缩略图加密缓存的落盘目录（<缓存根>/thumbs）。
+func ThumbCacheDir(root string) string { return filepath.Join(root, "thumbs") }
+
+// MediaCacheDir 返回媒体分块读缓存的落盘目录（<缓存根>/media）。
+func MediaCacheDir(root string) string { return filepath.Join(root, "media") }
+
+// systemCacheBases 列出「不允许作为缓存目录」的系统位置所对应的环境变量。
+//
+// 覆盖三类：系统临时目录、用户漫游/本地配置目录、系统与程序目录。
+// 变量缺失（非 Windows 或未设置）时自动跳过。
+var systemCacheBases = []string{
+	"TEMP", "TMP",
+	"APPDATA", "LOCALAPPDATA",
+	"SystemRoot", "windir",
+	"ProgramFiles", "ProgramFiles(x86)", "ProgramData",
+	"USERPROFILE",
+}
+
+// ForbiddenCacheDir 报告 dir 是否落在系统目录内（缓存红线校验）。
+//
+// 命中返回非空原因说明（供设置页直接展示）。判定用 filepath.Rel 而非
+// 字符串前缀，避免 "C:\TempX" 被误判为落在 "C:\Temp" 之下。
+//
+// 注意：这里**不**笼统地禁止整个 C 盘 —— 程序目录本身可能就在 C 盘，
+// 用户选择的缓存根跟随程序目录即可；红线是「不得把缓存写进系统位置，
+// 尤其是 %TEMP% / %APPDATA% 这类会被系统清理且位于系统盘的用户目录」。
+func ForbiddenCacheDir(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	target, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	for _, env := range systemCacheBases {
+		base := os.Getenv(env)
+		if base == "" {
+			continue
+		}
+		absBase, err := filepath.Abs(base)
+		if err != nil {
+			continue
+		}
+		if within(absBase, target) {
+			return "该位置位于系统目录 " + absBase + " 内，缓存不允许写进系统盘位置"
+		}
+	}
+	return ""
+}
+
+// within 报告 target 是否等于 base 或位于 base 之下（大小写不敏感，
+// Windows 盘符与路径均不区分大小写）。
+func within(base, target string) bool {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false
+	}
+	rel = strings.ToLower(rel)
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }

@@ -19,12 +19,16 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/appstate"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/bind"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/paths"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/session"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/storage"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/streaming"
@@ -47,10 +51,28 @@ type Server struct {
 	mu      sync.Mutex
 	clients map[chan event]struct{}
 
+	// 10Hz 状态帧合帧循环（替代 Wails 时代 bind.Events 的 Wails 专用循环）。
+	// Listen 启动、Shutdown 停止；帧走 collect 进 SSE 广播。
+	frameMu   sync.Mutex
+	frameStop chan struct{}
+
+	// quit 由 /api/app/quit 触发：前端 NavRail「退出」经此优雅关闭进程。
+	quit chan struct{}
+
 	addr string // 实际监听地址（端口冲突后可能与配置不同）
 	ln   net.Listener
 	srv  *http.Server
 }
+
+// frame 是每帧载荷：全局快照 + 传输任务明细（任务进度 10Hz 刷新）。
+// 无活动传输时 Tasks 为 nil，减帧体积。
+type frame struct {
+	Snap  appstate.Snapshot   `json:"snap"`
+	Tasks []appstate.TaskView `json:"tasks,omitempty"`
+}
+
+// frameInterval 合帧周期 100ms（10Hz）。
+const frameInterval = 100 * time.Millisecond
 
 // event 是 SSE 单条事件：name 作为 event: 名，data JSON 序列化。
 type event struct {
@@ -64,15 +86,16 @@ func New(log *slog.Logger, st *appstate.State, holder *bind.ContextHolder,
 	settings *bind.Settings, preview *bind.Preview, distFS fs.FS) *Server {
 	s := &Server{
 		log:      log,
-		st:        st,
-		holder:    holder,
-		vault:     vault,
-		files:     files,
-		transfer:  transfer,
-		settings:  settings,
-		preview:   preview,
-		distFS:    distFS,
-		clients:   make(map[chan event]struct{}),
+		st:       st,
+		holder:   holder,
+		vault:    vault,
+		files:    files,
+		transfer: transfer,
+		settings: settings,
+		preview:  preview,
+		distFS:   distFS,
+		clients:  make(map[chan event]struct{}),
+		quit:     make(chan struct{}),
 	}
 	// 注入 Emit 收集器：appstate 事件 → SSE 广播
 	st.SetEmit(s.collect)
@@ -100,6 +123,8 @@ func (s *Server) Listen(host string, port int) (string, error) {
 	s.ln = ln
 	s.addr = ln.Addr().String()
 	s.log.Info("Web 服务启动", "addr", s.addr)
+	// 监听成功后启动 10Hz 状态帧合帧循环（Serve 阻塞前就绪，首帧即可达 SSE）。
+	s.startFrameLoop()
 	return s.addr, nil
 }
 
@@ -108,20 +133,54 @@ func (s *Server) Serve() error {
 	return s.srv.Serve(s.ln)
 }
 
-// Start 兼容旧入口：Listen + Serve（goroutine 内调用时主线程应立即读 Addr 则竞态，请用 Listen + Serve 分开）。
-func (s *Server) Start(host string, port int) error {
-	if _, err := s.Listen(host, port); err != nil {
-		return err
-	}
-	return s.Serve()
-}
-
 // Addr 返回实际监听地址。
 func (s *Server) Addr() string { return s.addr }
 
-// Shutdown 停止 server。
+// Shutdown 停止 server（先停帧循环，再停 HTTP）。
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.stopFrameLoop()
 	return s.srv.Shutdown(ctx)
+}
+
+// QuitCh 返回前端退出信号通道（/api/app/quit 触发）。
+func (s *Server) QuitCh() <-chan struct{} { return s.quit }
+
+// startFrameLoop 启动 10Hz 状态帧合帧循环（幂等：重复调用以首次为准）。
+func (s *Server) startFrameLoop() {
+	s.frameMu.Lock()
+	defer s.frameMu.Unlock()
+	if s.frameStop != nil {
+		return // 已启动
+	}
+	stop := make(chan struct{})
+	s.frameStop = stop
+	go func() {
+		t := time.NewTicker(frameInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				f := frame{Snap: s.st.Snapshot()}
+				if f.Snap.TransferActive {
+					f.Tasks = s.st.Tasks()
+				}
+				s.collect("st:frame", f)
+			case <-stop:
+				return
+			}
+		}
+	}()
+}
+
+// stopFrameLoop 停止合帧循环（幂等；未启动/已停止时无操作）。
+func (s *Server) stopFrameLoop() {
+	s.frameMu.Lock()
+	defer s.frameMu.Unlock()
+	if s.frameStop == nil {
+		return
+	}
+	close(s.frameStop)
+	s.frameStop = nil
 }
 
 /* ----------------------------------------------------------- 路由注册 */
@@ -138,6 +197,17 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	}))
 	mux.HandleFunc("/api/app/version", s.wrapErr(func(r *http.Request) (any, error) {
 		return s.version(), nil
+	}))
+	mux.HandleFunc("/api/app/quit", s.wrapErr(func(r *http.Request) (any, error) {
+		// 延迟 200ms 让本响应先刷新，再通知 main 收尾退出。
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			select {
+			case s.quit <- struct{}{}:
+			default:
+			}
+		}()
+		return nil, nil
 	}))
 
 	// Vault 域
@@ -243,10 +313,20 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 		return nil, s.settings.SetFontSize(req.Px)
 	}))
 	mux.HandleFunc("/api/settings/setcache", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
-		var req struct{ LimitMB int; Path string }
+		var req struct {
+			LimitMB int
+			Path    string
+		}
 		json.Unmarshal(body, &req)
 		return nil, s.settings.SetCache(req.LimitMB, req.Path)
 	}))
+	mux.HandleFunc("/api/settings/setchunksize", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
+		var req struct{ MB int }
+		json.Unmarshal(body, &req)
+		return nil, s.settings.SetChunkSize(req.MB)
+	}))
+	mux.HandleFunc("/api/settings/cacheinfo", s.wrapErr(func(r *http.Request) (any, error) { return s.settings.CacheInfo(), nil }))
+	mux.HandleFunc("/api/settings/purgecache", s.wrapErr(func(r *http.Request) (any, error) { return s.settings.PurgeCache() }))
 	mux.HandleFunc("/api/settings/settransfer", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
 		var req struct{ ChunkIndex, Concurrent int }
 		json.Unmarshal(body, &req)
@@ -272,19 +352,31 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/settings/choosecachedir", s.wrapErr(func(r *http.Request) (any, error) { return s.settings.ChooseCacheDir() }))
 
 	// Transfer 域
-	mux.HandleFunc("/api/transfer/upload", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
-		// TODO 阶段4：multipart。当前占位。
-		return nil, nil
-	}))
+	mux.HandleFunc("/api/transfer/upload", s.handleUpload)
 	mux.HandleFunc("/api/transfer/download", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
 		var req struct {
-			Entries []appstate.FileEntry
+			Entries  []appstate.FileEntry
 			LocalDir string
 		}
 		json.Unmarshal(body, &req)
 		return nil, s.transfer.Download(req.Entries, req.LocalDir)
 	}))
 	mux.HandleFunc("/api/transfer/tasks", s.wrapErr(func(r *http.Request) (any, error) { return s.transfer.Tasks(), nil }))
+	mux.HandleFunc("/api/transfer/downloadurl", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
+		var req struct {
+			Remote  string
+			Display string
+		}
+		json.Unmarshal(body, &req)
+		if req.Remote == "" {
+			return nil, fmt.Errorf("缺少 remote")
+		}
+		url, err := s.preview.DownloadURL(req.Remote, req.Display)
+		if err != nil {
+			return nil, bind.Wrap(err)
+		}
+		return map[string]string{"url": url}, nil
+	}))
 	mux.HandleFunc("/api/transfer/retry", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
 		var req struct{ Id int64 }
 		json.Unmarshal(body, &req)
@@ -351,8 +443,15 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}()
 
-	// 立即发一帧当前状态（前端连上即有数据）
-	s.collect("st:frame", nil) // 触发一帧（实际数据由合帧器提供，这里仅唤醒）
+	// 立即发一帧真实快照（前端连上即有数据；不能发空帧——
+	// 前端对每帧 JSON.parse，空 data 会抛异常触发 boot-err）。
+	f := frame{Snap: s.st.Snapshot()}
+	if f.Snap.TransferActive {
+		f.Tasks = s.st.Tasks()
+	}
+	dataBytes, _ := json.Marshal(f)
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", "st:frame", string(dataBytes))
+	flusher.Flush()
 
 	for {
 		select {
@@ -373,7 +472,25 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) registerStatic(mux *http.ServeMux) {
 	// distFS 已是 frontend/dist 子树（main.go 注入 fs.Sub 后的结果）
-	mux.Handle("/", http.FileServer(http.FS(s.distFS)))
+	fileServer := http.FileServer(http.FS(s.distFS))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// /api/* /s/ /t/ /d/ 等由各自路由模式接管；此处只处理静态资源。
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if path != "" {
+			// 文件存在则直接服务；不存在（SPA 历史路由）回退 index.html。
+			if _, err := fs.Stat(s.distFS, path); err == nil {
+				// 静态资源（带内容 hash 的文件名）可强缓存
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+		// index.html / 未知路径：no-store 强制每次取最新（防旧前端缓存）
+		w.Header().Set("Cache-Control", "no-store")
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/"
+		fileServer.ServeHTTP(w, r2)
+	})
 }
 
 /* ----------------------------------------------------------- 代理流 */
@@ -388,6 +505,14 @@ func (s *Server) registerStream(mux *http.ServeMux) {
 		s.stream.Handler().ServeHTTP(w, r)
 	})
 	mux.HandleFunc("/t/", func(w http.ResponseWriter, r *http.Request) {
+		if s.stream == nil {
+			http.NotFound(w, r)
+			return
+		}
+		s.stream.Handler().ServeHTTP(w, r)
+	})
+	// /d/* 下载端点（浏览器保存解密后的完整文件）
+	mux.HandleFunc("/d/", func(w http.ResponseWriter, r *http.Request) {
 		if s.stream == nil {
 			http.NotFound(w, r)
 			return
@@ -413,6 +538,71 @@ func (s *Server) wrapJSON(h func(*http.Request, []byte) (any, error)) http.Handl
 		v, err := h(r, body)
 		s.writeJSON(w, v, err)
 	}
+}
+
+// handleUpload 处理浏览器 multipart 上传：文件先落临时目录（保留原始
+// 文件名），再经 appstate.UploadPaths 入传输队列（复用续传/重试/进度）。
+//
+// 浏览器 FormData 用 <input type=file> 或拖放产生 File 对象，与 Wails 时代
+// 的本地路径语义不同：此处理器把 multipart 内容 staging 成临时文件作为
+// 任务 LocalPath，上传完成后由任务清理逻辑删除。
+func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	// 32MB 内存在内存，更大自动溢出到系统临时目录。
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		s.writeJSON(w, nil, fmt.Errorf("解析上传表单失败: %w", err))
+		return
+	}
+	remoteDir := r.FormValue("remoteDir")
+	fileHeaders := r.MultipartForm.File["files"]
+	if len(fileHeaders) == 0 {
+		s.writeJSON(w, nil, fmt.Errorf("未选择文件"))
+		return
+	}
+
+	tmpBase, _ := paths.TempDir(true)
+	if tmpBase == "" {
+		tmpBase = os.TempDir()
+	}
+	// 每个文件一个独立子目录，避免同名文件互相覆盖。
+	stageDir, err := os.MkdirTemp(tmpBase, "cp-upload-*")
+	if err != nil {
+		s.writeJSON(w, nil, fmt.Errorf("创建暂存目录失败: %w", err))
+		return
+	}
+	defer os.RemoveAll(stageDir)
+
+	localPaths := make([]string, 0, len(fileHeaders))
+	for _, fh := range fileHeaders {
+		src, err := fh.Open()
+		if err != nil {
+			s.writeJSON(w, nil, fmt.Errorf("打开上传文件失败: %w", err))
+			return
+		}
+		dst, err := os.Create(filepath.Join(stageDir, filepath.Base(filepath.Clean(fh.Filename))))
+		if err != nil {
+			src.Close()
+			s.writeJSON(w, nil, fmt.Errorf("创建暂存文件失败: %w", err))
+			return
+		}
+		_, cpErr := io.Copy(dst, src)
+		src.Close()
+		if cpErr != nil {
+			dst.Close()
+			s.writeJSON(w, nil, fmt.Errorf("写入暂存文件失败: %w", cpErr))
+			return
+		}
+		if err := dst.Close(); err != nil {
+			s.writeJSON(w, nil, fmt.Errorf("关闭暂存文件失败: %w", err))
+			return
+		}
+		localPaths = append(localPaths, dst.Name())
+	}
+
+	if err := s.st.UploadPaths(r.Context(), localPaths, remoteDir); err != nil {
+		s.writeJSON(w, nil, bind.Wrap(err))
+		return
+	}
+	s.writeJSON(w, map[string]any{"enqueued": len(localPaths)}, nil)
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, v any, err error) {

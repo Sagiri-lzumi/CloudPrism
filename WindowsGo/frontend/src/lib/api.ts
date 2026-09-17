@@ -7,7 +7,7 @@
 //
 // Go 侧错误约定见 internal/bind/apierr.go：Code 常量 + {code,message} JSON。
 
-import type {appstate} from '../../wailsjs/go/models'
+import type {appstate} from '../types/appstate'
 
 /** ApiCode 全集（镜像 internal/bind/apierr.go）。 */
 export const ApiCode = {
@@ -123,12 +123,27 @@ export const Files = {
   Export: (remote: string) => call<string>('/files/export', {remote}),
 }
 
+/** CacheInfo：缓存目录与占用（镜像 appstate.CacheInfo）。 */
+export interface CacheInfo {
+  dir: string // 实际生效的缓存根目录
+  scope: string // 当前密库的作用域目录（未连接为空）
+  chunkMb: number // 生效的分块大小（MB）
+  limitMb: number // 容量上限（MB）
+  bytes: number // 已占用字节
+  entries: number // 条目数
+  enabled: boolean // 分块缓存是否可用
+}
+
 /** Settings 域：偏好读写（Web 模式下目录选择用 stub，后续阶段补）。 */
 export const Settings = {
   Get: () => call<Record<string, unknown>>('/settings/get'),
   SetTheme: (index: number) => call<void>('/settings/settheme', {index}),
   SetFontSize: (px: number) => call<void>('/settings/setfontsize', {px}),
   SetCache: (limitMB: number, path: string) => call<void>('/settings/setcache', {limitMB, path}),
+  // 分块大小 = 分块阈值（MB）：大于等于该值的文件按块缓存
+  SetChunkSize: (mb: number) => call<void>('/settings/setchunksize', {mb}),
+  CacheInfo: () => call<CacheInfo>('/settings/cacheinfo'),
+  PurgeCache: () => call<CacheInfo>('/settings/purgecache'),
   SetTransfer: (chunkIndex: number, concurrent: number) =>
     call<void>('/settings/settransfer', {chunkIndex, concurrent}),
   SetAutoLock: (index: number) => call<void>('/settings/setautolock', {index}),
@@ -141,15 +156,26 @@ export const Settings = {
 
 /** Transfer 域：上传/下载/任务管理。 */
 export const Transfer = {
-  // multipart 流上传（阶段4补全；当前 stub）
-  Upload: async (localPaths: string[], remoteDir: string): Promise<void> => {
-    await call<void>('/transfer/upload', {localPaths, remoteDir})
+  // 浏览器 multipart 流上传：files 为浏览器 File 对象（input/drag-drop），
+  // 后端 staging 成临时文件后入传输队列。
+  Upload: async (files: File[], remoteDir: string): Promise<void> => {
+    const fd = new FormData()
+    for (const f of files) fd.append('files', f)
+    fd.append('remoteDir', remoteDir)
+    const resp = await fetch('/api/transfer/upload', {method: 'POST', body: fd})
+    if (!resp.ok) {
+      let err: unknown
+      try {
+        err = await resp.json()
+      } catch {
+        err = {code: ApiCode.Internal, message: `HTTP ${resp.status}`}
+      }
+      throw unwrap(err)
+    }
   },
-  Download: (entries: appstate.FileEntry[], localDir: string) =>
-    call<void>('/transfer/download', {entries, localDir}),
-  // 浏览器目录/文件选择（阶段4补全；当前 stub）
-  DownloadDialog: (): Promise<string> => Promise.resolve(''),
-  UploadDialog: (): Promise<string[]> => Promise.resolve([]),
+  // 下载端点 URL：浏览器 <a download> 触发保存（后端 /d/ 流式解密）。
+  DownloadURL: (remote: string, display: string) =>
+    call<{url: string}>('/transfer/downloadurl', {remote, display}),
   Tasks: () => call<appstate.TaskView[]>('/transfer/tasks'),
   Retry: (id: number) => call<void>('/transfer/retry', {id}),
   CancelAll: () => call<void>('/transfer/cancelall'),
@@ -166,7 +192,7 @@ export const Preview = {
 
 /** App 域：全局操作。 */
 export const App = {
-  Quit: () => Promise.resolve(),
+  Quit: () => call<void>('/app/quit'),
   Ping: (token: string) => call<string>('/app/ping', {token}),
   Version: () => call<string>('/app/version'),
 }

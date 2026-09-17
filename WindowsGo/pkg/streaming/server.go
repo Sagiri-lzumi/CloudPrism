@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/cache"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/cryptox"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/session"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/storage"
@@ -49,8 +50,9 @@ const (
 	// tokenHexLen 令牌十六进制长度（16 字节随机数）。
 	tokenHexLen = 32
 
-	routeStream = "s" // /s/{token}/{display-name}
-	routeThumb  = "t" // /t/{token}
+	routeStream   = "s" // /s/{token}/{display-name}
+	routeThumb    = "t" // /t/{token}
+	routeDownload = "d" // /d/{token}/{display-name}
 )
 
 // ErrNotVaultFile 目标存在但不是合法加密容器时返回（绑定层据此提示
@@ -65,6 +67,10 @@ type Server struct {
 	backend storage.Backend
 	reg     *Registry
 
+	// cc 是可选的大文件分块读缓存（pkg/cache）。为 nil 时读取路径退化为
+	// 直连远端 —— 缓存永远只是加速层，缺席不影响任何功能语义。
+	cc *cache.Store
+
 	mu   sync.RWMutex // 保护 httpSrv/addr
 	http *http.Server
 	addr string // 实际监听地址 "host:port"
@@ -78,6 +84,12 @@ func NewServer(sess *session.Session, backend storage.Backend) *Server {
 		reg:     NewRegistry(),
 	}
 }
+
+// SetChunkCache 注入分块读缓存（在 Start 之前调用；nil 表示不启用）。
+//
+// 缓存按「密文区间」缓存，与本包的解密职责正交：本包只向它要字节、
+// 拿到明文窗口后照常就地解密，缓存层不感知密钥与明文。
+func (s *Server) SetChunkCache(cc *cache.Store) { s.cc = cc }
 
 // Registry 暴露注册表（锁库清理/诊断用；通常经 Server 方法操作）。
 func (s *Server) Registry() *Registry { return s.reg }
@@ -125,6 +137,7 @@ func (s *Server) RegisterStream(ctx context.Context, remotePath, displayName str
 	if err != nil {
 		return nil, fmt.Errorf("streaming: 派生密钥失败: %w", err)
 	}
+	s.cacheHead(remotePath, displayName, size, head)
 	token, err := newToken()
 	if err != nil {
 		return nil, fmt.Errorf("streaming: 生成令牌失败: %w", err)
@@ -139,6 +152,19 @@ func (s *Server) RegisterStream(ctx context.Context, remotePath, displayName str
 		Key:         key,
 		Created:     time.Now(),
 	})
+}
+
+// cacheHead 把注册阶段已下载的密文文件头写入分块缓存。
+//
+// 必要性：播放器的 Range 请求只覆盖明文主体对应的密文段（从 CipherOffset
+// 起），密文头部（salt/iv 等）永远不会被请求 —— 若不在此处补写，首个
+// 分块的覆盖区间将永远缺一小段，导致它无法补齐转正、一直停留在 .part。
+// 这里复用注册时已经付过费的那次下载，不产生额外网络往返。
+func (s *Server) cacheHead(remotePath, displayName string, cipherSize int64, head []byte) {
+	if s.cc == nil || len(head) == 0 {
+		return
+	}
+	s.cc.Put(remotePath, displayName, cipherSize, 0, head)
 }
 
 // RegisterThumb 注册缩略图端点令牌，payload 为已生成的 JPEG 字节
@@ -160,6 +186,54 @@ func (s *Server) RegisterThumb(remotePath, displayName string, payload []byte, c
 		DisplayName: displayName,
 		Payload:     payload,
 		ContentType: contentType,
+		Created:     time.Now(),
+	})
+}
+
+// RegisterDownload 注册下载端点令牌（/d/）。与 RegisterStream 同样的
+// 文件头/大小/密钥预取，但 handler 走 serveDownload：全文件流式解密 +
+// Content-Disposition: attachment（浏览器下载而非播放）。
+//
+// 幂等语义同 RegisterStream。
+func (s *Server) RegisterDownload(ctx context.Context, remotePath, displayName string) (*Entry, error) {
+	if s.sess == nil || s.backend == nil {
+		return nil, errors.New("streaming: 代理未绑定 Session/Backend")
+	}
+	if e := s.reg.find(KindDownload, remotePath); e != nil {
+		return e, nil
+	}
+	head, err := s.backend.DownloadRange(ctx, remotePath, 0, headFetchLen-1)
+	if err != nil {
+		return nil, classifyBackendErr(err, "读取文件头失败")
+	}
+	header, err := cryptox.ParseBytes(head)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNotVaultFile, err)
+	}
+	size, err := s.backend.GetSize(ctx, remotePath)
+	if err != nil {
+		return nil, classifyBackendErr(err, "读取文件大小失败")
+	}
+	if size < header.CipherOffset() {
+		return nil, fmt.Errorf("%w: 文件大小 %d 小于文件头", ErrNotVaultFile, size)
+	}
+	key, err := s.sess.DeriveKey(header.Salt)
+	if err != nil {
+		return nil, fmt.Errorf("streaming: 派生密钥失败: %w", err)
+	}
+	s.cacheHead(remotePath, displayName, size, head)
+	token, err := newToken()
+	if err != nil {
+		return nil, fmt.Errorf("streaming: 生成令牌失败: %w", err)
+	}
+	return s.reg.Add(&Entry{
+		Kind:        KindDownload,
+		Token:       token,
+		RemotePath:  remotePath,
+		DisplayName: displayName,
+		Header:      header,
+		CipherSize:  size,
+		Key:         key,
 		Created:     time.Now(),
 	})
 }

@@ -65,6 +65,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.serveStream(w, r, e)
 	case kindStr == routeThumb && e.Kind == KindThumb:
 		s.serveThumb(w, r, e)
+	case kindStr == routeDownload && e.Kind == KindDownload:
+		s.serveDownload(w, r, e)
 	default:
 		// 端点与令牌类型不匹配（拿流令牌打 /t/ 等）
 		writeError(w, http.StatusNotFound, "not found")
@@ -168,6 +170,65 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request, e *Entry) {
 	}
 }
 
+// serveDownload 输出下载端点：全文件流式解密 + Content-Disposition:
+// attachment（浏览器触发保存而非播放）。GET 触发下载；HEAD 返回长度。
+//
+// 与 serveStream 的区别：忽略 Range、不截断（浏览器 <a download> 需要完整
+// 文件），Content-Length = 明文总长，响应状态 200。
+func (s *Server) serveDownload(w http.ResponseWriter, r *http.Request, e *Entry) {
+	hl := e.Header.CipherOffset()
+	total := pipeline.PlaintextTotal(hl, e.CipherSize)
+
+	h := w.Header()
+	h.Set("Content-Type", "application/octet-stream")
+	h.Set("Content-Disposition", `attachment; filename="`+e.DisplayName+`"`)
+	h.Set("Cache-Control", "no-store")
+
+	if r.Method == http.MethodHead {
+		h.Set("Content-Length", strconv.FormatInt(total, 10))
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if total <= 0 {
+		// 空文件：下载得到 0 字节文件（浏览器端正常）
+		h.Set("Content-Length", "0")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	ctr, err := cryptox.NewCTR(e.Key[:], e.Header.IV)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "backend error")
+		return
+	}
+
+	// 首窗口：失败可回 502（响应头未发）。
+	firstEnd := min(WriteChunk-1, total-1)
+	ct, part, err := s.fetchWindow(r.Context(), e, 0, firstEnd, ctr)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "backend error")
+		return
+	}
+	h.Set("Content-Length", strconv.FormatInt(total, 10))
+	w.WriteHeader(http.StatusOK)
+	if !writeScrubbed(w, ct, part) {
+		return // 客户端中断：静默
+	}
+	// 后续窗口：失败只能断流（头已发），浏览器按 Content-Length 感知中断。
+	pos := firstEnd + 1
+	for pos < total {
+		winEnd := min(pos+WriteChunk-1, total-1)
+		ct, part, err := s.fetchWindow(r.Context(), e, pos, winEnd, ctr)
+		if err != nil {
+			return
+		}
+		if !writeScrubbed(w, ct, part) {
+			return
+		}
+		pos = winEnd + 1
+	}
+}
+
 // fetchWindow 下载并解密一个明文窗口 [pos, winEnd]（含两端）。
 //
 // 返回 ct 为解密后的整段明文缓冲（含窗口前块内对齐的块首字节），
@@ -182,7 +243,7 @@ func (s *Server) fetchWindow(ctx context.Context, e *Entry, pos, winEnd int64, c
 	if cr.CtEnd <= cr.CtStart {
 		return nil, nil, errContainerShort
 	}
-	raw, err := s.backend.DownloadRange(ctx, e.RemotePath, cr.CtStart, cr.CtEnd-1)
+	raw, err := s.readCipher(ctx, e, cr.CtStart, cr.CtEnd-1)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -199,6 +260,32 @@ func (s *Server) fetchWindow(ctx context.Context, e *Entry, pos, winEnd int64, c
 		return nil, nil, errContainerShort
 	}
 	return raw, raw[from : from+need], nil
+}
+
+// readCipher 取密文区间 [start, end]（含两端），优先走本地分块缓存。
+//
+// 读穿语义（见 pkg/cache 包注释）：
+//
+//   - 命中：直接返回本地字节，零网络往返（重看 / 回拖的加速来源）；
+//   - 未命中：按原路径从远端拉取**同样的区间**（首字节延迟与无缓存时
+//     完全一致，绝不为了填块而扩大单次下载），随后把这一段喂给缓存。
+//
+// 缓存写入是「尽力而为」：失败只记日志，绝不影响本次响应 —— 缓存是
+// 性能优化而非正确性依赖。
+func (s *Server) readCipher(ctx context.Context, e *Entry, start, end int64) ([]byte, error) {
+	if s.cc != nil {
+		if data, ok := s.cc.Fetch(e.RemotePath, e.CipherSize, start, end); ok {
+			return data, nil
+		}
+	}
+	raw, err := s.backend.DownloadRange(ctx, e.RemotePath, start, end)
+	if err != nil {
+		return nil, err
+	}
+	if s.cc != nil && len(raw) > 0 {
+		s.cc.Put(e.RemotePath, e.DisplayName, e.CipherSize, start, raw)
+	}
+	return raw, nil
 }
 
 // writeScrubbed 写出明文段并清零缓冲，返回 false 表示客户端已断开

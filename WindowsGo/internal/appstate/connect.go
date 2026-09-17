@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/cryptox"
-	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/paths"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/session"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/settings"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/storage"
@@ -142,14 +141,19 @@ func (s *State) applyConnection(conn *connState) error {
 	s.cfg.Queue.Runner = s.makeRunner(conn)
 	s.applyTransferPrefsLocked()
 
+	// 大文件分块读缓存：必须先于代理装配 —— 代理构造后立刻 startProxy，
+	// 缓存句柄要一并注入。装配失败返回 nil，读取链路自动退回直连远端。
+	conn.mediaCache = s.openMediaCache(conn)
+
 	// 流式解密代理：127.0.0.1 动态端口，仅本机可访问。
 	// 启动失败只记日志不阻断连接（视频播放降级为导出后用系统播放器）。
 	if err := s.startProxy(conn); err != nil {
 		s.cfg.Log.Warn("流式代理启动失败", "err", err)
 	}
 
-	// 缩略图缓存：加密磁盘缓存与会话绑定，锁库时一并丢弃
-	dir := filepath.Join(paths.DataDir(), "thumb-cache")
+	// 缩略图缓存：加密磁盘缓存与会话绑定，锁库时一并丢弃。
+	// 目录与分块缓存共用同一个可配置缓存根（<根>/thumbs）。
+	dir := s.thumbCacheDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		s.cfg.Log.Warn("缩略图缓存目录不可用", "err", err)
 	}
@@ -175,8 +179,11 @@ func (s *State) applyConnection(conn *connState) error {
 }
 
 // startProxy 在 127.0.0.1 动态端口启动流式解密代理。
+//
+// 分块读缓存经 SetChunkCache 注入（nil 表示不启用，代理退化为直连远端）。
 func (s *State) startProxy(conn *connState) error {
 	proxy := streaming.NewServer(conn.sess, conn.backend)
+	proxy.SetChunkCache(conn.mediaCache)
 	addr, err := proxy.Start("127.0.0.1", 0)
 	if err != nil {
 		return fmt.Errorf("streaming: %w", err)
@@ -239,6 +246,10 @@ func (s *State) Lock() {
 
 	if conn.proxy != nil {
 		_ = conn.proxy.Close()
+	}
+	if conn.mediaCache != nil {
+		// 落盘元信息后再丢弃：已下载的块在下次连接时继续可用
+		_ = conn.mediaCache.Close()
 	}
 	conn.sess.Close() // 清零主密码与派生密钥
 
