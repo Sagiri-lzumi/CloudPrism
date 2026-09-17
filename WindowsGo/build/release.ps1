@@ -1,7 +1,7 @@
 ﻿# CloudPrism WindowsGo Web 模式发布打包脚本。
 #
 # 用法：
-#   powershell -ExecutionPolicy Bypass -File build\release.ps1 [-Tag <tag>] [-Clean]
+#   powershell -ExecutionPolicy Bypass -File build\release.ps1 [-Tag <tag>] [-Clean] [-SkipNpmCi] [-SkipFrontend]
 # 默认 Tag=v1；产物落在仓库根 Release\<yyyy-MM-dd>-<Tag>-Go-{dir,exe}/：
 #   -dir：CloudPrismGo.exe + assets\{icon.ico,baidu_guide.md}（随包资源，
 #         便于日后替换/增补）+ data\tmp\（运行期临时数据目录占位）+
@@ -12,11 +12,22 @@
 #   WindowsGo\ 下历史遗留的 Release* 临时发布目录，只留本次新包。
 #   不指定该开关时行为与历史版本完全一致（不删任何东西）。
 #
+# -SkipNpmCi：跳过 npm ci，直接用现有 frontend\node_modules 构建。
+#   npm ci 会先删光再重装整个 node_modules（本机实测数千次小文件写 +
+#   杀软实时扫描，单次可达十几分钟甚至卡死），仅在前端依赖确实变动、
+#   或需要严格对齐锁文件时才需要跑；日常改前端代码用 npm run build 即可。
+#
+# -SkipFrontend：前端完全不动，直接复用现有 frontend\dist。
+#   适用于「本轮只改后端/只打包」的场景。dist 必须已是最新（go:embed 直接
+#   吃它），S1 自检仍会校验 exe 内嵌资源与 dist 一致，装错产物会立即失败。
+#
 # 全部路径用 $PSScriptRoot 相对定位（不写任何绝对路径，风格对齐
 # WindowsPy/build/_package.ps1）；任一步失败立即退出并给出非 0 码。
 param(
     [string]$Tag = "v1",
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$SkipNpmCi,
+    [switch]$SkipFrontend
 )
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -35,13 +46,36 @@ function Fail([string]$msg) {
 }
 function Step([string]$msg) { Write-Host "[release] $msg" -ForegroundColor Cyan }
 
+# Remove-Tree 高效递归删除。
+#
+# 不用 Remove-Item -Recurse：PS 5.1 的实现在深层目录上会反复重枚举，
+# 实测删 WebView2/UDF 这类「目录深 + 小文件极多」的树只有约 1 文件/秒
+# （一次 -Clean 要等数小时）。.NET 的 Directory.Delete(path,true) 直接走
+# Win32，快 1~2 个数量级；遇到只读属性等异常再回退老办法保底。
+function Remove-Tree([string]$path) {
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    try {
+        $item = Get-Item -LiteralPath $path -Force
+        if ($item.PSIsContainer) {
+            [System.IO.Directory]::Delete($item.FullName, $true)
+        } else {
+            [System.IO.File]::SetAttributes($item.FullName, [System.IO.FileAttributes]::Normal)
+            [System.IO.File]::Delete($item.FullName)
+        }
+    } catch {
+        Write-Host "[release] .NET 删除失败，回退 Remove-Item：$path" -ForegroundColor Yellow
+        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # ---------- 0. 可选清理（-Clean） ----------
 # 放在工具链检查之前：清理由用户显式要求，不应因 Go/npm 缺失而跳过。
 if ($Clean) {
     Step "[0/4] 清理旧产物（-Clean）"
     if (Test-Path $relRoot) {
         Get-ChildItem $relRoot -Force | ForEach-Object {
-            Remove-Item $_.FullName -Recurse -Force
+            Write-Host "[release] 删除 $($_.Name)" -ForegroundColor DarkGray
+            Remove-Tree $_.FullName
         }
     } else {
         New-Item -ItemType Directory -Force -Path $relRoot | Out-Null
@@ -50,7 +84,7 @@ if ($Clean) {
     # 易与正式产物混淆，一并清掉；按 Release* 通配以免写死具体版本号。
     Get-ChildItem $root -Directory -Filter "Release*" -Force | ForEach-Object {
         Write-Host "[release] 清理源码树临时目录 $($_.Name)" -ForegroundColor DarkGray
-        Remove-Item $_.FullName -Recurse -Force
+        Remove-Tree $_.FullName
     }
     Write-Host "[release] 旧产物已清空" -ForegroundColor Green
 }
@@ -65,14 +99,34 @@ if ($LASTEXITCODE -ne 0) { Fail "go 不可用（请先安装 Go 1.24+）" }
 go env GOPROXY | Out-Null
 if ($LASTEXITCODE -ne 0) { $env:GOPROXY = "https://goproxy.cn,direct" }
 
-# ---------- 2. 前端产物（ci 保证依赖与锁文件一致） ----------
+# ---------- 2. 前端产物 ----------
+# 默认跑 npm ci + npm run build；两个开关用于跳过（见文件头说明）：
+#   -SkipNpmCi    跳过 ci，复用现有 node_modules 再 build
+#   -SkipFrontend 前端 dist 已是最新时整体跳过，go:embed 直接吃现成 dist
 Step "[1/4] 前端构建"
-Push-Location (Join-Path $root "frontend")
-npm ci | Out-Host
-if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "npm ci 失败" }
-npm run build | Out-Host
-if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "npm run build 失败" }
-Pop-Location
+$feDir = Join-Path $root "frontend"
+if ($SkipFrontend) {
+    $distHtml = Join-Path $feDir "dist\index.html"
+    if (-not (Test-Path $distHtml)) {
+        Fail "指定了 -SkipFrontend，但 frontend\dist\index.html 不存在，请先完整跑一次前端构建"
+    }
+    Write-Host "[release] 跳过全部 npm 步骤（-SkipFrontend，复用现有 frontend\dist）" -ForegroundColor Yellow
+    Write-Host "[release] 提示：仅当前端源码未变动时可用；S1 自检仍会校验 exe 与 dist 一致" -ForegroundColor DarkGray
+} else {
+    Push-Location $feDir
+    if ($SkipNpmCi) {
+        if (-not (Test-Path (Join-Path $feDir "node_modules"))) {
+            Pop-Location; Fail "指定了 -SkipNpmCi，但 frontend\node_modules 不存在，请先在不带该开关的情况下跑一次"
+        }
+        Write-Host "[release] 跳过 npm ci（-SkipNpmCi，复用现有 node_modules）" -ForegroundColor Yellow
+    } else {
+        npm ci
+        if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "npm ci 失败" }
+    }
+    npm run build
+    if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "npm run build 失败" }
+    Pop-Location
+}
 
 # ---------- 3. Go 编译 ----------
 # -H windowsgui：托盘守护进程无控制台窗口（Web 模式形态）；
@@ -103,7 +157,7 @@ Write-Host "[release] S1 通过：exe 已嵌入前端产物 $($assetHashes -join
 
 # ---------- 4. 组装双形态产物 ----------
 Step "[3/4] 组装 $ver-dir"
-if (Test-Path $dirOut) { Remove-Item $dirOut -Recurse -Force }
+if (Test-Path $dirOut) { Remove-Tree $dirOut }
 New-Item -ItemType Directory -Force -Path $dirOut | Out-Null
 Copy-Item $exe $dirOut
 
@@ -186,7 +240,7 @@ $utf8 = New-Object System.Text.UTF8Encoding($true)  # BOM，记事本直接可�
 [System.IO.File]::WriteAllText((Join-Path $dirOut "README-便携版.txt"), $readme, $utf8)
 
 Step "[4/4] 组装 $ver-exe"
-if (Test-Path $exeOut) { Remove-Item $exeOut -Recurse -Force }
+if (Test-Path $exeOut) { Remove-Tree $exeOut }
 New-Item -ItemType Directory -Force -Path $exeOut | Out-Null
 Copy-Item $exe $exeOut
 

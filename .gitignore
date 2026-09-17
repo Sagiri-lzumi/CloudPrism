@@ -234,6 +234,10 @@ config/
 # dist
 Release/
 
+# Release 归档（清理巨量历史产物时先原地改名挪开、后续再删，
+# 避免删除阻塞打包；归档期间不应污染 git status）
+Release.old-*/
+
 # 便携化用户数据（含 DPAPI 加密的网盘凭证与最近密库记录，严禁入库）
 data/
 
