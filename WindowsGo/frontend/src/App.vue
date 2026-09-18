@@ -272,4 +272,54 @@ async function pickUpload() {
   border-right: 1px solid var(--divider);
   box-sizing: border-box;
 }
+
+/* ---- 手机（≤640px）：导航轨竖轨 → 底部横排 TabBar ----
+   本组件 scoped 规则的 specificity 高于 layout.css 的裸类选择器，
+   故导航轨的形态覆盖必须写在这里，写进 layout.css 会被这里压掉。 */
+@media (max-width: 640px) {
+  .app-nav {
+    grid-row: 4;
+    grid-column: 1;
+    flex-direction: row;
+    align-items: center;
+    padding: 4px 6px;
+    border-right: none;
+    border-top: 1px solid var(--divider);
+  }
+
+  /* 横排后原左侧选中指示条改为底部 2px 短条（TabBar 选中语义） */
+  .nav-btn.on::before {
+    left: 50%;
+    top: auto;
+    bottom: 0;
+    width: 22px;
+    height: 2px;
+    transform: translateX(-50%);
+  }
+
+  /* 上下两组由纵向堆叠改横向：导航项 | 弹性空隙 | 锁定/退出 */
+  .nav-group {
+    flex-direction: row;
+    gap: 4px;
+  }
+
+  .nav-space {
+    flex: 1;
+  }
+
+  /* 操作簇的分隔线由顶部改为左侧（横排后"上"变"左"） */
+  .nav-group.bottom {
+    padding: 0 0 0 8px;
+    margin: 0 0 0 8px;
+    border-top: none;
+    border-left: 1px solid var(--divider);
+  }
+
+  /* 触摸目标放大到 44px（iOS HIG 最小点击区），避免手机误触 */
+  .nav-btn {
+    width: 44px;
+    height: 44px;
+    margin: 0;
+  }
+}
 </style>

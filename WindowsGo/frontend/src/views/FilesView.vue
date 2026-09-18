@@ -65,7 +65,18 @@ function kindOfRow(e: appstate.FileEntry): string {
 // shift 连选锚点：最近一次「普通单击」的主条目 remote（无则取列表首项）
 const shiftAnchor = ref<string | null>(null)
 
+/** 触摸设备判定：无 hover 且指针不精确（手机/平板）。桌面触屏笔记本主指针
+ *  仍是鼠标（hover:hover），不会命中，故不影响桌面交互。
+ */
+const isCoarsePointer = () => window.matchMedia('(hover: none) and (pointer: coarse)').matches
+
 function onItemClick(ev: MouseEvent, e: appstate.FileEntry) {
+  // 触摸设备无双击（网格卡的 @dblclick 永不触发）、也无 Ctrl/Shift 修饰键，
+  // 目录若是只选中就会拿不到进入入口 → 触摸下目录单击直接进入。
+  if (e.isDir && isCoarsePointer()) {
+    enterDir(e)
+    return
+  }
   if (ev.shiftKey) {
     rangeMulti(e, shiftAnchor.value, entries.value)
     return
@@ -441,9 +452,12 @@ function confirmDlg(payload: string | boolean) {
         </div>
       </Transition>
 
-      <!-- 三栏：目录树抽屉 | 文件列表 | 预览（大头，E 方案双栏抽屉） -->
+      <!-- 三栏：目录树抽屉 | 文件列表 | 预览（大头，E 方案双栏抽屉）。
+           preview-open 供 ≤640px 下把预览切成全屏浮层（选中即浮出，
+           清空选择或进入目录时 listDir 清 ui.sel 自动收起）。 -->
       <div
         class="files-shell"
+        :class="{'preview-open': !!ui.sel}"
         :style="{'--tree-w': treeW + 'px', '--split-l': splitL + 'px'}"
       >
         <!-- 左栏：目录树（懒加载，展开时拉子目录） -->
@@ -806,6 +820,14 @@ function confirmDlg(payload: string | boolean) {
   gap: 6px;
 }
 
+/* 手机：卡片放大到 148px（110px 在手机上过小，缩略图难辨认） */
+@media (max-width: 640px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, 148px);
+    gap: 8px;
+  }
+}
+
 /* 列表：行式条目 */
 .list {
   display: flex;
@@ -907,4 +929,102 @@ function confirmDlg(payload: string | boolean) {
   background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--accent);
 }
+
+/* ============================================================ 响应式
+ * ≤900px：目录树列收起，三栏 → 两栏（列表 | 预览）。
+ *   依据：三栏可用下限 ≈ 树 140 + 柄 4 + 列表 180 + 柄 4 + 预览 300 = 628px，
+ *   再叠加导航轨 48px 后低于 900px 预览已被挤到不可用。目录树的导航职能由
+ *   面包屑（可逐级回退）与列表行尾「进入目录」钮承接。
+ * ≤640px：预览改全屏浮层，选中才浮出；列表独占单栏。
+ * 触摸设备：补 hover 缺失导致的入口不可见问题。
+ * ============================================================ */
+
+@media (max-width: 900px) {
+  /* 仍是三轨但去掉树列。必须重排 grid-column：原 column 3/5 的 .browse 与
+     .preview 若不动，会落到隐式轨道上把栅格撑宽。 */
+  .files-shell {
+    grid-template-columns: var(--split-l, 280px) 4px 1fr;
+  }
+
+  .dirtree-col,
+  .tree-split {
+    display: none;
+  }
+
+  .browse {
+    grid-column: 1;
+  }
+
+  .files-split {
+    grid-column: 2;
+  }
+
+  :deep(.preview) {
+    grid-column: 3;
+  }
+}
+
+@media (max-width: 640px) {
+  .files-shell {
+    position: relative; /* 预览浮层的定位上下文 */
+    grid-template-columns: 1fr;
+  }
+
+  .browse {
+    grid-column: 1;
+  }
+
+  /* 单栏下拖柄无意义 */
+  .files-split {
+    display: none;
+  }
+
+  /* 预览默认不占位；选中后浮出覆盖列表区。
+     只盖 .files-shell 而非整页，工具栏与面包屑仍可见可点，避免"进去出不来"。 */
+  :deep(.preview) {
+    display: none;
+  }
+
+  .files-shell.preview-open :deep(.preview) {
+    display: flex;
+    position: absolute;
+    inset: 0;
+    z-index: 620;
+    background: var(--bg-page);
+  }
+
+  /* 触摸目标放大：行 36→48px，行尾钮 24→40px */
+  .row {
+    height: 48px;
+  }
+
+  .open,
+  .more {
+    width: 40px;
+    height: 40px;
+  }
+
+  .row-size {
+    min-width: 44px;
+  }
+
+  /* 面包屑同步放大，便于手指点按逐级回退 */
+  .crumbs {
+    height: 44px;
+  }
+
+  .crumb {
+    height: 32px;
+    max-width: 130px;
+  }
+}
+
+/* 触摸设备（无 hover）：行尾「更多」钮原为 hover 才显形，触摸下会永久隐形，
+   导致手机上没有改名/删除入口 → 常显。粗指针判定同时排除触屏笔记本。 */
+@media (hover: none) and (pointer: coarse) {
+  .more {
+    opacity: 1;
+  }
+}
+
 </style>

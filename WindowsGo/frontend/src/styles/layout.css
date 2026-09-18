@@ -121,3 +121,59 @@
 .view-wrap {
   height: 100%;
 }
+
+/* ============================================================ 响应式
+ * 断点取值依据：三栏最小可用宽 ≈ 树 140（拖柄钳位下限）+ 柄 4 + 列表 180
+ * （钳位下限）+ 柄 4 + 预览 ~300 = 628px，加导航轨 48px 与留白取 900px。
+ * - ≤900px：文件页三栏收成两栏（见 FilesView scoped），目录树职能由面包屑
+ *   与列表内「进入目录」钮承接；外壳不动。
+ * - ≤640px：外壳改单列，48px 竖导航轨移到底部横排（ActivityBar → TabBar）。
+ * ============================================================ */
+
+@media (max-width: 640px) {
+  /* 列轨道由 48px|1fr 变单列；行轨道追加第 4 行给底部导航。
+     必须整组重排，否则残留的 48px 空列 + grid-row:1/4 的导航会错位。 */
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr auto auto auto; /* 内容 | TransferBar | StatusBar | NavBar */
+  }
+
+  .app-main {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .app-transfer {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .app-status {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  /* 手机下触发区扩大：分隔拖柄不再可用（列已收成单栏） */
+  .split-handle {
+    display: none;
+  }
+
+  /* 工具行：图标钮在 375px 视口下会顶到边界，允许横向滑动兜底
+     （FilesView 10 个钮、SettingsView/TransfersView 页题行共用此类）。 */
+  .cp-toolbar {
+    gap: 2px;
+    min-height: 48px;
+    padding: 0 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .cp-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .cp-toolbar .sep {
+    margin: 0 3px;
+  }
+}
+

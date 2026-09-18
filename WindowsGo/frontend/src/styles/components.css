@@ -128,3 +128,37 @@
 .expand-group.open .expand-arrow {
   transform: rotate(180deg);
 }
+
+/* ============================================================ 响应式
+ * 手机（≤640px）：设置卡骨架「图标 + 文本 + 右侧操作」横排在 375px 下会崩。
+ * 根因：.set-body 是 flex:1 且 min-width:0，允许一直收缩到 0，而 .set-right
+ * 是 flex:none 不参与收缩 —— 右侧一旦是「数值框 + 单位 + 按钮」这类组合
+ * （如缓存上限），文本列会被压成一行一个字。
+ * 解法：控件换行到第二行并右对齐，文本与图标独占第一行。
+ * ============================================================ */
+
+@media (max-width: 640px) {
+  .set-card {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px 10px;
+    padding: 10px 12px;
+  }
+
+  /* min-width 兜底：即使同行还有图标，也给文本留出可读宽度 */
+  .set-body {
+    min-width: 120px;
+  }
+
+  /* 强制换到第二行（flex-basis 100%），并保持右对齐承接原视觉层级 */
+  .set-right {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  /* 触摸目标：下拉桩加高到 38px */
+  .set-combo {
+    height: 38px;
+  }
+}

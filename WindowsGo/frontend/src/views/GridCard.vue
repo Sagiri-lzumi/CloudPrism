@@ -248,4 +248,33 @@ const multiMode = computed(() => ui.multi.length > 1)
   -webkit-box-orient: vertical;
   overflow-wrap: anywhere;
 }
+
+/* ---- 触摸设备：hover 缺失下的可见性与命中区 ----
+   .gc-more 原为 hover/sel 才显形，触摸下会永久隐形（手机上拿不到改名/删除
+   入口）→ 常显；18px 命中区远小于手指，放大到 28px。 */
+@media (hover: none) and (pointer: coarse) {
+  .gc-more {
+    opacity: 1;
+    width: 28px;
+    height: 28px;
+  }
+}
+
+/* ---- 手机：卡片放大到 150px，缩略图同步放大更好认图 ---- */
+@media (max-width: 640px) {
+  .gc-more {
+    width: 28px;
+    height: 28px;
+  }
+
+  .thumb {
+    height: 120px;
+  }
+
+  .img {
+    max-width: 140px;
+    max-height: 120px;
+  }
+}
+
 </style>

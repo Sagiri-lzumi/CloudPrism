@@ -1193,4 +1193,58 @@ async function onOtherConfirm(payload: string | boolean) {
 .fade-leave-to {
   opacity: 0;
 }
+
+/* ============================================================ 响应式
+ * 手机（≤640px）适配。
+ *
+ * 注意：本页的 .set-card 是「accent 图标 + 阴影」变体，在本组件 scoped 块
+ * 内重新定义过（见上方 911 行起）。scoped 选择器带 [data-v-*] 属性，特异性
+ * 高于 styles/components.css 里的同名全局类 —— **全局那份窄屏规则对本页
+ * 无效**，所以这里必须再写一份；将来改设置卡骨架，两处都要动。
+ *
+ * 挤压根因：.set-body / .ov-body 是 flex:1 + min-width:0，可以一路收缩到 0，
+ * 而 .set-right / .ov-actions 是 flex:none 不参与收缩。右侧一旦是
+ * 「数值 + 按钮」这类组合（自动锁定卡的"从不（不自动锁定）+ 去设置"），
+ * 文本列就被压成一行一个字。解法：右侧整体换到第二行并右对齐。
+ * ============================================================ */
+
+@media (max-width: 640px) {
+  .set-card {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px 10px;
+    padding: 10px 12px;
+  }
+
+  /* min-width 兜底：与图标同行时也给文本留出可读宽度 */
+  .set-body {
+    min-width: 120px;
+  }
+
+  /* flex-basis 100% 强制换行；沿用右对齐承接原视觉层级 */
+  .set-right {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  /* 概览卡（本页独有结构）：库名/后端占第一行，重命名/锁定换第二行 */
+  .ov-card {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 10px 12px;
+    padding: 14px 12px;
+  }
+
+  .ov-body {
+    min-width: 120px;
+  }
+
+  .ov-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
 </style>

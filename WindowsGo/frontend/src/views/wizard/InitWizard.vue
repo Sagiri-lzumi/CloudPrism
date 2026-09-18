@@ -751,6 +751,13 @@ function enterAt(e: KeyboardEvent) {
   gap: 8px;
 }
 
+/* 手机：凭证两列并排会把输入框压到不可用，改单列堆叠 */
+@media (max-width: 640px) {
+  .cred-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .two-radios {
   display: flex;
   gap: 8px;

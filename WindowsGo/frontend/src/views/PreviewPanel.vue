@@ -7,7 +7,7 @@
 -->
 <script setup lang="ts">
 import {computed, onBeforeUnmount, ref, watch} from 'vue'
-import {ui, mediaUrl, revoke, downloadSel, exportSel} from '../lib/store'
+import {ui, mediaUrl, revoke, downloadSel, exportSel, selectEntry} from '../lib/store'
 import {fmtSize} from '../lib/format'
 import {kindOf, KIND_ICON} from '../lib/media'
 import Icon from '../components/fluent/Icon.vue'
@@ -130,8 +130,19 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
     </div>
 
     <template v-else>
-      <!-- 固定信息头：图标 + 名称 + 元信息 -->
+      <!-- 固定信息头：图标 + 名称 + 元信息。
+           手机端多一个「返回列表」钮（≤640px 才显示）：此时预览是全屏浮层，
+           需要显式退出入口，否则只能靠进目录/锁库等副作用才能收回列表。 -->
       <header class="head">
+        <button
+          type="button"
+          class="head-back"
+          title="返回列表"
+          aria-label="返回列表"
+          @click="selectEntry(null)"
+        >
+          <Icon name="close" :size="18" />
+        </button>
         <span class="head-icon"><Icon :name="bigIcon" :size="20" /></span>
         <div class="head-text">
           <h2 class="name" :title="title">{{ title }}</h2>
@@ -360,4 +371,39 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* ---- 手机端「返回列表」钮 ----
+   桌面预览是常驻右栏，没有"退出"概念，故此钮默认不渲染；仅 ≤640px
+   （预览被 FilesView 切成全屏浮层）时显形，作为收起浮层的显式入口。 */
+.head-back {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  margin-right: 2px;
+  color: var(--text2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-ctrl);
+}
+
+.head-back:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .head-back {
+    display: inline-flex;
+  }
+
+  /* 浮层下信息头压扁一点，给正文留高度 */
+  .head {
+    min-height: 52px;
+    padding: 6px 10px;
+  }
+}
+
 </style>
