@@ -529,15 +529,25 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 func (s *Server) registerStatic(mux *http.ServeMux) {
 	// distFS 已是 frontend/dist 子树（main.go 注入 fs.Sub 后的结果）
 	fileServer := http.FileServer(http.FS(s.distFS))
+	// 静态资源统一走 gzip（SSE / API / 媒体流不经过此路由，见 compress.go）
+	serve := withGzip(fileServer)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// /api/* /s/ /t/ /d/ 等由各自路由模式接管；此处只处理静态资源。
-		path := strings.TrimPrefix(r.URL.Path, "/")
-		if path != "" {
+		rel := strings.TrimPrefix(r.URL.Path, "/")
+		if rel != "" {
 			// 文件存在则直接服务；不存在（SPA 历史路由）回退 index.html。
-			if _, err := fs.Stat(s.distFS, path); err == nil {
-				// 静态资源（带内容 hash 的文件名）可强缓存
-				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-				fileServer.ServeHTTP(w, r)
+			if _, err := fs.Stat(s.distFS, rel); err == nil {
+				// 带内容 hash 的构建产物可强缓存一年；但 .html 必须例外 ——
+				// .html 文件名里没有内容 hash。注意 /index.html 会被
+				// http.FileServer 301 重定向到 ./，这条 301 若带上 immutable，
+				// 浏览器会把它当永久重定向缓存；而 dist 里若出现非 index 的
+				// .html，FileServer 会直接服务、不重定向，那才是真被钉死一年。
+				if strings.EqualFold(filepath.Ext(rel), ".html") {
+					w.Header().Set("Cache-Control", "no-store")
+				} else {
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				}
+				serve.ServeHTTP(w, r)
 				return
 			}
 		}
@@ -545,7 +555,7 @@ func (s *Server) registerStatic(mux *http.ServeMux) {
 		w.Header().Set("Cache-Control", "no-store")
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = "/"
-		fileServer.ServeHTTP(w, r2)
+		serve.ServeHTTP(w, r2)
 	})
 }
 

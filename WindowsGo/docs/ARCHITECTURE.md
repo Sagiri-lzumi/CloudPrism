@@ -33,6 +33,8 @@ WindowsGo/
 ├── app.go                      NewApp() 依赖图装配 + frontendFingerprint + Version 诊断
 ├── build/                      release.ps1（go build -H windowsgui）+ windows/icon.ico
 ├── frontend/                   Vue 3 + Vite + TS；dist/ 入库（//go:embed 依赖），无 wailsjs
+│   ├── scripts/gen-icons.mjs   图标注册表生成器（按源码引用裁剪，prebuild 自动跑，详见 §8.2）
+│   └── src/lib/icons.gen.ts    ★ 生成物，勿手工编辑；图标显式 import 表
 ├── pkg/                        ★ GUI 无关核心，零平台 import
 │   ├── protocol/               格式常量的单一真源（逐条标注 Python 对照行号）
 │   ├── cryptox/                KDF / AES-CTR / GCM(12,16) / 文件头 / 文件名 / Vault
@@ -51,6 +53,7 @@ WindowsGo/
 │   ├── bind/                   6 个域 struct（Vault/Files/Transfer/Settings/Preview/Lan）+ ContextHolder
 │   ├── web/                    HTTP server：/api/* JSON + /api/events SSE + 静态前端 + 10Hz 合帧循环
 │   │                           + 同源媒体路由 /s/ /t/ /d/ + 访问闸门 auth.go（局域网档）
+│   │                           + 静态资源 gzip 中间件 compress.go（§8.3）
 │   ├── tray/                   系统托盘（getlantern/systray，纯 syscall）
 │   ├── platform/win/           dpapi / shell / dialogs(IFileOpenDialog) / FatalMessage —— 唯一 syscall 出口
 │   └── loggingx/               slog + 脱敏 handler + 2MB×3 轮转
@@ -158,6 +161,7 @@ HTTP/SSE 与后端交互，不再依赖 Chromium Mojo IPC。
 | 20 | 缓存目录默认位置 | 未配置时落 `%TEMP%/cloudprism_cache`，会持续吃满系统盘 | 程序目录旁 `data/cache`，**代码层面不提供 `%TEMP%`/`%AppData%` 兜底**；用户配置进系统目录直接拒绝 | 缓存红线：绝不写系统盘位置；`pkg/paths.ForbiddenCacheDir` 是唯一闸门 |
 | 21 | 跨设备访问 | 无此概念：Qt 窗口只在运行它的那台机器上 | 可选「局域网访问档」：绑 `0.0.0.0` + 访问令牌闸门（回环免令牌，非回环必须带令牌，退出/选目录端点仅本机）；令牌 DPAPI 落盘 `data/lan_token`，**默认关闭** | Web 模式天然可被同网段访问，必须显式开关 + 访问控制，否则等于把密库界面开放给整层楼 |
 | 22 | 媒体/下载 URL 形态 | Qt 播放器直连本机代理端口，无 URL 概念 | 相对路径（`/s/ /t/ /d/`），与其余 API 共用同一监听端口与同一道鉴权闸门；**不再另起 127.0.0.1 动态代理端口** | 绝对地址 `http://127.0.0.1:<port>` 在远端浏览器上会指向**远端自己**，局域网档下预览/缩略图/下载会全部失效（详见 §7.3） |
+| 23 | 前端产物体积与传输 | 无此概念：Qt 资源编译进二进制，不存在独立前端产物与传输环节 | 图标注册表改**生成式显式 import**（起 176 + 59 个 SVG 共 437KB 全量内联 → 只打包源码引用到的 62 个）；静态资源加 **gzip 中间件**。入口 JS 637KB → 229KB（gzip 76KB），首屏 690KB → 283KB（gzip 87KB） | 局域网档把浏览器变成真正的客户端，首屏要过网线/无线；690KB 未压缩明文在手机弱网下打开明显偏慢（详见 §8） |
 
 ### 明确不移植的 Python 历史包袱
 
@@ -323,4 +327,84 @@ Web 模式意味着「凡是能连上这个端口的人，都能操作这个密�
 - 回环免令牌意味着**本机任何进程**都能操作（与历史版本一致，未扩大也未收窄）。
 - 首次绑 `0.0.0.0` 时 Windows 会弹防火墙授权框，拒绝则局域网连不上 ——
   设置页写明了排查步骤。
+
+## 8. 前端资源体积与传输（v36）
+
+### 8.1 两条独立的杠杆
+
+局域网档让浏览器成为真正的客户端，首屏必须经网络传输，于是「产物多大」与
+「传多少字节」变成两件必须分别治理的事：
+
+| 杠杆 | 手段 | 效果 |
+|---|---|---|
+| 产物体积 | 图标注册表按源码引用裁剪（§8.2） | 入口 JS 637KB → 229KB（CSS 不变） |
+| 传输字节 | 静态资源 gzip（§8.3） | 首屏明文 690KB → 283KB，再 gzip → 87KB |
+
+合计把局域网首屏从 **690KB 明文**压到 **约 87KB**（约 8 倍）。顺带修掉
+`index.html` 的强缓存缺陷（§8.4）。
+
+### 8.2 图标注册表：从全量 glob 到生成式显式 import
+
+`src/lib/icons.ts` 原先用 `import.meta.glob(..., {eager:true})` 把
+`assets/fluent-icons`（176 个 / 401KB）与 `assets/lucide`（59 个 / 26KB）
+**全部**以 `?raw` 内联进入口 chunk —— 合计 437KB，占 637KB 入口 JS 的 69%，
+而源码真正引用的只有 62 个。
+
+现在由 `frontend/scripts/gen-icons.mjs` 生成 `src/lib/icons.gen.ts`：扫描
+`src/**/*.{vue,ts}` 的字符串字面量 + `ICONS.xxx` 直接访问，与图标文件名求交，
+只对命中的文件 emit 显式 `import`。`npm run build` 的 `prebuild` 会自动先跑一次，
+正常无需手动执行（手动：`npm --prefix WindowsGo/frontend run gen:icons`）。
+
+**改这个脚本前必须知道的三个坑：**
+
+1. **三种引号必须各用一条正则独立扫描**，不能写成 `A|B|C` 互斥分支。Vue 模板里
+   普遍存在 `:name="reveal ? 'hide' : 'eye'"` 这种「双引号属性内套单引号」的
+   写法，互斥分支会先命中双引号并把整段属性一起吃掉，内层 `'eye'` 永远匹配不到。
+   实测曾因此把 `eye` / `lock_open` / `mute` / `pause` / `play` 五个**在用**图标
+   误判为未引用而裁掉。
+2. **`question` 必须强制保留**（脚本里的 `ALWAYS_KEEP`）。它是 `Icon.vue` 的兜底
+   图标，以裸标识符 `ICONS.question` 访问，字面量扫描天然扫不到。
+3. **扫描必须排除产物 `icons.gen.ts` 自身**，否则上一轮生成的 `import` 会被当成
+   「引用」，形成自锁，失效图标永远删不掉。
+
+另设命中数下限断言（`MIN_EXPECTED`）：低于下限直接报错退出且**不写任何产物** ——
+宁可不生成，也不能静默丢图标。
+
+**降级行为**：裁剪后若出现未注册的名字，`Icon.vue` 回退成 `question`（布局不塌）
+并在 dev 控制台告警，prod 静默（不给终端用户添噪音）。
+
+### 8.3 静态资源 gzip（`internal/web/compress.go`）
+
+Go 侧原先直接 `http.FileServer`，没有任何压缩中间件。现在 `registerStatic`
+统一套一层 `withGzip`。
+
+- **只挂静态路由**：SSE / API / 媒体流不经过这里；`text/event-stream` 在
+  `compressible` 里另有显式排除（双保险）。
+- **压缩决策推迟到 `WriteHeader`**：`Content-Type` 由 `http.FileServer` 自己写，
+  只有到那一刻才知道类型。
+- **必须删 `Content-Length` 与 `Accept-Ranges`**：前者记录的是压缩前长度，留着会
+  让客户端截断或挂起；后者是对字节范围的承诺，压缩后偏移不再对应原始文件，
+  必须撤掉这个广告，否则客户端可能按压缩前的偏移续传而拿到错位数据。
+- **每个请求 `Close()` 冲刷 gzip 尾部**，否则缺 CRC + 长度，响应会被判定为截断。
+- `gzip.Writer` 走 `sync.Pool`，避免每请求分配约 32KB 压缩窗口。
+
+跳过条件：客户端未声明接受 gzip（含 `q=0` 显式拒绝）、带 `Range` 头（断点续传
+依赖原始字节语义）、已有 `Content-Encoding`、非 2xx、`Content-Type` 不可压缩
+（png / woff2 / mp4 等已自带压缩的格式再压一遍几乎不减小，纯属浪费 CPU）。
+
+### 8.4 `.html` 不再强缓存（回归防护）
+
+原实现对**任何已存在的文件**都贴 `Cache-Control: public, max-age=31536000,
+immutable`，`.html` 一并中招。准确的失效路径是：
+
+- `/index.html` 会被 `http.FileServer` **301 重定向到 `./`**（Go 的标准行为），
+  这条 **301 响应**于是也带上了 `immutable` —— 浏览器会把它当**永久重定向**缓存。
+  用户最终仍能从 `/` 拿到最新前端（`/` 走 no-store 分支），所以不是「拿不到新
+  前端」，但 301 被永久缓存本身就是错误的缓存语义。
+- 更严重的隐患在**非 index 的 `.html`**：`http.FileServer` 会直接服务、不重定向，
+  那类文件就真被钉死一年。
+
+现在 `.html` 一律 `no-store`，只有带内容 hash 的构建产物才 immutable，
+`TestRegisterStaticHtmlIsNeverImmutable` 守住这条。
+
 

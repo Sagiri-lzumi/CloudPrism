@@ -6,7 +6,7 @@
 -->
 <script setup lang="ts">
 import {computed, ref} from 'vue'
-import {ui} from '../lib/store'
+import {ui, listDir} from '../lib/store'
 import {Files, unwrap} from '../lib/api'
 import {showError} from '../lib/toast'
 import Icon from '../components/fluent/Icon.vue'
@@ -74,7 +74,10 @@ async function toggle(node: TreeNode) {
 
 async function open(node: TreeNode) {
   if (node.remote === current.value) return
-  const {listDir} = await import('../lib/store')
+  // listDir 走顶部静态导入：store 在本文件已静态引入，此处再 await import 既拆不出
+  // 独立 chunk（vite 会告警 "dynamic import will not move module into another
+  // chunk"），又会把该告警写到 stderr 上，导致 release.ps1 的 npm run build 被
+  // PowerShell 判成 NativeCommandError 而中断打包。
   ui.crumbs = buildCrumbs(root.value, node.remote)
   await listDir(node.remote)
 }

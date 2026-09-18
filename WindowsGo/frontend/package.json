@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "gen:icons": "node scripts/gen-icons.mjs",
+    "prebuild": "node scripts/gen-icons.mjs",
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview"

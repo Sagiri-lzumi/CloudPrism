@@ -35,7 +35,17 @@ function normalize(svg: string): string {
 }
 
 // 未知图标名显示问号（question），保证布局不塌、错误可见
-const inner = computed(() => normalize(ICONS[props.name] ?? ICONS.question ?? ''))
+const inner = computed(() => {
+  const raw = ICONS[props.name]
+  if (raw === undefined && import.meta.env.DEV) {
+    // 图标表已按源码引用裁剪，未注册只可能是两种情况：
+    //   1. 新增了图标但忘了跑 gen-icons（npm run build 已挂 prebuild 自动跑）；
+    //   2. 图标名是动态拼出来的，静态扫描覆盖不到，需要显式加进生成器。
+    // dev 下高声告警，prod 静默回退，避免用户侧看到控制台噪音。
+    console.warn(`[Icon] 未注册的图标名 "${props.name}"，已回退为 question`)
+  }
+  return normalize(raw ?? ICONS.question ?? '')
+})
 </script>
 
 <template>
