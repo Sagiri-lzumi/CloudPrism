@@ -17,6 +17,7 @@ import (
 //
 //	/s/{token}/{display-name}  视频/音频流端点（Range + 流式解密）
 //	/t/{token}                 缩略图端点（绑定层用 pkg/thumb 生成 JPEG 后注入）
+//	/d/{token}/{display-name}  下载端点（全文件流式解密 + Content-Disposition: attachment）
 //
 // token 是 32 位十六进制随机值（16 字节 crypto/rand），仅本机代理可见，
 // 同时解决三个 Python 版遗留问题：
@@ -35,11 +36,16 @@ const (
 	KindStream Kind = iota
 	// KindThumb 表示缩略图端点（/t/）。
 	KindThumb
+	// KindDownload 表示下载端点（/d/）。
+	KindDownload
 )
 
 func (k Kind) String() string {
-	if k == KindThumb {
+	switch k {
+	case KindThumb:
 		return "thumb"
+	case KindDownload:
+		return "download"
 	}
 	return "stream"
 }
@@ -76,8 +82,11 @@ type Entry struct {
 // 服务端按 token 找 entry，尾巴内容不参与任何判定，因此 URL 编码后
 // 即便个别字符被客户端改写也不影响播放。
 func (e *Entry) URLPath() string {
-	if e.Kind == KindThumb {
+	switch e.Kind {
+	case KindThumb:
 		return "/t/" + e.Token
+	case KindDownload:
+		return "/d/" + e.Token + "/" + url.PathEscape(e.DisplayName)
 	}
 	return "/s/" + e.Token + "/" + url.PathEscape(e.DisplayName)
 }

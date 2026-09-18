@@ -11,7 +11,7 @@
 // 模块单例：App.vue onMounted 调 start()，onBeforeUnmount 调 stop()。
 
 import {reactive} from 'vue'
-import type {appstate} from '../../wailsjs/go/models'
+import type {appstate} from '../types/appstate'
 import {ApiCode, App, Files, Preview, Settings, Transfer, Vault, unwrap} from './api'
 import * as evt from './events'
 import {applyThemeIndex} from './theme'
@@ -161,11 +161,11 @@ function onLocked() {
   showInfo('密库已锁定')
 }
 
-/** st:files-dropped：系统文件拖入 → 上传到当前浏览目录。 */
+/** st:files-dropped（保留防御性处理；Web 模式拖放走浏览器原生 onDropFiles）。 */
 function onDropped(paths: unknown) {
   const list = paths as string[]
   if (!Array.isArray(list) || list.length === 0) return
-  void uploadPaths(list)
+  void uploadFiles(list as unknown as File[])
 }
 
 /* ------------------------------------------------------------ 事件订阅（SSE） */
@@ -177,12 +177,46 @@ export function start() {
   if (started) return
   started = true
   eventSource = new EventSource('/api/events')
-  eventSource.addEventListener(evt.EvtFrame, (ev) => onFrame(JSON.parse(ev.data)))
-  eventSource.addEventListener(evt.EvtOpProgress, (ev) => onOpProgress(JSON.parse(ev.data)))
-  eventSource.addEventListener(evt.EvtOpDone, (ev) => onOpDone(JSON.parse(ev.data)))
-  eventSource.addEventListener(evt.EvtOpError, (ev) => onOpError(JSON.parse(ev.data)))
+  // 所有 SSE 载荷先做空值与 JSON 守卫：服务端异常帧（如空 data）不得
+  // 触发全局 unhandledrejection → boot-err 红屏（曾因空帧 JSON.parse 崩溃）。
+  eventSource.addEventListener(evt.EvtFrame, (ev) => {
+    const raw = ev.data as string
+    if (!raw) return
+    try {
+      onFrame(JSON.parse(raw))
+    } catch {
+      /* 坏帧丢弃 */
+    }
+  })
+  eventSource.addEventListener(evt.EvtOpProgress, (ev) => {
+    const raw = ev.data as string
+    if (!raw) return
+    try {
+      onOpProgress(JSON.parse(raw))
+    } catch {
+      /* 坏帧丢弃 */
+    }
+  })
+  eventSource.addEventListener(evt.EvtOpDone, (ev) => {
+    const raw = ev.data as string
+    if (!raw) return
+    try {
+      onOpDone(JSON.parse(raw))
+    } catch {
+      /* 坏帧丢弃 */
+    }
+  })
+  eventSource.addEventListener(evt.EvtOpError, (ev) => {
+    const raw = ev.data as string
+    if (!raw) return
+    try {
+      onOpError(JSON.parse(raw))
+    } catch {
+      /* 坏帧丢弃 */
+    }
+  })
   eventSource.addEventListener(evt.EvtLocked, () => onLocked())
-  eventSource.addEventListener(evt.EvtDropped, (ev) => onDropped(JSON.parse(ev.data)))
+  eventSource.addEventListener(evt.EvtDropped, (ev) => onDropped(JSON.parse(ev.data as string)))
   if (!pollTimer) pollTimer = setInterval(pollTick, POLL_MS)
   void boot()
 }
@@ -389,13 +423,20 @@ export function navigate(p: PageId) {
 /** 选择并上传（工具栏/拖放/右键共用；remoteDir 缺省为当前浏览目录）。
  *  注意：上传/下载结束后**不再**强制跳转传输页 —— 进度由底部 TransferBar
  *  展示，用户想细看再点「详情」。批次收敛后由 onFrame 静默刷新当前目录。 */
-export async function uploadPaths(localPaths: string[], remoteDir: string = ui.remote) {
+export async function uploadFiles(files: File[] | FileList, remoteDir: string = ui.remote) {
+  const arr = Array.from(files)
+  if (!arr.length) return
   try {
-    await Transfer.Upload(localPaths, remoteDir)
-    showInfo(`已加入上传队列：${localPaths.length} 项`)
+    await Transfer.Upload(arr, remoteDir)
+    showInfo(`已加入上传队列：${arr.length} 项`)
   } catch (e) {
     showError('上传失败：' + unwrap(e).message)
   }
+}
+
+/** 浏览器拖放（DataTransfer.files → File[]）。 */
+export async function onDropFiles(files: FileList | File[]) {
+  void uploadFiles(Array.from(files))
 }
 
 /** 取当前生效的操作集合：多选 >1 用 multi，否则回退主条目。 */
@@ -403,18 +444,39 @@ function opEntries(): appstate.FileEntry[] {
   return ui.multi.length > 1 ? ui.multi : ui.sel ? [ui.sel] : []
 }
 
-/** 批量下载选中条目到用户选择目录（目录/文件混合由后端递归处理）。 */
+/** 批量下载选中条目（浏览器 <a download> 触发保存；服务端 /d/ 流式解密）。
+ *  目录暂不支持（多选下提示）。 */
 export async function downloadSel() {
   const list = opEntries()
   if (!list.length) return
-  try {
-    const dir = await Transfer.DownloadDialog()
-    if (!dir) return // 用户取消
-    await Transfer.Download(list, dir)
-    showInfo(list.length > 1 ? `已开始下载 ${list.length} 项` : `已开始下载：${list[0].display}`)
-  } catch (err) {
-    showError('下载失败：' + unwrap(err).message)
+  if (list.length > 1 && list.some((e) => e.isDir)) {
+    showError('暂不支持下载文件夹，请逐个选择文件')
+    return
   }
+  const firstDir = list.find((e) => e.isDir)
+  if (firstDir) {
+    showError('暂不支持下载文件夹，请逐个选择文件')
+    return
+  }
+  for (const e of list) {
+    try {
+      const {url} = await Transfer.DownloadURL(e.remote, e.display)
+      triggerDownload(url, e.display)
+    } catch (err) {
+      showError('下载失败：' + unwrap(err).message)
+    }
+  }
+  showInfo(list.length > 1 ? `已开始下载 ${list.length} 项` : `已开始下载：${list[0].display}`)
+}
+
+/** 触发浏览器下载（动态 <a download>）。 */
+function triggerDownload(url: string, filename: string) {
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
 }
 
 /** 向导/快速连接入参（字段镜像后端 appstate.OpenRequest，可选字段省略）。 */
@@ -519,9 +581,8 @@ export async function deleteSel() {
   }
 }
 
-/** 导出（解密到本地）：目录框由 Go 弹原生对话框。
- *  单条走 Files.Export（弹目录后返回落盘路径）；多选复用 Transfer.Download
- *  （弹一次目录、后端数组逐条解密落盘，语义一致）。 */
+/** 导出（解密到本地）：单条走 Files.Export（Go 弹原生目录框后落盘）；
+ *  多选复用浏览器下载（逐条 triggerDownload，与 downloadSel 同路径）。 */
 export async function exportSel() {
   const list = opEntries()
   if (!list.length) return
@@ -536,15 +597,17 @@ export async function exportSel() {
     }
     return
   }
-  // 多选批量导出
-  try {
-    const dir = await Transfer.DownloadDialog()
-    if (!dir) return
-    await Transfer.Download(list, dir)
-    showInfo(`已开始导出 ${list.length} 项到所选目录`)
-  } catch (err) {
-    showError('批量导出失败：' + unwrap(err).message)
+  // 多选批量导出（浏览器下载）
+  for (const e of list) {
+    if (e.isDir) continue
+    try {
+      const {url} = await Transfer.DownloadURL(e.remote, e.display)
+      triggerDownload(url, e.display)
+    } catch (err) {
+      showError('批量导出失败：' + unwrap(err).message)
+    }
   }
+  showInfo(`已开始导出 ${list.length} 项`)
 }
 
 /** 复制条目明文展示名到剪贴板（右键高级项）。 */

@@ -1,8 +1,6 @@
 package bind
 
 import (
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/appstate"
 )
 
@@ -64,27 +62,4 @@ func (t *Transfer) ClearFinished() error {
 	t.st.Activity()
 	t.st.ClearFinished()
 	return nil
-}
-
-// UploadDialog 弹系统多选文件框，返回待上传路径；取消返回空列表。
-func (t *Transfer) UploadDialog() ([]string, error) {
-	files, err := wruntime.OpenMultipleFilesDialog(t.ctx.Context(), wruntime.OpenDialogOptions{
-		Title: "选择要上传的文件",
-	})
-	if err != nil {
-		return nil, Wrap(err)
-	}
-	return files, nil
-}
-
-// DownloadDialog 弹目录选择框，返回下载保存位置；取消返回空串。
-func (t *Transfer) DownloadDialog() (string, error) {
-	dir, err := wruntime.OpenDirectoryDialog(t.ctx.Context(), wruntime.OpenDialogOptions{
-		Title:                "选择下载保存位置",
-		CanCreateDirectories: true,
-	})
-	if err != nil {
-		return "", Wrap(err)
-	}
-	return dir, nil
 }

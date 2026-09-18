@@ -1,9 +1,8 @@
 package bind
 
 import (
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/appstate"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/platform/win"
 )
 
 // Files 是文件浏览域的 Wails 绑定：目录列表/新建/重命名/删除/导出。
@@ -63,10 +62,7 @@ func (f *Files) Delete(remotes []string) error {
 // 用户取消对话框时返回空路径与 nil（前端静默，不视为错误）。
 func (f *Files) Export(remote string) (string, error) {
 	f.st.Activity()
-	dir, err := wruntime.OpenDirectoryDialog(f.ctx.Context(), wruntime.OpenDialogOptions{
-		Title:                "选择导出位置",
-		CanCreateDirectories: true,
-	})
+	dir, err := win.PickFolder("选择导出位置")
 	if err != nil {
 		return "", Wrap(err)
 	}

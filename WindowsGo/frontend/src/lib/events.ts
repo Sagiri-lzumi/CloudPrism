@@ -33,7 +33,7 @@ export const ALL_EVENTS = [
 
 // 帧载荷与 go/models.ts 的 appstate 模型对应；此处只用类型断言，
 // 模型实例化统一走 models（Wails 已生成 createFrom 便捷方法）。
-import type {appstate} from '../../wailsjs/go/models'
+import type {appstate} from '../types/appstate'
 
 /** 合帧载荷：全局快照 + 活动传输任务明细（Tasks 仅传输活跃时存在）。 */
 export interface StateFrame {

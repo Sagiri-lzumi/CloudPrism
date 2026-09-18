@@ -40,6 +40,16 @@ func (p *Preview) MediaURL(remote, displayName string) (string, error) {
 	return url, nil
 }
 
+// DownloadURL 签发下载端点 URL（浏览器 <a download> 触发保存）。
+func (p *Preview) DownloadURL(remote, displayName string) (string, error) {
+	p.st.Activity()
+	url, err := p.st.DownloadURL(p.ctx.Context(), remote, displayName)
+	if err != nil {
+		return "", Wrap(err)
+	}
+	return url, nil
+}
+
 // Revoke 吊销一个代理令牌（停止播放/离开预览页时调用，释放派生密钥）。
 func (p *Preview) Revoke(token string) {
 	p.st.Activity()

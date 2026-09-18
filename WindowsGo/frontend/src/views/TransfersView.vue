@@ -7,9 +7,9 @@
 -->
 <script setup lang="ts">
 import {computed, reactive, ref} from 'vue'
-import type {appstate} from '../../wailsjs/go/models'
+import type {appstate} from '../types/appstate'
 import {Transfer, Vault, unwrap} from '../lib/api'
-import {ui, navigate, uploadPaths} from '../lib/store'
+import {ui, navigate, uploadFiles} from '../lib/store'
 import {fmtSize, fmtPct} from '../lib/format'
 import {showError, showInfo, showSuccess, showWarning} from '../lib/toast'
 import Button from '../components/fluent/Button.vue'
@@ -91,14 +91,15 @@ async function retryOne(id: number) {
   }
 }
 
-/** 选择本地文件上传（空态快捷入口）。 */
+/** 选择本地文件上传（空态快捷入口，浏览器 file input）。 */
 async function pickUpload() {
-  try {
-    const paths = await Transfer.UploadDialog()
-    if (paths && paths.length) void uploadPaths(paths)
-  } catch {
-    /* 取消对话框静默 */
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.multiple = true
+  input.onchange = () => {
+    if (input.files?.length) void uploadFiles(Array.from(input.files))
   }
+  input.click()
 }
 
 /* ---------------------------------------------------- 清空确认模态 */

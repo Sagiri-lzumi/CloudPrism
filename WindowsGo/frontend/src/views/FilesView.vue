@@ -7,8 +7,7 @@
 -->
 <script setup lang="ts">
 import {computed, reactive, ref} from 'vue'
-import type {appstate} from '../../wailsjs/go/models'
-import {Transfer} from '../lib/api'
+import type {appstate} from '../types/appstate'
 import {
   ui,
   selectEntry,
@@ -22,13 +21,14 @@ import {
   newFolder,
   renameSel,
   deleteSel,
-  uploadPaths,
+  uploadFiles,
   navigate,
   toggleMulti,
   rangeMulti,
   clearMulti,
   copyEntryName,
   copyEntryPath,
+  onDropFiles,
 } from '../lib/store'
 import {fmtSize} from '../lib/format'
 import {kindOf, KIND_ICON} from '../lib/media'
@@ -273,15 +273,22 @@ async function onCtx(i: number) {
   else if (i === 8) openMsg('delete')
 }
 
-/* ------------------------------------------------- 上传对话框（原生） */
+/* ------------------------------------------------- 上传对话框（浏览器 file input） */
 
 async function pickUpload(remoteDir: string = ui.remote) {
-  try {
-    const paths = await Transfer.UploadDialog()
-    if (paths && paths.length) void uploadPaths(paths, remoteDir)
-  } catch {
-    /* 用户取消对话框时不提示 */
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.multiple = true
+  input.onchange = () => {
+    if (input.files?.length) void uploadFiles(Array.from(input.files), remoteDir)
   }
+  input.click()
+}
+
+/** 浏览器原生拖放：拖入文件 → 上传到当前浏览目录。 */
+function onViewDrop(ev: DragEvent) {
+  const files = ev.dataTransfer?.files
+  if (files && files.length) void onDropFiles(files)
 }
 
 /* ------------------------------------------------- 模态对话框队列 */
@@ -349,7 +356,13 @@ function confirmDlg(payload: string | boolean) {
 </script>
 
 <template>
-  <div ref="viewEl" class="files-view">
+  <!-- 浏览器原生拖放上传：文件拖到文件页即入队上传当前目录 -->
+  <div
+    ref="viewEl"
+    class="files-view"
+    @dragover.prevent
+    @drop.prevent="onViewDrop"
+  >
     <!-- 未连接：引导回密库页（锁库事件后兜底） -->
     <div v-if="!connected" class="empty-state">
       <Icon name="folder" :size="40" class="dim" />
@@ -549,9 +562,10 @@ function confirmDlg(payload: string | boolean) {
           </div>
         </section>
 
-        <!-- 拖柄2：文件列表/预览 -->
+        <!-- 拖柄2：文件列表/预览（独立类 files-split，避免与 tree-split 共用
+             split-handle 类导致 grid-column 权重冲突） -->
         <div
-          class="split-handle"
+          class="split-handle files-split"
           :class="{dragging}"
           role="separator"
           aria-orientation="vertical"
@@ -675,13 +689,18 @@ function confirmDlg(payload: string | boolean) {
   grid-column: 2;
 }
 
-/* 拖柄2（文件列表/预览）：column 4（覆盖 layout.css 全局 .split-handle 的 column 2） */
-.files-shell > .split-handle {
+/* 拖柄2（文件列表/预览）：column 4。
+   拖柄2 用独立类 files-split（不与 tree-split 共用 split-handle 做 grid 定位），
+   避免高权重选择器把 tree-split 从 column 2 误拉到 4 导致两行阶梯。 */
+.files-split {
   grid-column: 4;
 }
 
-/* 预览面板（三栏右栏，占大头 1fr）：column 5 */
-.preview {
+/* 预览面板（三栏右栏，占大头 1fr）：column 5。
+   PreviewPanel 是子组件，根元素 .cp-preview 的 scope hash 属于 PreviewPanel，
+   本组件 scoped 的 .preview 匹配不到 → 必须用 :deep 穿透，否则
+   grid-column:5 不生效、预览栏溢出到下一行造成三栏"阶梯"错位。 */
+:deep(.preview) {
   grid-column: 5;
   min-height: 0;
   min-width: 0;

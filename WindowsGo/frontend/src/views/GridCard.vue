@@ -9,7 +9,7 @@
 -->
 <script setup lang="ts">
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
-import type {appstate} from '../../wailsjs/go/models'
+import type {appstate} from '../types/appstate'
 import {thumbUrl, revoke, ui} from '../lib/store'
 import {kindOf, KIND_ICON} from '../lib/media'
 import Icon from '../components/fluent/Icon.vue'

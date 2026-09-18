@@ -15,7 +15,7 @@ import {
   reloadDir,
   lockVault,
   quitApp,
-  uploadPaths,
+  uploadFiles,
   downloadSel,
   clearRecovery,
 } from './lib/store'
@@ -28,8 +28,6 @@ import TransferBar from './components/layout/TransferBar.vue'
 import StatusBar from './components/layout/StatusBar.vue'
 import InfoBar from './components/fluent/InfoBar.vue'
 import Icon from './components/fluent/Icon.vue'
-import {Transfer, unwrap} from './lib/api'
-import {showError} from './lib/toast'
 
 onMounted(() => {
   start()
@@ -78,14 +76,15 @@ function onGlobalKey(e: KeyboardEvent) {
   }
 }
 
-/** 快捷键 Ctrl+U 共用：弹原生文件选择框入队上传。 */
+/** 快捷键 Ctrl+U 共用：浏览器文件选择框入队上传。 */
 async function pickUpload() {
-  try {
-    const paths = await Transfer.UploadDialog()
-    if (paths && paths.length) void uploadPaths(paths)
-  } catch (e) {
-    showError('上传失败：' + unwrap(e).message)
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.multiple = true
+  input.onchange = () => {
+    if (input.files?.length) void uploadFiles(Array.from(input.files))
   }
+  input.click()
 }
 </script>
 

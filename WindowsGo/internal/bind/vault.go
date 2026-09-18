@@ -6,9 +6,8 @@ import (
 	"strings"
 	"time"
 
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/appstate"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/platform/win"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/storage"
 )
 
@@ -159,10 +158,8 @@ func (v *Vault) BaiduAuthURL(appID, appKey string) (string, error) {
 		return "", Wrap(errors.New("请先填写 AppKey（必填）"))
 	}
 	u := storage.BaiduAuthURL(appKey, strings.TrimSpace(appID))
-	if ctx := v.ctx.Context(); ctx != nil {
-		// 打开失败不阻断：返回 URL 供前端展示/复制兜底
-		wruntime.BrowserOpenURL(ctx, u)
-	}
+	// 打开失败不阻断：返回 URL 供前端展示/复制兜底
+	_ = win.OpenURL(u)
 	return u, nil
 }
 
@@ -220,10 +217,7 @@ func maskBaiduKey(s string) string {
 // ChooseLocalDir 弹目录选择框返回密库存放目录；取消返回空串（非错误）。
 // 向导本地卡「浏览」按钮用；标题与 Settings.ChooseSyncDir 区分语义。
 func (v *Vault) ChooseLocalDir() (string, error) {
-	dir, err := wruntime.OpenDirectoryDialog(v.ctx.Context(), wruntime.OpenDialogOptions{
-		Title:                "选择密库存放的本地文件夹",
-		CanCreateDirectories: true,
-	})
+	dir, err := win.PickFolder("选择密库存放的本地文件夹")
 	if err != nil {
 		return "", Wrap(err)
 	}
