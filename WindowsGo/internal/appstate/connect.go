@@ -2,7 +2,6 @@ package appstate
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -178,17 +177,18 @@ func (s *State) applyConnection(conn *connState) error {
 	return nil
 }
 
-// startProxy 在 127.0.0.1 动态端口启动流式解密代理。
+// startProxy 装配流式解密代理（不监听端口）。
 //
 // 分块读缓存经 SetChunkCache 注入（nil 表示不启用，代理退化为直连远端）。
+//
+// 代理不再自己起监听：媒体/缩略图/下载统一由 web 的同源路由
+// （/s/ /t/ /d/）直接调用 conn.proxy.Handler()，经 State.StreamProxy
+// 暴露给 web 层。好处有二：
+//  1. 远端浏览器不会拿到 127.0.0.1 的绝对地址（局域网档的关键前提）；
+//  2. 令牌与解密能力不落在额外端口上，与其余 API 共用同一道鉴权闸门。
 func (s *State) startProxy(conn *connState) error {
 	proxy := streaming.NewServer(conn.sess, conn.backend)
 	proxy.SetChunkCache(conn.mediaCache)
-	addr, err := proxy.Start("127.0.0.1", 0)
-	if err != nil {
-		return fmt.Errorf("streaming: %w", err)
-	}
-	_ = addr // 动态端口经 BaseURL() 取用
 	conn.proxy = proxy
 	return nil
 }

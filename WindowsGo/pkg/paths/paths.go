@@ -70,6 +70,15 @@ func BaiduCredentialFile() string {
 	return filepath.Join(DataDir(), "baidu.json")
 }
 
+// LanTokenFile 返回局域网访问令牌文件路径 data/lan_token
+// （内容为 DPAPI/PLAIN 前缀 + base64 密文，见 pkg/secret.File）。
+//
+// 令牌是秘密，按 pkg/settings 顶部约定不得写入设置存储，故单独落盘。
+// data/ 已在 .gitignore 中，令牌文件不会入库。
+func LanTokenFile() string {
+	return filepath.Join(DataDir(), "lan_token")
+}
+
 // TempDir 返回自管临时目录 data/tmp/。
 //
 // 不用系统 %TEMP%：部分沙箱/受管环境下 %TEMP% 的 ACL 不完整，创建临时

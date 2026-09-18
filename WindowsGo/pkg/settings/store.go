@@ -51,6 +51,14 @@ const (
 	KeyWebDAVURL        = "conn/webdav_url"
 	KeyWebDAVUser       = "conn/webdav_user"
 
+	// 监听 / 访问
+	//
+	// KeyLanEnabled 控制 Web 服务是否绑 0.0.0.0（允许局域网访问）。
+	// "0"（默认）= 只绑 127.0.0.1，行为与历史版本完全一致；"1" = 局域网档，
+	// 此时非回环来源的请求必须携带访问令牌（令牌本身不进本存储，见
+	// paths.LanTokenFile）。
+	KeyLanEnabled = "listen/lan"
+
 	// 最近连接的密库记录（仅连接参数，任何密码均不落盘）
 	KeyRecentVaults = "vaults/recent"
 )

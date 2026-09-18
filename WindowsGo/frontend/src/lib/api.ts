@@ -190,6 +190,34 @@ export const Preview = {
   Revoke: (token: string) => call<void>('/preview/revoke', {token}),
 }
 
+/** LanAddr：一个可用于局域网访问的地址及其来源网卡（镜像 bind.LanAddr）。 */
+export interface LanAddr {
+  ip: string // IPv4 地址
+  iface: string // 网卡名称（如「以太网」「WLAN」）
+  url: string // 带访问令牌的完整地址（复制即用）
+  virtual: boolean // 虚拟网卡/隧道上的地址：手机通常连不上，UI 需标注
+}
+
+/** LanStatus：局域网访问档状态（镜像 bind.Lan.Status 返回的 map）。 */
+export interface LanStatus {
+  enabled: boolean // 设置里已保存的开关
+  active: boolean // 当前进程是否真的对局域网监听（切换开关需重启才生效）
+  port: number // 实际监听端口（0 = 尚未监听）
+  token: string // 访问令牌（拼接分享链接用；能拿到即已通过闸门）
+  localUrl: string // 本机地址
+  addrs: LanAddr[] // 局域网可分享地址（真实网卡在前、虚拟网卡在后）
+}
+
+/** Lan 域：局域网访问档（开关 / 分享地址 / 访问令牌）。 */
+export const Lan = {
+  Status: () => call<LanStatus>('/lan/status'),
+  // 仅写设置、不热重载监听：开启后需重启程序才会真正绑到局域网，
+  // 因此 UI 必须同时显示 enabled（已保存）与 active（当前生效）。
+  SetEnabled: (on: boolean) => call<void>('/lan/setenabled', {on}),
+  // 重新生成令牌：旧令牌立即失效，所有已授权远端设备需用新链接重新进入。
+  RotateToken: () => call<{token: string}>('/lan/rotatetoken'),
+}
+
 /** App 域：全局操作。 */
 export const App = {
   Quit: () => call<void>('/app/quit'),

@@ -1,11 +1,12 @@
 // Package web 提供 CloudPrism 的 Web 服务模式：HTTP server + JSON API + SSE 事件。
 //
 // 架构（v32 起，替代 Wails 桌面 app）：
-//   - HTTP server 监听本机/局域网/公网（三档可切换）+ 端口可配
+//   - HTTP server 监听本机（默认）/ 局域网（可选档，须带访问令牌）+ 端口顺延
 //   - /api/* JSON API 封装 internal/bind 5 域方法
 //   - /api/events SSE 推送状态帧 + 瞬时事件（替代 Wails EventsEmit）
 //   - / 静态前端（内嵌 frontend/dist）
-//   - /s/* /t/* 复用 pkg/streaming 代理流（预览/缩略图令牌）
+//   - /s/* /t/* /d/* 媒体、缩略图、下载——直接复用 appstate 的流式解密代理，
+//     同源同端口，不再另起 127.0.0.1 代理端口
 //
 // 业务逻辑（internal/appstate + internal/bind + pkg/*）完全复用，不依赖 Wails。
 package web
@@ -13,6 +14,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -29,9 +31,6 @@ import (
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/appstate"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/bind"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/paths"
-	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/session"
-	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/storage"
-	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/streaming"
 )
 
 // Server 是 Web 服务模式的总装配：HTTP server + API + SSE + 静态前端 + 代理流。
@@ -44,8 +43,12 @@ type Server struct {
 	transfer *bind.Transfer
 	settings *bind.Settings
 	preview  *bind.Preview
-	stream   *streaming.Server // 媒体/缩略图代理（连接时重建）
-	distFS   fs.FS             // 内嵌前端 dist（main.go 注入）
+	lan      *bind.Lan // 局域网访问档（开关/令牌/可分享地址）
+	distFS   fs.FS     // 内嵌前端 dist（main.go 注入）
+
+	// guard 是访问闸门：回环来源放行，非回环来源要求访问令牌（局域网档）；
+	// token 为空时为 fail-closed 的纯本机模式。Listen 时构造。
+	guard *guard
 
 	// SSE 事件收集器：appstate.Emit 注入此收集器，事件进 SSE 广播
 	mu      sync.Mutex
@@ -62,6 +65,11 @@ type Server struct {
 	addr string // 实际监听地址（端口冲突后可能与配置不同）
 	ln   net.Listener
 	srv  *http.Server
+
+	// lanActive 表示当前进程是否真的对局域网监听（绑的不是回环地址）。
+	// 与设置里的 listen/lan 分开上报：切换开关需要重启，两者可能不一致，
+	// UI 必须能同时显示「已保存」与「当前生效」。
+	lanActive bool
 }
 
 // frame 是每帧载荷：全局快照 + 传输任务明细（任务进度 10Hz 刷新）。
@@ -80,10 +88,10 @@ type event struct {
 	data any
 }
 
-// New 构造 Web server（未启动；Start 才监听）。distFS 是内嵌的前端 dist（main.go 注入）。
+// New 构造 Web server（未启动；Listen 才监听）。distFS 是内嵌的前端 dist（main.go 注入）。
 func New(log *slog.Logger, st *appstate.State, holder *bind.ContextHolder,
 	vault *bind.Vault, files *bind.Files, transfer *bind.Transfer,
-	settings *bind.Settings, preview *bind.Preview, distFS fs.FS) *Server {
+	settings *bind.Settings, preview *bind.Preview, lan *bind.Lan, distFS fs.FS) *Server {
 	s := &Server{
 		log:      log,
 		st:       st,
@@ -93,6 +101,7 @@ func New(log *slog.Logger, st *appstate.State, holder *bind.ContextHolder,
 		transfer: transfer,
 		settings: settings,
 		preview:  preview,
+		lan:      lan,
 		distFS:   distFS,
 		clients:  make(map[chan event]struct{}),
 		quit:     make(chan struct{}),
@@ -102,31 +111,50 @@ func New(log *slog.Logger, st *appstate.State, holder *bind.ContextHolder,
 	return s
 }
 
-// SetStreaming 连接建立后注入代理流 server（锁库/换连时重建）。
-func (s *Server) SetStreaming(sess *session.Session, backend storage.Backend) {
-	s.stream = streaming.NewServer(sess, backend)
-}
-
-// Start 启动 HTTP server（阻塞直到 Shutdown）。
-// Listen 同步建立监听并返回地址（供 main 在启动浏览器前拿到完整 URL）。
-func (s *Server) Listen(host string, port int) (string, error) {
+// Listen 建立监听并返回实际地址（供 main 在启动浏览器前拿到完整 URL）。
+//
+// host 为 "127.0.0.1"（默认，纯本机）或 "0.0.0.0"（局域网档）。
+// token 为空串表示不启用访问闸门（纯本机模式）；非空时启用 guard：
+// 回环来源免令牌，其余来源必须携带令牌。
+func (s *Server) Listen(host string, port int, token string) (string, error) {
 	mux := http.NewServeMux()
 	s.registerAPI(mux)
 	s.registerStatic(mux)
 	s.registerStream(mux)
 
-	s.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	// 访问闸门始终启用（token 为空即 fail-closed 的纯本机模式）：
+	// 即使外部把监听地址误配成 0.0.0.0，也不会出现无鉴权对外服务。
+	s.guard = newGuard(token, s.log)
+	s.srv = &http.Server{Handler: s.guard.wrap(mux), ReadHeaderTimeout: 10 * time.Second}
 	ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
 		return "", fmt.Errorf("监听 %s:%d 失败: %w", host, port, err)
 	}
 	s.ln = ln
 	s.addr = ln.Addr().String()
-	s.log.Info("Web 服务启动", "addr", s.addr)
+	s.lanActive = !isLoopbackAddr(s.addr)
+	s.log.Info("Web 服务启动", "addr", s.addr, "lan", s.lanActive)
 	// 监听成功后启动 10Hz 状态帧合帧循环（Serve 阻塞前就绪，首帧即可达 SSE）。
 	s.startFrameLoop()
 	return s.addr, nil
 }
+
+// Port 返回实际监听端口；未监听时返回 0。
+func (s *Server) Port() int {
+	_, portStr, err := net.SplitHostPort(s.addr)
+	if err != nil {
+		return 0
+	}
+	p, err := strconv.Atoi(portStr)
+	if err != nil {
+		return 0
+	}
+	return p
+}
+
+// LanActive 报告当前进程是否对局域网监听（与设置里的开关可能不一致，
+// 因为切换开关需要重启进程）。
+func (s *Server) LanActive() bool { return s.lanActive }
 
 // Serve 开始服务（阻塞直到 Shutdown）。Listen 后调用。
 func (s *Server) Serve() error {
@@ -351,6 +379,34 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/settings/choosesyncdir", s.wrapErr(func(r *http.Request) (any, error) { return s.settings.ChooseSyncDir() }))
 	mux.HandleFunc("/api/settings/choosecachedir", s.wrapErr(func(r *http.Request) (any, error) { return s.settings.ChooseCacheDir() }))
 
+	// Lan 域（局域网访问档）
+	//
+	// 令牌由本域返回：能调到这里说明调用方已通过访问闸门（本机或已带令牌），
+	// 因此不构成新的泄露面。lanUrls 里的链接已内嵌令牌，复制即用。
+	mux.HandleFunc("/api/lan/status", s.wrapErr(func(r *http.Request) (any, error) {
+		return s.lan.Status(s.Port(), s.LanActive()), nil
+	}))
+	mux.HandleFunc("/api/lan/setenabled", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
+		// 用 *bool 而非 bool：body 缺 on 字段与「显式传 false」必须区分开。
+		// 若用 bool 且忽略解析错误，一个坏 body 会被当成 false 静默写入 ——
+		// 等于「用户点开、开关自己弹回去」，正是要杜绝的展示缺口。
+		var req struct{ On *bool }
+		if err := json.Unmarshal(body, &req); err != nil {
+			return nil, fmt.Errorf("请求体解析失败: %w", err)
+		}
+		if req.On == nil {
+			return nil, errors.New("缺少 on 字段")
+		}
+		return nil, s.lan.SetEnabled(*req.On)
+	}))
+	mux.HandleFunc("/api/lan/rotatetoken", s.wrapErr(func(r *http.Request) (any, error) {
+		tok, err := s.lan.Rotate()
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"token": tok}, nil
+	}))
+
 	// Transfer 域
 	mux.HandleFunc("/api/transfer/upload", s.handleUpload)
 	mux.HandleFunc("/api/transfer/download", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
@@ -496,29 +552,24 @@ func (s *Server) registerStatic(mux *http.ServeMux) {
 /* ----------------------------------------------------------- 代理流 */
 
 func (s *Server) registerStream(mux *http.ServeMux) {
-	// /s/* 媒体预览 + /t/* 缩略图（连接后 s.stream 非 nil 才可用）
-	mux.HandleFunc("/s/", func(w http.ResponseWriter, r *http.Request) {
-		if s.stream == nil {
+	// /s/* 媒体预览 + /t/* 缩略图 + /d/* 下载。
+	// 三者都直接复用 appstate 当前连接的流式解密代理 —— 不再另起
+	// 127.0.0.1 代理端口，因此媒体流量与本机/局域网访问共用同一个端口
+	// 与同一道鉴权闸门（远端浏览器拿到的也是同源相对路径）。
+	//
+	// streamer 每请求取一次：连接建立/锁库/换连时 appstate 会整体替换
+	// 代理实例，缓存指针会拿到过期对象。
+	streamer := func(w http.ResponseWriter, r *http.Request) {
+		proxy := s.st.StreamProxy()
+		if proxy == nil {
 			http.NotFound(w, r)
 			return
 		}
-		s.stream.Handler().ServeHTTP(w, r)
-	})
-	mux.HandleFunc("/t/", func(w http.ResponseWriter, r *http.Request) {
-		if s.stream == nil {
-			http.NotFound(w, r)
-			return
-		}
-		s.stream.Handler().ServeHTTP(w, r)
-	})
-	// /d/* 下载端点（浏览器保存解密后的完整文件）
-	mux.HandleFunc("/d/", func(w http.ResponseWriter, r *http.Request) {
-		if s.stream == nil {
-			http.NotFound(w, r)
-			return
-		}
-		s.stream.Handler().ServeHTTP(w, r)
-	})
+		proxy.Handler().ServeHTTP(w, r)
+	}
+	mux.HandleFunc("/s/", streamer)
+	mux.HandleFunc("/t/", streamer)
+	mux.HandleFunc("/d/", streamer)
 }
 
 /* ----------------------------------------------------------- API 包装 */

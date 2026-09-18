@@ -225,6 +225,16 @@ func (s *State) ExportRemote(ctx context.Context, remote, localDir string) (stri
 // 预览端点（图片缩略图 / 媒体播放）
 // ---------------------------------------------------------------------------
 
+// 下列三个方法一律返回**相对路径**（形如 /s/<token>/<name>），由浏览器按
+// 当前页面 origin 自行解析。
+//
+// 历史坑：早期这里拼的是代理自己的绝对地址 http://127.0.0.1:<动态端口>。
+// 本机访问看不出问题，但局域网档下远端浏览器会去连**它自己**的 127.0.0.1，
+// 导致预览/缩略图/下载全部失效。改为相对路径后，本机与远端走同一条
+// 同源路由（web 的 /s/ /t/ /d/，直接复用 appstate 的代理处理器），
+// 代理也就不需要独立监听端口——pkg/streaming 顶部「代理只监听 127.0.0.1、
+// 不把令牌与解密能力暴露给局域网」的约束由此天然成立。
+
 // ThumbURL 取远端图片的缩略图端点 URL（两级缓存 + 服务端缩放 JPEG）。
 // 幂等：同一远程路径重复调用返回既有令牌（流式注册表按路径判重）。
 // 生成失败返回错误，前端回退占位图标（对照 fetch_thumbnail 吞异常语义）。
@@ -246,7 +256,7 @@ func (s *State) ThumbURL(ctx context.Context, remote string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return conn.proxy.BaseURL() + entry.URLPath(), nil
+	return entry.URLPath(), nil
 }
 
 // MediaURL 注册媒体流端点 URL（播放器 <video>/<audio> 直连）。
@@ -265,7 +275,26 @@ func (s *State) MediaURL(ctx context.Context, remote, displayName string) (strin
 	if err != nil {
 		return "", err
 	}
-	return conn.proxy.BaseURL() + entry.URLPath(), nil
+	return entry.URLPath(), nil
+}
+
+// DownloadURL 注册下载端点 URL（浏览器 <a download> 直连，服务端全文件
+// 流式解密 + Content-Disposition: attachment）。幂等语义与错误分类同
+// MediaURL；displayName 用于响应头的下载文件名。
+func (s *State) DownloadURL(ctx context.Context, remote, displayName string) (string, error) {
+	conn, err := s.requireConn()
+	if err != nil {
+		return "", err
+	}
+	if conn.proxy == nil {
+		return "", errors.New("流式服务不可用（代理未启动）")
+	}
+	full := joinRemote(conn.vaultPath, trimSlash(remote))
+	entry, err := conn.proxy.RegisterDownload(ctx, full, displayName)
+	if err != nil {
+		return "", err
+	}
+	return entry.URLPath(), nil
 }
 
 // RevokeMedia 撤销媒体/缩略图令牌（token 为端点 URL 的最后一段）。

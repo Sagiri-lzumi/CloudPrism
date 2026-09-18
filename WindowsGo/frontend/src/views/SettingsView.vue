@@ -2,6 +2,7 @@
   SettingsView.vue —— 设置页。
   对照 Python side_panel.SettingsPage 分组：外观（主题/字号）→ 缓存
   （分块大小 / 目录 / 上限 / 清空）→ 传输（分块/并发）→ 安全（自动锁定）
+  → 局域网访问（Web 模式特有：开关 / 分享链接 / 访问令牌）
   → 百度网盘（凭证表单 + 授权流程，与向导内嵌表单同链路）→ 性能
   （加密核心数）→ 关于（运行时版本）。
   注意两个「分块」不是同一件事：缓存组的「分块大小」是大文件本地分块
@@ -15,8 +16,8 @@
 import {computed, onMounted, reactive, ref} from 'vue'
 import {ui} from '../lib/store'
 import {applyFontSize} from '../lib/store'
-import {App, Settings, Vault, unwrap} from '../lib/api'
-import type {CacheInfo} from '../lib/api'
+import {App, Lan, Settings, Vault, unwrap} from '../lib/api'
+import type {CacheInfo, LanStatus} from '../lib/api'
 import {MODE_LABELS, applyThemeIndex} from '../lib/theme'
 import {showError, showInfo, showSuccess, showWarning} from '../lib/toast'
 import Button from '../components/fluent/Button.vue'
@@ -25,6 +26,7 @@ import ComboBoxCard from '../components/fluent/ComboBoxCard.vue'
 import Icon from '../components/fluent/Icon.vue'
 import LineEdit from '../components/fluent/LineEdit.vue'
 import SpinBox from '../components/fluent/SpinBox.vue'
+import SwitchCard from '../components/fluent/SwitchCard.vue'
 
 /* -------------------------------------------------------- 选项常量 */
 
@@ -365,11 +367,17 @@ async function clearBaidu() {
   }
 }
 
-function copyBaiduUrl() {
-  void navigator.clipboard.writeText(baiduUrl.value).then(
-    () => showInfo('授权网址已复制'),
-    () => showWarning('复制失败，请手动选中网址'),
+/** 复制文本到剪贴板（失败时提示手动选中，不静默吞掉）。 */
+function copyText(text: string, okMsg: string) {
+  if (!text) return
+  void navigator.clipboard.writeText(text).then(
+    () => showInfo(okMsg),
+    () => showWarning('复制失败，请手动选中文本'),
   )
+}
+
+function copyBaiduUrl() {
+  copyText(baiduUrl.value, '授权网址已复制')
 }
 
 /** 授权状态卡文案（掩码 AppKey 展示，与后端 BaiduStatus 口径一致）。 */
@@ -388,6 +396,92 @@ const GUIDE_LINES = [
   '5. 把四项凭证填入上方表单，点「打开授权页」用百度账号授权；将页面展示的 code 粘贴到「授权码」后点「完成授权」。',
   '6. 凭证仅加密保存在本机 %APPDATA%\\CloudPrism\\baidu.json，不会上传；access_token 约 30 天过期，届时重新授权即可。',
 ]
+
+/* -------------------------------------------------------- 局域网访问档 */
+
+// 局域网访问状态（镜像 bind.Lan.Status）。
+//
+// 关键：enabled 是「设置里已保存的意愿」，active 是「当前进程真的在对局域网
+// 监听」。切换开关不热重载监听（绑定的地址在 Listen 时确定），因此两者可能
+// 不一致 —— 卡片必须把两者都显示出来并明确提示「需重启」，否则就成了
+// 「看似可配但不会生效」的展示缺口。
+const lan = reactive<LanStatus>({
+  enabled: false,
+  active: false,
+  port: 0,
+  token: '',
+  localUrl: '',
+  addrs: [],
+})
+const lanBusy = ref(false)
+const lanShowToken = ref(false) // 令牌默认打码（截图/投屏时不至于直接泄露）
+
+async function refreshLan() {
+  try {
+    Object.assign(lan, await Lan.Status())
+  } catch {
+    // 状态拉取失败时保留上一次的值：设置页不应因为后端未连接而整页报错
+  }
+}
+
+/** 开关内容文案：把「已保存」与「当前生效」的差异说清楚。 */
+const lanSwitchHint = computed(() => {
+  if (!lan.enabled) {
+    return '关闭时只监听本机（127.0.0.1），其他设备无法访问；开启后需重启程序才会真正对外监听'
+  }
+  if (lan.active) {
+    return `已开启并生效：正在监听 ${lan.port} 端口，同一网络下的设备可用下方链接访问`
+  }
+  return '已保存为「开启」，但当前进程仍在仅本机监听：重启程序后生效'
+})
+
+/** 需要在卡片上单独提示「重启才生效」的条件（避免隐藏的无效开关）。 */
+const lanNeedRestart = computed(() => lan.enabled !== lan.active)
+const lanRestartHint = computed(() =>
+  lan.enabled
+    ? '开关已改为「开启」，当前进程仍在监听本机。请从托盘菜单退出后重新打开本程序。'
+    : '开关已改为「关闭」，当前进程仍在监听局域网。请从托盘菜单退出后重新打开本程序。',
+)
+
+/** 令牌展示：默认打码，保留首尾各 4 位便于用户比对。 */
+const lanTokenText = computed(() => {
+  const t = lan.token
+  if (!t) return '—'
+  if (lanShowToken.value || t.length <= 8) return t
+  return `${t.slice(0, 4)}${'•'.repeat(t.length - 8)}${t.slice(-4)}`
+})
+
+async function onLanToggle(on: boolean) {
+  if (lanBusy.value) return
+  lanBusy.value = true
+  const prev = lan.enabled
+  lan.enabled = on // 乐观更新，失败回滚
+  try {
+    await Lan.SetEnabled(on)
+    // 不热重载监听：如实告知生效时机，而不是让用户以为已经生效
+    showInfo(on ? '已开启局域网访问：重启程序后生效' : '已关闭局域网访问：重启程序后恢复仅本机访问')
+  } catch (e) {
+    lan.enabled = prev
+    showError('保存失败：' + unwrap(e).message)
+  } finally {
+    lanBusy.value = false
+    void refreshLan()
+  }
+}
+
+async function rotateLanToken() {
+  if (lanBusy.value) return
+  lanBusy.value = true
+  try {
+    await Lan.RotateToken()
+    await refreshLan()
+    showWarning('已重新生成访问令牌：之前分享的链接全部失效，需用新链接重新进入')
+  } catch (e) {
+    showError('重新生成失败：' + unwrap(e).message)
+  } finally {
+    lanBusy.value = false
+  }
+}
 
 /* ------------------------------------------------------------ 关于 */
 
@@ -561,6 +655,69 @@ const version = ref('读取运行时信息…')
           @change="onAutoLock"
         />
         <div class="hint-row">连接详情与恢复码管理位于「密库」页（连接密库后可见）。</div>
+
+        <!-- ===================== 局域网访问 ===================== -->
+        <div class="group-title">局域网访问</div>
+        <SwitchCard
+          icon="wifi"
+          title="允许其他设备访问"
+          :content="lanSwitchHint"
+          :checked="lan.enabled"
+          :disabled="lanBusy"
+          @change="onLanToggle"
+        />
+        <div v-if="lanNeedRestart" class="set-card">
+          <span class="set-icon"><Icon name="update" :size="17" /></span>
+          <div class="set-body">
+            <div class="set-title">需重启程序才会生效</div>
+            <div class="set-content">{{ lanRestartHint }}</div>
+          </div>
+        </div>
+        <template v-if="lan.active">
+          <div v-for="a in lan.addrs" :key="a.ip" class="lan-row">
+            <span class="lan-iface" :title="a.iface">{{ a.iface }}</span>
+            <span class="url-text" dir="ltr">{{ a.url }}</span>
+            <span v-if="a.virtual" class="lan-tag">虚拟网卡</span>
+            <Button icon="copy" :disabled="lanBusy" @click="copyText(a.url, '分享链接已复制')">
+              复制
+            </Button>
+          </div>
+          <div v-if="!lan.addrs.length" class="hint-row">
+            未检测到局域网 IPv4 地址：请确认本机已连接 Wi-Fi 或网线后重启程序。
+          </div>
+          <div v-if="lan.addrs.some((a) => a.virtual)" class="hint-row">
+            标「虚拟网卡」的地址（VMware / 代理隧道等）其他设备通常连不上，
+            请优先使用不带该标记的地址；若手机与电脑连的是同一个 Wi-Fi，选「WLAN」或「以太网」那条。
+          </div>
+          <div class="set-card">
+            <span class="set-icon"><Icon name="lock" :size="17" /></span>
+            <div class="set-body">
+              <div class="set-title">访问令牌</div>
+              <div class="set-content">
+                远端设备凭它证明自己已被授权；重新生成可立即踢掉所有已授权设备
+              </div>
+            </div>
+            <div class="set-right">
+              <span class="lan-token" dir="ltr">{{ lanTokenText }}</span>
+              <Button
+                :icon="lanShowToken ? 'hide' : 'eye'"
+                iconOnly
+                :title="lanShowToken ? '隐藏令牌' : '显示令牌'"
+                :disabled="lanBusy"
+                @click="lanShowToken = !lanShowToken"
+              />
+              <Button icon="update" :disabled="lanBusy" @click="rotateLanToken">重新生成</Button>
+            </div>
+          </div>
+        </template>
+        <div v-else class="hint-row">
+          当前未对外监听：开启并重启程序后，这里会显示带令牌的分享链接与访问令牌。
+        </div>
+        <div class="hint-row">
+          首次开启时 Windows 会弹出防火墙授权框，需选择「允许」，否则其他设备连不上；
+          局域网走明文 HTTP，令牌与文件名在同一网段内可被嗅探，请勿在公共 Wi-Fi 下开启。
+          密库内容始终是端到端加密的，令牌只保护界面访问。
+        </div>
 
         <!-- ===================== 百度网盘 ===================== -->
         <div class="group-title">百度网盘</div>
@@ -857,8 +1014,9 @@ const version = ref('读取运行时信息…')
   color: var(--muted);
 }
 
-/* 授权 URL 兜底展示行 */
-.bf-url {
+/* 授权 URL / 局域网分享链接兜底展示行（同一版式：等宽文本框 + 复制按钮） */
+.bf-url,
+.lan-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -876,6 +1034,39 @@ const version = ref('读取运行时信息…')
   border: 1px solid var(--stroke);
   border-radius: var(--radius-ctrl);
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 令牌值：等宽打码展示，宽度受限避免把「重新生成」按钮挤出卡片 */
+.lan-token {
+  max-width: 220px;
+  overflow: hidden;
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 0.786rem;
+  color: var(--text2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 网卡名：窄列，避免长名（VMware Network Adapter VMnet1）挤压地址栏 */
+.lan-iface {
+  flex: none;
+  max-width: 104px;
+  overflow: hidden;
+  font-size: 0.786rem;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 「虚拟网卡」标记：提示该地址其他设备通常连不上 */
+.lan-tag {
+  flex: none;
+  padding: 1px 6px;
+  font-size: 0.714rem;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border-radius: 999px;
   white-space: nowrap;
 }
 

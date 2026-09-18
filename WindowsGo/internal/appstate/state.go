@@ -72,7 +72,7 @@ type connState struct {
 	// 时为 nil —— 读取链路自动退回直连远端，不影响功能。
 	mediaCache *cache.Store
 
-	proxy *streaming.Server // 流式解密代理（127.0.0.1 动态端口）
+	proxy *streaming.Server // 流式解密代理（不监听端口，由 web 同源路由调用）
 
 	// transfer 状态回调装配由 connect 完成：任务完成/失败时驱动
 	// 续传记录持久化（见 worker.go 的回调接线）。
@@ -139,6 +139,19 @@ func (s *State) Queue() *transfer.Queue { return s.cfg.Queue }
 // BaiduCreds 返回百度凭证存储（nil = 未装配，OpenVault kind=baidu 恒「未授权」）。
 func (s *State) BaiduCreds() *storage.BaiduCredStore { return s.baiduCred }
 
+// StreamProxy 返回当前连接的流式解密代理；未连接或代理未装配时返回 nil。
+//
+// web 层用它在同源路径 /s/ /t/ /d/ 上直接挂载代理处理器：媒体流量因此与
+// 其余 API 走同一个监听端口、同一道鉴权闸门，本机与局域网行为一致。
+func (s *State) StreamProxy() *streaming.Server {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.conn == nil {
+		return nil
+	}
+	return s.conn.proxy
+}
+
 // ---------------------------------------------------------------------------
 // 事件出口
 // ---------------------------------------------------------------------------
@@ -198,7 +211,6 @@ type Snapshot struct {
 	HasRecovery  bool   `json:"hasRecovery"`
 	ConnectedSec int64  `json:"connectedSec"`
 	ResumeCount  int    `json:"resumeCount"`
-	ProxyBase    string `json:"proxyBase"`
 	AutoLockMin  int    `json:"autoLockMin"`
 
 	TransferActive bool  `json:"transferActive"`
@@ -237,9 +249,6 @@ func (s *State) Snapshot() Snapshot {
 		snap.FilenameEnc = c.meta.FilenameEnc
 		snap.HasRecovery = c.meta.HasRecovery
 		snap.ConnectedSec = int64(time.Since(c.connected).Seconds())
-		if c.proxy != nil {
-			snap.ProxyBase = c.proxy.BaseURL()
-		}
 	}
 	if done, total := s.cfg.Queue.Aggregate(); total > 0 {
 		snap.TransferActive = done < total || s.cfg.Queue.HasActive()

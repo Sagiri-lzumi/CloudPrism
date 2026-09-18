@@ -42,13 +42,15 @@ WindowsGo/
 │   ├── transfer/               传输队列（并发、重试、断点续传、进度聚合）
 │   ├── thumb/                  缩略图解码与两级缓存
 │   ├── cache/                  大文件分块读缓存（密文、按阈值切块、LRU 淘汰）
+│   ├── secret/                 单个秘密值的加密落盘（DPAPI:/PLAIN: 前缀，局域网令牌用）
 │   ├── perf/  settings/  paths/  update/  syncengine/
 │   ├── storage/                三后端：local / webdav / baidu
 │   └── streaming/              令牌化流式解密代理（/s/ 播放 /t/ 缩略图 /d/ 下载）
 ├── internal/
 │   ├── appstate/               唯一有状态对象，取代 WindowsPy 的 AppController
-│   ├── bind/                   5 个域 struct（Vault/Files/Transfer/Settings/Preview）+ ContextHolder
+│   ├── bind/                   6 个域 struct（Vault/Files/Transfer/Settings/Preview/Lan）+ ContextHolder
 │   ├── web/                    HTTP server：/api/* JSON + /api/events SSE + 静态前端 + 10Hz 合帧循环
+│   │                           + 同源媒体路由 /s/ /t/ /d/ + 访问闸门 auth.go（局域网档）
 │   ├── tray/                   系统托盘（getlantern/systray，纯 syscall）
 │   ├── platform/win/           dpapi / shell / dialogs(IFileOpenDialog) / FatalMessage —— 唯一 syscall 出口
 │   └── loggingx/               slog + 脱敏 handler + 2MB×3 轮转
@@ -154,6 +156,8 @@ HTTP/SSE 与后端交互，不再依赖 Chromium Mojo IPC。
 | 18 | 检查更新 UI | 设置页「关于」组提供「检查更新」按钮（对比 GitHub Release） | **未接线 UI**：`pkg/update` checker 有单测但无绑定消费；「关于」组只展示 App.Version() 运行时诊断串 | Go 版暂无产品版本号载体；功能等价缺口，已记录待后续接线 |
 | 19 | 大文件读取 | 无本地读缓存，每次 Range 请求都回源（单次响应受 `MAX_RESPONSE_BYTES` 截断） | `pkg/cache` 密文分块读缓存：读穿命中零下载、未命中按原区间回源并落盘分块 | 重看/回拖不再重复下载；分块大小可配且同时是「是否分块」的阈值 |
 | 20 | 缓存目录默认位置 | 未配置时落 `%TEMP%/cloudprism_cache`，会持续吃满系统盘 | 程序目录旁 `data/cache`，**代码层面不提供 `%TEMP%`/`%AppData%` 兜底**；用户配置进系统目录直接拒绝 | 缓存红线：绝不写系统盘位置；`pkg/paths.ForbiddenCacheDir` 是唯一闸门 |
+| 21 | 跨设备访问 | 无此概念：Qt 窗口只在运行它的那台机器上 | 可选「局域网访问档」：绑 `0.0.0.0` + 访问令牌闸门（回环免令牌，非回环必须带令牌，退出/选目录端点仅本机）；令牌 DPAPI 落盘 `data/lan_token`，**默认关闭** | Web 模式天然可被同网段访问，必须显式开关 + 访问控制，否则等于把密库界面开放给整层楼 |
+| 22 | 媒体/下载 URL 形态 | Qt 播放器直连本机代理端口，无 URL 概念 | 相对路径（`/s/ /t/ /d/`），与其余 API 共用同一监听端口与同一道鉴权闸门；**不再另起 127.0.0.1 动态代理端口** | 绝对地址 `http://127.0.0.1:<port>` 在远端浏览器上会指向**远端自己**，局域网档下预览/缩略图/下载会全部失效（详见 §7.3） |
 
 ### 明确不移植的 Python 历史包袱
 
@@ -233,4 +237,90 @@ HTTP/SSE 与后端交互，不再依赖 Chromium Mojo IPC。
 | `cache/chunk_mb` | 分块大小 = 分块阈值（MB） | 50 |
 | `cache/path` | 缓存根目录；空 = 程序目录旁 `data/cache` | 空 |
 | `cache/limit_mb` | 媒体分块缓存上限（MB），超出按最近访问淘汰整条 | 512 |
+
+---
+
+## 7. 局域网访问档（v35）
+
+### 7.1 定位
+
+Web 模式意味着「凡是能连上这个端口的人，都能操作这个密库界面」。默认只绑
+`127.0.0.1` 时这只等价于「本机进程可操作」，与历史版本一致；但一旦要让手机 /
+另一台电脑访问，就必须补上访问控制，否则等于把端到端加密的密库对整层楼开放。
+
+因此本档的设计原则是：**默认行为零变化，开启是一个显式动作，且开启后必有闸门。**
+
+| 规则 | 说明 |
+|---|---|
+| 默认不变 | `listen/lan` 默认关，仍绑 `127.0.0.1`，无令牌摩擦 |
+| 回环免令牌 | 来源 `127.0.0.1`/`::1` 直接放行 → 本机浏览器、托盘「打开界面」、单实例探测全零改动 |
+| 非回环必须带令牌 | 覆盖静态资源、`/api/*`、SSE、媒体 `/s/ /t/ /d/` 全路径 |
+| fail-closed | 令牌为空时非回环一律拒绝。即使外部把监听地址误配成 `0.0.0.0`，也不会出现无鉴权对外服务 |
+| 本机专属端点 | `/api/app/quit` 与三个原生目录选择端点仅回环可用，远端即使令牌正确也 403 |
+| 令牌呈现 | 首次 `?token=xxx` → 种 `HttpOnly; SameSite=Lax` Cookie → 302 跳到去令牌的干净 URL；同时接受 `Authorization: Bearer` |
+| 常量时间比较 | 两侧先取 SHA-256 再 `subtle.ConstantTimeCompare`，避免长度差泄露令牌长度 |
+| 失败节流 | 同 IP 连续失败 6 次进入 30 秒封禁窗口；回环永不受影响（否则用户会把自己锁在界面外） |
+
+**为什么是「URL 带令牌 + Cookie」而不是账号密码**：本程序没有用户体系，密库
+主密钥始终留在主机，远端浏览器只是界面。令牌的职责是「证明这台设备被授权」，
+不是身份认证 —— 一次性种 Cookie 后可长期使用，发链接即可分享，重新生成能一键
+踢掉所有设备。
+
+### 7.2 令牌存储
+
+| 键 / 文件 | 含义 | 默认 |
+|---|---|---|
+| `listen/lan`（非秘密） | 是否允许局域网访问 | `"0"`（关） |
+| `data/lan_token`（秘密） | 访问令牌密文，`DPAPI:<b64>` / `PLAIN:<b64>` | 首次需要时生成 |
+
+`pkg/secret` 专管「一个文件装一个秘密值」，落盘格式与
+`pkg/storage.BaiduCredStore` 同一约定（`DPAPI:` / `PLAIN:` 前缀 + base64），
+加解密实现由装配层注入（`pkg/*` 不允许 import `internal/platform/win`）。
+**令牌绝不进设置存储** —— `pkg/settings` 顶部明确写着「密码/token 等秘密一律
+不入本存储」。令牌为 16 字节 `crypto/rand` → 32 位 hex。
+
+### 7.3 媒体链路：本档最容易翻车的一环
+
+历史坑（务必记住）：`appstate` 曾把流式解密代理**单独起在
+`127.0.0.1:<动态端口>`**，并把 `proxy.BaseURL()` 这个**绝对地址**拼在
+`entry.URLPath()` 前面返回给前端。本机访问看不出问题，但局域网档下远端浏览器
+会去连**它自己**的 `127.0.0.1` → 预览、缩略图、下载全部失效。
+
+现在的做法：
+
+1. `appstate` 的 `ThumbURL/MediaURL/DownloadURL` 一律返回**相对路径**
+   （`/s/ /t/ /d/`，`Entry.URLPath()` 本来就给的是相对路径）；
+2. `appstate.startProxy` **不再 `Start()` 监听**，只装配 `streaming.Server`
+   并把令牌注册表保留在原处（`Revoke` 语义不变）；
+3. `internal/web` 的 `registerStream` 在 `/s/ /t/ /d/` 上**每请求**取
+   `State.StreamProxy()` 并直接调 `proxy.Handler()`（每请求取一次：连接建立 /
+   锁库 / 换连时 `appstate` 会整体替换代理实例，缓存指针会拿到过期对象）；
+4. 媒体流量因此与其余 API 共用同一端口、同一道闸门，`pkg/streaming` 顶部
+   「代理只监听 127.0.0.1，令牌与解密能力不能暴露给局域网」的约束**天然成立**。
+
+同时删掉了 `web.Server.stream` 字段与死代码 `SetStreaming`（全仓 grep 确认
+从未有调用方，`/s/ /t/ /d/` 因此一直 404，流量实际全走代理端口），以及
+`appstate.Snapshot.ProxyBase` 与前端同名类型字段。
+
+### 7.4 开关不热重载
+
+`Listen` 在启动时确定绑定地址，切换开关**不会**重新监听。语义上：
+
+- `listen/lan` = 已保存的意愿；`web.Server.LanActive()` = 当前进程真实状态；
+- 设置页同时显示两者，不一致时显式提示「需重启程序才会生效」。
+
+这不是「隐藏的无效开关」，而是刻意避免「看似可配但要重启」的展示缺口 ——
+把生效时机如实写在卡片上。
+
+**明确非目标：不做端口可配。** 端口可配同样需要重新监听；而 `7840` 起自动
+顺延的机制已够用，UI 直接显示**实际监听端口**即可。
+
+### 7.5 已知局限（必须在 UI 如实告知）
+
+- 局域网走**明文 HTTP**，令牌与数据在同一网段内可被嗅探 → 家用 WPA2 可接受，
+  公共 Wi-Fi 下不应开启。
+- 拿到令牌即等于拿到本程序全部界面能力（含解密下载），因此默认关闭。
+- 回环免令牌意味着**本机任何进程**都能操作（与历史版本一致，未扩大也未收窄）。
+- 首次绑 `0.0.0.0` 时 Windows 会弹防火墙授权框，拒绝则局域网连不上 ——
+  设置页写明了排查步骤。
 

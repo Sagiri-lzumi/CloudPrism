@@ -1,26 +1,35 @@
-// CloudPrism Go 版入口（v32 起 Web 服务模式）。
+// CloudPrism Go 版入口（v33 起 Web 服务模式为唯一形态）。
 //
-// 架构转变：从 Wails 桌面 app 变「HTTP server + 系统托盘」守护进程。
-// 本文件装配依赖图（NewApp 复用）→ 起 internal/web HTTP server（API+SSE+静态前端）
-// → 起系统托盘（打开浏览器/切换监听档/锁定/退出）→ 阻塞等退出信号。
-//
+// 架构：HTTP server（API+SSE+静态前端+代理流）+ 系统托盘守护进程。
 // 业务逻辑（internal/appstate + internal/bind + pkg/*）完全复用，不依赖 Wails。
 // 前端 Vue 组件逻辑复用，数据层改 fetch/SSE（不依赖 wailsjs runtime）。
+//
+// 启动顺序：依赖图 → 内嵌前端 dist → 按「局域网访问档」设置决定监听地址
+// （关闭=127.0.0.1；开启=0.0.0.0 + 访问令牌闸门，令牌不可用则回退本机）→
+// 端口顺延 + 单实例探测 → 开浏览器 → Serve（goroutine）→ 托盘消息循环（主线程）。
+// 退出：托盘「退出」/ NavRail「退出」/ SIGINT → 统一收尾（停帧循环→
+// Shutdown→ 锁库 → 关日志 → 移除托盘）。
 package main
 
 import (
 	"context"
 	"embed"
+	"fmt"
+	"io"
 	"io/fs"
 	"log"
-	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/platform/win"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/tray"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/web"
-	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/paths"
 )
 
 // assets 内嵌前端产物。Web 模式下 HTTP server 直接 serve 这份 dist。
@@ -28,10 +37,11 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// basePort 默认监听端口；被占用时顺延至 basePort+tryPorts。
+const basePort = 7840
+const tryPorts = 10
+
 func main() {
-	// 构造依赖图（NewApp 复用：数据目录→日志→设置→传输队列→状态→绑定域）。
-	// Wails 模式的 OnStartup 已不适用；holder 用 Background context 即可
-	// （对话框 API 在 Web 模式下由前端 Web 替代，不再需要前台句柄）。
 	app := NewApp()
 	app.holder.Set(context.Background())
 
@@ -43,17 +53,50 @@ func main() {
 
 	// Web server：API + SSE + 静态前端 + 代理流。Emit 收集器在 web.New 内注入。
 	srv := web.New(app.log, app.st, app.holder, app.vault, app.files,
-		app.transfer, app.settings, app.preview, dist)
+		app.transfer, app.settings, app.preview, app.lan, dist)
 
-	// 先同步 Listen 拿实际地址（避免 goroutine 竞态读到空 addr），再开浏览器。
-	// 绑 "::"（IPv6 通配，Windows dual-stack 同时接受 IPv4 + IPv6），让 Edge 访问
-	// localhost/127.0.0.1/::1 都通。局域网暴露问题下轮通过网络档解决。
-	if _, err := srv.Listen("::", 7840); err != nil {
+	// 单实例：若 basePort..basePort+3 已有 CloudPrism 实例（ping 应答），
+	// 直接打开其界面并退出，避免多开。
+	if existing := detectRunningInstance(); existing != "" {
+		app.log.Info("检测到已在运行的实例，打开其界面", "url", existing)
+		_ = win.OpenURL(existing)
+		return
+	}
+
+	// 监听地址与访问令牌由「局域网访问档」设置决定：
+	//   档位关闭（默认）→ 只绑 127.0.0.1，无令牌，行为与历史版本完全一致；
+	//   档位开启       → 绑 0.0.0.0 并启用访问令牌闸门（回环来源仍免令牌）。
+	// 令牌取不到时**回退为仅本机监听**（fail-closed）：宁可局域网访问不了，
+	// 也不能把没有鉴权的界面暴露出去。
+	host, token := "127.0.0.1", ""
+	if app.lan.Enabled() {
+		tok, err := app.lan.Token()
+		if err != nil {
+			app.log.Error("已开启局域网访问，但访问令牌不可用，本次回退为仅本机监听", "err", err)
+		} else {
+			host, token = "0.0.0.0", tok
+		}
+	}
+
+	// 端口从 basePort 起顺延，直到找到一个可绑端口。
+	port, err := listenOn(srv, host, token)
+	if err != nil && host != "127.0.0.1" {
+		// 局域网档绑失败（例如被安全软件拦截）：退一步保证程序仍可用。
+		app.log.Error("局域网监听失败，回退为仅本机监听", "err", err)
+		host, token = "127.0.0.1", ""
+		port, err = listenOn(srv, host, token)
+	}
+	if err != nil {
 		fatal("CloudPrism Web 服务启动失败", err.Error())
 	}
-	// url 用 127.0.0.1（强制 IPv4，避免 Edge 显示 localhost 导致解析问题）。
-	url := "http://127.0.0.1:7840"
-	app.log.Info("CloudPrism Web 就绪", "url", url, "frontend", frontendFingerprint())
+	url := fmt.Sprintf("http://127.0.0.1:%d", port)
+	app.log.Info("CloudPrism Web 就绪", "url", url, "lan", srv.LanActive(),
+		"frontend", frontendFingerprint())
+	if srv.LanActive() {
+		for _, u := range app.lan.ShareURLs(port) {
+			app.log.Info("局域网访问地址（含访问令牌，勿外传）", "url", u)
+		}
+	}
 
 	// 打开默认浏览器到 Web 界面。
 	if err := win.OpenURL(url); err != nil {
@@ -62,23 +105,103 @@ func main() {
 
 	// goroutine 里开始服务（阻塞直到 Shutdown）。
 	go func() {
-		if err := srv.Serve(); err != nil {
+		if err := srv.Serve(); err != nil && err != http.ErrServerClosed {
 			app.log.Error("Web 服务异常退出", "err", err)
 		}
 	}()
 
-	// 系统托盘（后续阶段；当前先阻塞等 Ctrl+C / 信号退出）。
-	app.log.Info("CloudPrism 启动完成", "mode", "web", "url", url)
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	<-sig
+	// 统一退出信号：托盘「退出」/ /api/app/quit / SIGINT。
+	quitCh := make(chan struct{}, 1)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
-	// 退出：锁库收尾 + 关日志。
+	// 后端触发退出（/api/app/quit）与 SIGINT：tray.Run 占主 goroutine，
+	// 无法直接 select srv.QuitCh()/sigCh，故用 goroutine 监听并：
+	//   1) 调 tray.Quit() 让托盘消息循环结束（tray.Run 返回，主 goroutine 释放）；
+	//   2) 经 quitCh 通知主流程继续优雅收尾。
+	go func() {
+		select {
+		case <-srv.QuitCh():
+		case <-sigCh:
+		}
+		tray.Quit()
+		select {
+		case quitCh <- struct{}{}:
+		default:
+		}
+	}()
+
+	// 托盘占主 goroutine（Windows 消息循环要求）；HTTP server 已在 goroutine。
+	// onQuit 直接 signal quitCh → 主流程继续走优雅收尾（tray.Run 返回后）。
+	tray.Run(
+		func() { _ = win.OpenURL(url) }, // 打开界面
+		func() { app.st.Lock() },        // 锁定密库
+		func() {
+			select {
+			case quitCh <- struct{}{}:
+			default:
+			}
+		}, // 退出
+	)
+
+	// 主流程阻塞在 quitCh：托盘「退出」/ /api/app/quit / SIGINT 三路任一触发。
+	<-quitCh
+
+	// 优雅收尾：停 HTTP（带超时）→ 锁库 → 关日志 → 移除托盘。
 	app.log.Info("CloudPrism 退出中")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(ctx)
 	app.st.Lock()
-	app.shutdown(context.Background())
+	tray.Quit()
 	app.log.Info("CloudPrism 退出")
 	app.closeLog()
+}
+
+// detectRunningInstance 探测 basePort..basePort+3 是否已有 CloudPrism 实例：
+// GET /api/app/ping?token=probe（500ms 超时），应答 pong:probe 即认作本程序。
+// 返回其 URL；无则空串。
+func detectRunningInstance() string {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	for p := basePort; p <= basePort+3; p++ {
+		resp, err := client.Post(
+			fmt.Sprintf("http://127.0.0.1:%d/api/app/ping", p),
+			"application/json",
+			strings.NewReader(`{"Token":"probe"}`),
+		)
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if strings.Contains(string(body), "pong:probe") {
+			return fmt.Sprintf("http://127.0.0.1:%d", p)
+		}
+	}
+	return ""
+}
+
+// listenOn 从 basePort 起尝试绑 host（"127.0.0.1" 或 "0.0.0.0"），
+// 最多顺延 tryPorts 次；token 透传给访问闸门（空串 = 纯本机 fail-closed 模式）。
+// 返回实际监听端口。所有端口均不可绑时返回 error。
+func listenOn(srv *web.Server, host string, token string) (int, error) {
+	for p := basePort; p < basePort+tryPorts; p++ {
+		addr, err := srv.Listen(host, p, token)
+		if err != nil {
+			continue // 端口被占（非本程序，detectRunningInstance 已排除本程序），顺延
+		}
+		// addr 形如 127.0.0.1:7840；解析端口。
+		_, portStr, err := net.SplitHostPort(addr)
+		if err != nil {
+			return p, nil
+		}
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return p, nil
+		}
+		return port, nil
+	}
+	return 0, fmt.Errorf("无可绑端口（尝试 %d-%d 均失败）", basePort, basePort+tryPorts-1)
 }
 
 // fatal 报告致命错误并终止进程。
@@ -89,7 +212,3 @@ func fatal(title, text string) {
 }
 
 // frontendFingerprint 定义在 app.go（启动日志核对前端版本用）。
-
-// 防止未使用 import 警告（paths/slog 在 NewApp 内部用，但本文件编译期可能误报）
-var _ = paths.EnsureDataDir
-var _ = slog.Default
