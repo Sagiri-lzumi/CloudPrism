@@ -51,21 +51,41 @@ function Step([string]$msg) { Write-Host "[release] $msg" -ForegroundColor Cyan 
 # 不用 Remove-Item -Recurse：PS 5.1 的实现在深层目录上会反复重枚举，
 # 实测删 WebView2/UDF 这类「目录深 + 小文件极多」的树只有约 1 文件/秒
 # （一次 -Clean 要等数小时）。.NET 的 Directory.Delete(path,true) 直接走
-# Win32，快 1~2 个数量级；遇到只读属性等异常再回退老办法保底。
+# Win32，快 1~2 个数量级。
+#
+# 删不掉时不回退 Remove-Item，而是重试后直接失败退出，原因是实测踩过的坑：
+# 某些环境（含自动化沙箱）把 Remove-Item 接到了「发送到回收站」，遇到被
+# 占用的文件会弹 OnlyErrorDialogs 模态框并**无限等待**——打包脚本就此挂死
+# （实测卡在组装步骤 8 分钟以上，进程 CPU 仅 3 秒 = 纯阻塞，且模态框不会
+# 因非交互主机而自动消失）。失败要响、不要等：把异常原样抛出来定位占用者。
 function Remove-Tree([string]$path) {
     if (-not (Test-Path -LiteralPath $path)) { return }
-    try {
-        $item = Get-Item -LiteralPath $path -Force
-        if ($item.PSIsContainer) {
-            [System.IO.Directory]::Delete($item.FullName, $true)
-        } else {
-            [System.IO.File]::SetAttributes($item.FullName, [System.IO.FileAttributes]::Normal)
-            [System.IO.File]::Delete($item.FullName)
-        }
-    } catch {
-        Write-Host "[release] .NET 删除失败，回退 Remove-Item：$path" -ForegroundColor Yellow
-        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+    $item = Get-Item -LiteralPath $path -Force
+
+    # 先清只读属性：.NET 的 Delete 遇到只读文件会直接抛 IOException，
+    # 旧产物里可能残留只读文件，不清属性就会白白走进重试分支。
+    if ($item.PSIsContainer) {
+        Get-ChildItem -LiteralPath $item.FullName -Recurse -Force -ErrorAction SilentlyContinue |
+            ForEach-Object { try { $_.Attributes = [System.IO.FileAttributes]::Normal } catch { } }
+    } else {
+        try { [System.IO.File]::SetAttributes($item.FullName, [System.IO.FileAttributes]::Normal) } catch { }
     }
+
+    # 占用往往是瞬态的（杀软实时扫描、上一进程刚退出尚未释放句柄），重试有意义
+    $lastErr = $null
+    for ($i = 0; $i -lt 3; $i++) {
+        try {
+            if ($item.PSIsContainer) {
+                [System.IO.Directory]::Delete($item.FullName, $true)
+            } else {
+                [System.IO.File]::Delete($item.FullName)
+            }
+        } catch { $lastErr = $_ }
+        if (-not (Test-Path -LiteralPath $path)) { return }
+        Start-Sleep -Milliseconds 400
+    }
+
+    Fail "旧产物无法删除（多半被其他进程占用）：$path`n  $($lastErr.Exception.Message)"
 }
 
 # ---------- 0. 可选清理（-Clean） ----------
