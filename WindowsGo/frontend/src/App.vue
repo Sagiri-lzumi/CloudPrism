@@ -6,7 +6,7 @@
   输入控件聚焦时全部忽略，避免打断输入。
 -->
 <script setup lang="ts">
-import {onBeforeUnmount, onMounted} from 'vue'
+import {onBeforeUnmount, onMounted, ref} from 'vue'
 import {
   ui,
   start,
@@ -15,7 +15,8 @@ import {
   reloadDir,
   lockVault,
   quitApp,
-  uploadFiles,
+  uploadFromFileList,
+  onDropFiles,
   downloadSel,
   clearRecovery,
 } from './lib/store'
@@ -32,11 +33,20 @@ import Icon from './components/fluent/Icon.vue'
 onMounted(() => {
   start()
   window.addEventListener('keydown', onGlobalKey)
+  // 全窗口拖放热区：任意页面都能拖入上传（见下方「全窗口拖放」段）
+  window.addEventListener('dragenter', onDragEnter)
+  window.addEventListener('dragover', onDragOver)
+  window.addEventListener('dragleave', onDragLeave)
+  window.addEventListener('drop', onDrop)
 })
 
 onBeforeUnmount(() => {
   stop()
   window.removeEventListener('keydown', onGlobalKey)
+  window.removeEventListener('dragenter', onDragEnter)
+  window.removeEventListener('dragover', onDragOver)
+  window.removeEventListener('dragleave', onDragLeave)
+  window.removeEventListener('drop', onDrop)
 })
 
 /* --------------------------------------------------- 页面导航定义 */
@@ -82,9 +92,71 @@ async function pickUpload() {
   input.type = 'file'
   input.multiple = true
   input.onchange = () => {
-    if (input.files?.length) void uploadFiles(Array.from(input.files))
+    if (input.files?.length) void uploadFromFileList(input.files)
   }
   input.click()
+}
+
+/* -------------------------------------- 全窗口拖放（拖入即加密上传） */
+
+// 热区挂在 window 上而非某一页：文件/传输/密库/设置任意页面都能接住，
+// 用户不必先切回文件页。目标目录取 store 的当前浏览目录（ui.remote）。
+//
+// 加密发生在入队后的传输管线里（上传 = 加密 → 分块上传），所以「拖入即加密」
+// 就是「拖入即入队」；这里只负责把浏览器 File 交给队列，并给出明确反馈。
+const dropActive = ref(false)
+const dropBusy = ref(false)
+
+// dragenter/dragleave 会随光标跨过子元素反复触发，用深度计数抵消抖动，
+// 否则遮罩会疯狂闪烁。
+let dragDepth = 0
+
+/** 只对「拖的是文件」做出反应：拖选文本/链接时不得弹上传遮罩。 */
+function isFileDrag(e: DragEvent): boolean {
+  const types = e.dataTransfer?.types
+  // types 是 DOMStringList，各浏览器都支持 includes/length，这里用最保守的写法
+  return !!types && Array.prototype.indexOf.call(types, 'Files') !== -1
+}
+
+function onDragEnter(e: DragEvent) {
+  if (!isFileDrag(e)) return
+  dragDepth++
+  dropActive.value = true
+}
+
+function onDragOver(e: DragEvent) {
+  if (!isFileDrag(e)) return
+  // 必须 preventDefault：否则浏览器不会派发 drop，而是直接打开该文件
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+}
+
+function onDragLeave(e: DragEvent) {
+  if (!isFileDrag(e)) return
+  dragDepth = Math.max(0, dragDepth - 1)
+  // 光标移出窗口时 relatedTarget 为 null（子元素间移动时不为 null），直接收敛
+  if (dragDepth === 0 || e.relatedTarget === null) {
+    dragDepth = 0
+    dropActive.value = false
+  }
+}
+
+async function onDrop(e: DragEvent) {
+  if (!isFileDrag(e)) return
+  e.preventDefault()
+  dragDepth = 0
+  dropActive.value = false
+  const dt = e.dataTransfer
+  if (!dt) return
+  // 读取文件夹可能耗时（大目录要逐层枚举）：先亮「正在读取」态，避免像没反应。
+  // 注意 collectDropped 会在首个 await 之前同步取完所有 entry，因此 dt 在
+  // 事件返回后失效也不影响后续读取。
+  dropBusy.value = true
+  try {
+    await onDropFiles(dt)
+  } finally {
+    dropBusy.value = false
+  }
 }
 </script>
 
@@ -158,6 +230,23 @@ async function pickUpload() {
       :code="ui.pendingRecovery"
       @close="clearRecovery"
     />
+
+    <!-- 全窗口拖放遮罩：拖入文件时铺满视口，明确告知「松开即加密上传」。
+         pointer-events: none 保证它不抢 drop 目标（否则遮罩自己成为落点）。 -->
+    <div v-if="dropActive" class="drop-veil" :class="{busy: dropBusy}">
+      <div class="drop-card">
+        <Icon :name="dropBusy ? 'update' : 'folder-up'" :size="34" />
+        <p class="drop-title">{{ dropBusy ? '正在读取…' : '松开即加密上传' }}</p>
+        <p class="drop-sub">
+          {{
+            dropBusy
+              ? '正在展开文件夹内容，大目录需要一点时间'
+              : '文件与文件夹均可；文件夹会保留目录结构，上传前在本地加密'
+          }}
+        </p>
+        <p v-if="!dropBusy" class="drop-dest">目标位置：{{ ui.remote || '密库根目录' }}</p>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -271,6 +360,73 @@ async function pickUpload() {
   background: color-mix(in srgb, var(--surface) 60%, var(--bg-page));
   border-right: 1px solid var(--divider);
   box-sizing: border-box;
+}
+
+/* ---- 全窗口拖放遮罩 ----
+   铺满视口、压住内容但低于模态框。pointer-events: none 是关键：
+   遮罩若可接收指针事件，它自己就成了 drop 落点，虽然 window 上的 drop
+   监听仍会触发，但 dragover 的 dropEffect 会被遮罩覆盖而丢失「复制」光标。 */
+.drop-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  /* 兼容性优先：不用 color-mix，深浅两主题下都是标准遮罩观感 */
+  background: rgba(0, 0, 0, .28);
+  backdrop-filter: blur(2px);
+  animation: veil-in var(--dur-fast) var(--ease);
+}
+
+.drop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: 380px;
+  padding: 24px 32px;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  color: var(--accent);
+  text-align: center;
+}
+
+.drop-title {
+  margin: 6px 0 0;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.drop-sub {
+  margin: 0;
+  color: var(--text2);
+  font-size: .85rem;
+  line-height: 1.5;
+}
+
+.drop-dest {
+  margin: 2px 0 0;
+  color: var(--accent);
+  font-size: .8rem;
+}
+
+/* 读取文件夹期间让图标持续旋转，表明后台在枚举目录而不是卡住 */
+.drop-veil.busy .drop-card :deep(svg) {
+  animation: veil-spin 1.1s linear infinite;
+}
+
+@keyframes veil-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes veil-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ---- 手机（≤640px）：导航轨竖轨 → 底部横排 TabBar ----

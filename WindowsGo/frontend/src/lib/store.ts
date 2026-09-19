@@ -16,6 +16,7 @@ import {ApiCode, App, Files, Preview, Settings, Transfer, Vault, unwrap} from '.
 import * as evt from './events'
 import {applyThemeIndex} from './theme'
 import {showError, showInfo, showSuccess} from './toast'
+import {collectDropped, collectFromFileList, type UploadItem} from './upload'
 
 export type PageId = 'files' | 'transfers' | 'vaults' | 'settings'
 
@@ -161,13 +162,6 @@ function onLocked() {
   showInfo('密库已锁定')
 }
 
-/** st:files-dropped（保留防御性处理；Web 模式拖放走浏览器原生 onDropFiles）。 */
-function onDropped(paths: unknown) {
-  const list = paths as string[]
-  if (!Array.isArray(list) || list.length === 0) return
-  void uploadFiles(list as unknown as File[])
-}
-
 /* ------------------------------------------------------------ 事件订阅（SSE） */
 
 let eventSource: EventSource | null = null
@@ -216,7 +210,6 @@ export function start() {
     }
   })
   eventSource.addEventListener(evt.EvtLocked, () => onLocked())
-  eventSource.addEventListener(evt.EvtDropped, (ev) => onDropped(JSON.parse(ev.data as string)))
   if (!pollTimer) pollTimer = setInterval(pollTick, POLL_MS)
   void boot()
 }
@@ -423,20 +416,37 @@ export function navigate(p: PageId) {
 /** 选择并上传（工具栏/拖放/右键共用；remoteDir 缺省为当前浏览目录）。
  *  注意：上传/下载结束后**不再**强制跳转传输页 —— 进度由底部 TransferBar
  *  展示，用户想细看再点「详情」。批次收敛后由 onFrame 静默刷新当前目录。 */
-export async function uploadFiles(files: File[] | FileList, remoteDir: string = ui.remote) {
-  const arr = Array.from(files)
-  if (!arr.length) return
+export async function uploadFiles(items: UploadItem[], remoteDir: string = ui.remote) {
+  if (!items.length) {
+    showInfo('没有可上传的文件')
+    return
+  }
   try {
-    await Transfer.Upload(arr, remoteDir)
-    showInfo(`已加入上传队列：${arr.length} 项`)
+    // 加密发生在入队后的传输管线里（上传 = 加密 → 分块上传），
+    // 因此「拖入即加密」在此处只是把文件交给队列，不需要额外步骤。
+    await Transfer.Upload(items, remoteDir)
+    const dirs = new Set(items.map((it) => it.rel).filter((r) => r.includes('/')))
+    const scope = dirs.size ? `（含文件夹，保留目录结构）` : ''
+    showInfo(`已加入加密上传队列：${items.length} 个文件${scope}`)
   } catch (e) {
     showError('上传失败：' + unwrap(e).message)
   }
 }
 
-/** 浏览器拖放（DataTransfer.files → File[]）。 */
-export async function onDropFiles(files: FileList | File[]) {
-  void uploadFiles(Array.from(files))
+/** 全窗口拖放入口：DataTransfer → 条目列表（文件夹递归展开）→ 上传。 */
+export async function onDropFiles(dt: DataTransfer) {
+  const items = await collectDropped(dt)
+  await uploadFiles(items)
+}
+
+/** 文件 / 文件夹选择器入口：`<input type=file>` 的结果收集后上传。
+ *  目录选择器（webkitdirectory）会填 webkitRelativePath，故同样保留结构。 */
+export async function uploadFromFileList(
+  files: FileList | File[],
+  remoteDir: string = ui.remote,
+) {
+  const items: UploadItem[] = collectFromFileList(files)
+  await uploadFiles(items, remoteDir)
 }
 
 /** 取当前生效的操作集合：多选 >1 用 multi，否则回退主条目。 */

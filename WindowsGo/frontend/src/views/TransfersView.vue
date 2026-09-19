@@ -9,7 +9,7 @@
 import {computed, reactive, ref} from 'vue'
 import type {appstate} from '../types/appstate'
 import {Transfer, Vault, unwrap} from '../lib/api'
-import {ui, navigate, uploadFiles} from '../lib/store'
+import {ui, navigate, uploadFromFileList} from '../lib/store'
 import {fmtSize, fmtPct} from '../lib/format'
 import {showError, showInfo, showSuccess, showWarning} from '../lib/toast'
 import Button from '../components/fluent/Button.vue'
@@ -97,7 +97,7 @@ async function pickUpload() {
   input.type = 'file'
   input.multiple = true
   input.onchange = () => {
-    if (input.files?.length) void uploadFiles(Array.from(input.files))
+    if (input.files?.length) void uploadFromFileList(input.files)
   }
   input.click()
 }

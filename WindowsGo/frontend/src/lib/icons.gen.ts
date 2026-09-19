@@ -1,7 +1,7 @@
 // 本文件由 scripts/gen-icons.mjs 自动生成，请勿手工编辑。
 //
-// 图标来源：fluent 176 个 / lucide 59 个；
-// 按源码实际引用裁剪后仅打包 fluent 7 个 / lucide 55 个。
+// 图标来源：fluent 176 个 / lucide 60 个；
+// 按源码实际引用裁剪后仅打包 fluent 7 个 / lucide 56 个。
 //
 // 重新生成：npm --prefix WindowsGo/frontend run gen:icons
 // 新增图标后若忘记重新生成，运行期会回退成 question 并在 dev 控制台告警。
@@ -36,41 +36,42 @@ import l16 from '../assets/lucide/eye.svg?raw'
 import l17 from '../assets/lucide/feedback.svg?raw'
 import l18 from '../assets/lucide/fingerprint.svg?raw'
 import l19 from '../assets/lucide/folder.svg?raw'
-import l20 from '../assets/lucide/folder_add.svg?raw'
-import l21 from '../assets/lucide/font_size.svg?raw'
-import l22 from '../assets/lucide/globe.svg?raw'
-import l23 from '../assets/lucide/headphone.svg?raw'
-import l24 from '../assets/lucide/help.svg?raw'
-import l25 from '../assets/lucide/hide.svg?raw'
-import l26 from '../assets/lucide/history.svg?raw'
-import l27 from '../assets/lucide/home.svg?raw'
-import l28 from '../assets/lucide/info.svg?raw'
-import l29 from '../assets/lucide/library.svg?raw'
-import l30 from '../assets/lucide/list.svg?raw'
-import l31 from '../assets/lucide/lock.svg?raw'
-import l32 from '../assets/lucide/lock_open.svg?raw'
-import l33 from '../assets/lucide/more.svg?raw'
-import l34 from '../assets/lucide/mute.svg?raw'
-import l35 from '../assets/lucide/palette.svg?raw'
-import l36 from '../assets/lucide/pause.svg?raw'
-import l37 from '../assets/lucide/photo.svg?raw'
-import l38 from '../assets/lucide/pie_single.svg?raw'
-import l39 from '../assets/lucide/play.svg?raw'
-import l40 from '../assets/lucide/power_button.svg?raw'
-import l41 from '../assets/lucide/qrcode.svg?raw'
-import l42 from '../assets/lucide/save.svg?raw'
-import l43 from '../assets/lucide/send.svg?raw'
-import l44 from '../assets/lucide/setting.svg?raw'
-import l45 from '../assets/lucide/settings.svg?raw'
-import l46 from '../assets/lucide/share.svg?raw'
-import l47 from '../assets/lucide/speed_high.svg?raw'
-import l48 from '../assets/lucide/stop_watch.svg?raw'
-import l49 from '../assets/lucide/sync.svg?raw'
-import l50 from '../assets/lucide/tiles.svg?raw'
-import l51 from '../assets/lucide/up.svg?raw'
-import l52 from '../assets/lucide/update.svg?raw'
-import l53 from '../assets/lucide/video.svg?raw'
-import l54 from '../assets/lucide/volume.svg?raw'
+import l20 from '../assets/lucide/folder-up.svg?raw'
+import l21 from '../assets/lucide/folder_add.svg?raw'
+import l22 from '../assets/lucide/font_size.svg?raw'
+import l23 from '../assets/lucide/globe.svg?raw'
+import l24 from '../assets/lucide/headphone.svg?raw'
+import l25 from '../assets/lucide/help.svg?raw'
+import l26 from '../assets/lucide/hide.svg?raw'
+import l27 from '../assets/lucide/history.svg?raw'
+import l28 from '../assets/lucide/home.svg?raw'
+import l29 from '../assets/lucide/info.svg?raw'
+import l30 from '../assets/lucide/library.svg?raw'
+import l31 from '../assets/lucide/list.svg?raw'
+import l32 from '../assets/lucide/lock.svg?raw'
+import l33 from '../assets/lucide/lock_open.svg?raw'
+import l34 from '../assets/lucide/more.svg?raw'
+import l35 from '../assets/lucide/mute.svg?raw'
+import l36 from '../assets/lucide/palette.svg?raw'
+import l37 from '../assets/lucide/pause.svg?raw'
+import l38 from '../assets/lucide/photo.svg?raw'
+import l39 from '../assets/lucide/pie_single.svg?raw'
+import l40 from '../assets/lucide/play.svg?raw'
+import l41 from '../assets/lucide/power_button.svg?raw'
+import l42 from '../assets/lucide/qrcode.svg?raw'
+import l43 from '../assets/lucide/save.svg?raw'
+import l44 from '../assets/lucide/send.svg?raw'
+import l45 from '../assets/lucide/setting.svg?raw'
+import l46 from '../assets/lucide/settings.svg?raw'
+import l47 from '../assets/lucide/share.svg?raw'
+import l48 from '../assets/lucide/speed_high.svg?raw'
+import l49 from '../assets/lucide/stop_watch.svg?raw'
+import l50 from '../assets/lucide/sync.svg?raw'
+import l51 from '../assets/lucide/tiles.svg?raw'
+import l52 from '../assets/lucide/up.svg?raw'
+import l53 from '../assets/lucide/update.svg?raw'
+import l54 from '../assets/lucide/video.svg?raw'
+import l55 from '../assets/lucide/volume.svg?raw'
 
 /** 线性图标名集合（Lucide 源，Icon.vue 据此自动切 stroke 渲染）。 */
 export const STROKE_NAMES: ReadonlySet<string> = Object.freeze(
@@ -95,6 +96,7 @@ export const STROKE_NAMES: ReadonlySet<string> = Object.freeze(
     "feedback",
     "fingerprint",
     "folder",
+    "folder-up",
     "folder_add",
     "font_size",
     "globe",
@@ -162,41 +164,42 @@ export const ICONS: Readonly<Record<string, string>> = Object.freeze({
   "feedback": l17,
   "fingerprint": l18,
   "folder": l19,
-  "folder_add": l20,
-  "font_size": l21,
-  "globe": l22,
-  "headphone": l23,
-  "help": l24,
-  "hide": l25,
-  "history": l26,
-  "home": l27,
-  "info": l28,
-  "library": l29,
-  "list": l30,
-  "lock": l31,
-  "lock_open": l32,
-  "more": l33,
-  "mute": l34,
-  "palette": l35,
-  "pause": l36,
-  "photo": l37,
-  "pie_single": l38,
-  "play": l39,
-  "power_button": l40,
-  "qrcode": l41,
-  "save": l42,
-  "send": l43,
-  "setting": l44,
-  "settings": l45,
-  "share": l46,
-  "speed_high": l47,
-  "stop_watch": l48,
-  "sync": l49,
-  "tiles": l50,
-  "up": l51,
-  "update": l52,
-  "video": l53,
-  "volume": l54,
+  "folder-up": l20,
+  "folder_add": l21,
+  "font_size": l22,
+  "globe": l23,
+  "headphone": l24,
+  "help": l25,
+  "hide": l26,
+  "history": l27,
+  "home": l28,
+  "info": l29,
+  "library": l30,
+  "list": l31,
+  "lock": l32,
+  "lock_open": l33,
+  "more": l34,
+  "mute": l35,
+  "palette": l36,
+  "pause": l37,
+  "photo": l38,
+  "pie_single": l39,
+  "play": l40,
+  "power_button": l41,
+  "qrcode": l42,
+  "save": l43,
+  "send": l44,
+  "setting": l45,
+  "settings": l46,
+  "share": l47,
+  "speed_high": l48,
+  "stop_watch": l49,
+  "sync": l50,
+  "tiles": l51,
+  "up": l52,
+  "update": l53,
+  "video": l54,
+  "volume": l55,
 })
 
 /** 图标名（供 Icon.vue 的 name prop 静态校验）。 */

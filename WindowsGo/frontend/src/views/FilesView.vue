@@ -21,14 +21,13 @@ import {
   newFolder,
   renameSel,
   deleteSel,
-  uploadFiles,
+  uploadFromFileList,
   navigate,
   toggleMulti,
   rangeMulti,
   clearMulti,
   copyEntryName,
   copyEntryPath,
-  onDropFiles,
 } from '../lib/store'
 import {fmtSize} from '../lib/format'
 import {kindOf, KIND_ICON} from '../lib/media'
@@ -154,9 +153,32 @@ function splitEnd() {
 
 // 菜单 items 是**唯一事实源**：右键、列表行 ⋯、网格卡 ⋯ 三条入口
 // 全部经由 openCtx → ctxItems 取同一份内容，保证任意入口弹出的菜单一致。
+//
+// 分发按 **id** 而非数组下标：早期实现用下标分发，加一项就得同步改两处
+// 数字（分隔线还占下标），极易错位。现在 id 是唯一契约，插项不影响既有动作。
 // 目标类型优先级：multi=多选批量（目标 ∈ 当前多选集且 >1 项）→
 //   blank=无目标（空白区）→ dir=目录 → file=文件
+
+/** 菜单动作全集。新增动作只需在此加一项 + 在 onCtx 加一个 case。 */
+type CtxAction =
+  | 'open'
+  | 'preview'
+  | 'newFolder'
+  | 'newSubFolder'
+  | 'uploadFiles'
+  | 'uploadFolder'
+  | 'download'
+  | 'export'
+  | 'copyName'
+  | 'copyPath'
+  | 'rename'
+  | 'delete'
+  | 'refresh'
+  | 'clearMulti'
+
 interface CtxItem {
+  /** 动作标识；纯分隔线无 id */
+  id?: CtxAction
   label?: string
   icon?: string
   divider?: boolean
@@ -176,55 +198,64 @@ const ctxMulti = computed(
     ui.multi.some((x) => x.remote === ctxEntry.value!.remote),
 )
 
-/** 构建目标上下文菜单项（索引含分隔线占位，onCtx 按下标分发，两者必须同步改）。 */
+/** 构建目标上下文菜单项（分隔线不参与分发，动作靠 id 匹配）。 */
 function buildCtxItems(): CtxItem[] {
   const e = ctxEntry.value
   if (ctxMulti.value && e) {
-    // 多选批量菜单：精简版（动词领先 + 数量括号；onCtx 索引 0/1/3/4 不变）
+    // 多选批量菜单：精简版（动词领先 + 数量括号）
     const n = ui.multi.length
     return [
-      {label: `下载 (${n})`, icon: 'download'},
-      {label: `导出 (${n})`, icon: 'share'},
+      {id: 'download', label: `下载 (${n})`, icon: 'download'},
+      {id: 'export', label: `导出 (${n})`, icon: 'share'},
       {divider: true},
-      {label: `删除 (${n})`, icon: 'delete', danger: true},
-      {label: '取消选择', icon: 'cancel'},
+      {id: 'delete', label: `删除 (${n})`, icon: 'delete', danger: true},
+      {id: 'clearMulti', label: '取消选择', icon: 'cancel'},
     ]
   }
   if (!e)
     return [
-      {label: '新建文件夹', icon: 'folder_add'},
-      {label: '上传文件…', icon: 'send'},
+      {id: 'newFolder', label: '新建文件夹', icon: 'folder_add'},
+      {id: 'uploadFiles', label: '上传文件…', icon: 'send'},
+      {id: 'uploadFolder', label: '上传文件夹…', icon: 'folder-up'},
       {divider: true},
-      {label: '刷新', icon: 'update'},
+      {id: 'refresh', label: '刷新', icon: 'update'},
     ]
   if (e.isDir)
     return [
-      {label: '打开', icon: 'folder'},
-      {label: '新建子文件夹', icon: 'folder_add'},
-      {label: '上传', icon: 'send'},
+      {id: 'open', label: '打开', icon: 'folder'},
+      {id: 'newSubFolder', label: '新建子文件夹', icon: 'folder_add'},
+      {id: 'uploadFiles', label: '上传文件', icon: 'send'},
+      {id: 'uploadFolder', label: '上传文件夹', icon: 'folder-up'},
       {divider: true},
-      {label: '下载', icon: 'download'},
+      {id: 'download', label: '下载', icon: 'download'},
       {divider: true},
-      {label: '复制路径', icon: 'copy'},
+      {id: 'copyPath', label: '复制路径', icon: 'copy'},
       {divider: true},
-      {label: '重命名', icon: 'edit'},
-      {label: '删除', icon: 'delete', danger: true},
+      {id: 'rename', label: '重命名', icon: 'edit'},
+      {id: 'delete', label: '删除', icon: 'delete', danger: true},
     ]
   return [
-    {label: '打开预览', icon: 'photo'},
-    {label: '下载', icon: 'download'},
-    {label: '导出', icon: 'share'},
+    {id: 'preview', label: '打开预览', icon: 'photo'},
+    {id: 'download', label: '下载', icon: 'download'},
+    {id: 'export', label: '导出', icon: 'share'},
     {divider: true},
-    {label: '复制名称', icon: 'copy'},
-    {label: '复制路径', icon: 'copy'},
+    {id: 'copyName', label: '复制名称', icon: 'copy'},
+    {id: 'copyPath', label: '复制路径', icon: 'copy'},
     {divider: true},
-    {label: '重命名', icon: 'edit'},
-    {label: '删除', icon: 'delete', danger: true},
+    {id: 'rename', label: '重命名', icon: 'edit'},
+    {id: 'delete', label: '删除', icon: 'delete', danger: true},
   ]
 }
 
 // 响应式取用单一事实源；任何入口改动 ctxEntry 都会经此重算菜单内容
 const ctxItems = computed<CtxItem[]>(() => buildCtxItems())
+
+/** RoundMenu 以数组下标回调（其 items 契约不含 id，且被 ComboBoxCard 共用），
+ *  这里做一次下标→动作 id 的适配；分隔线不会被点中，故取不到 id 时静默忽略。 */
+function onCtxIndex(i: number) {
+  const id = ctxItems.value[i]?.id
+  if (id) void onCtx(id)
+}
 
 function openCtx(ev: MouseEvent, entry?: appstate.FileEntry | null) {
   // 所有入口都显式内联传参：GridCard @ctx="openCtx($event, e)"、列表行
@@ -244,62 +275,79 @@ function openCtx(ev: MouseEvent, entry?: appstate.FileEntry | null) {
   ctxOpen.value = true
 }
 
-// 菜单项分发：索引 = ctxItems 数组下标（分隔线占位占下标，勿按视觉顺序改）
-//   批量 0下载 1导出 3删除 4取消；空白 0新建 1上传 3刷新
-//   目录 0打开 1建子夹 2上传 4下载 6复制路径 8重命名 9删除
-//   文件 0预览 1下载 2导出 4复制名 5复制路径 7重命名 8删除
-async function onCtx(i: number) {
+// 菜单动作分发：按 id 匹配（分隔线无 id，不参与分发）
+async function onCtx(action: CtxAction) {
   const e = ctxEntry.value
-  // —— 多选批量菜单 ——
-  if (ctxMulti.value && e) {
-    if (i === 0) void downloadSel() // 批量下载
-    else if (i === 1) void exportSel() // 批量导出
-    else if (i === 3) openMsg('delete') // 批量删除（危险确认）
-    else if (i === 4) clearMulti() // 取消选择
-    return
+  switch (action) {
+    case 'open':
+      if (e) enterDir(e)
+      return
+    case 'preview':
+      if (e) selectEntry(e) // 已在集合/主条目，预览即打开
+      return
+    case 'newFolder':
+      openMsg('newFolder')
+      return
+    case 'newSubFolder':
+      openMsg('newSubFolder')
+      return
+    case 'uploadFiles':
+      await pickUpload(e?.remote ?? ui.remote, false)
+      return
+    case 'uploadFolder':
+      await pickUpload(e?.remote ?? ui.remote, true)
+      return
+    case 'download':
+      void downloadSel()
+      return
+    case 'export':
+      void exportSel()
+      return
+    case 'copyName':
+      if (e) copyEntryName(e)
+      return
+    case 'copyPath':
+      if (e) copyEntryPath(e)
+      return
+    case 'rename':
+      openMsg('rename')
+      return
+    case 'delete':
+      openMsg('delete')
+      return
+    case 'refresh':
+      reloadDir()
+      return
+    case 'clearMulti':
+      clearMulti()
+      return
   }
-  if (!e) {
-    if (i === 0) openMsg('newFolder')
-    else if (i === 1) void pickUpload()
-    else if (i === 3) reloadDir()
-    return
-  }
-  if (e.isDir) {
-    if (i === 0) enterDir(e)
-    else if (i === 1) openMsg('newSubFolder')
-    else if (i === 2) void pickUpload(e.remote)
-    else if (i === 4) void downloadSel()
-    else if (i === 6) void copyEntryPath(e)
-    else if (i === 8) openMsg('rename')
-    else if (i === 9) openMsg('delete')
-    return
-  }
-  if (i === 0) {
-    selectEntry(e) // 已在集合/主条目，预览即打开
-  } else if (i === 1) void downloadSel()
-  else if (i === 2) void exportSel()
-  else if (i === 4) void copyEntryName(e)
-  else if (i === 5) void copyEntryPath(e)
-  else if (i === 7) openMsg('rename')
-  else if (i === 8) openMsg('delete')
 }
 
 /* ------------------------------------------------- 上传对话框（浏览器 file input） */
 
-async function pickUpload(remoteDir: string = ui.remote) {
+/**
+ * 打开系统选择器并上传。
+ *
+ * @param remoteDir 目标远端目录
+ * @param directory true = 选文件夹（webkitdirectory，目录结构随 webkitRelativePath
+ *   一路带到后端）；false = 选多个文件（平铺到当前目录）
+ *
+ * 用 `document.createElement('input')` 而非模板里的隐藏 input：每次点击都是
+ * 全新元素，天然规避「选同一批文件不触发 change」的老问题。
+ */
+async function pickUpload(remoteDir: string = ui.remote, directory = false) {
   const input = document.createElement('input')
   input.type = 'file'
   input.multiple = true
+  if (directory) {
+    // 非标准但 Chromium 全系支持；Web 模式下界面始终跑在浏览器里，可用
+    input.webkitdirectory = true
+  }
   input.onchange = () => {
-    if (input.files?.length) void uploadFiles(Array.from(input.files), remoteDir)
+    if (input.files?.length) void uploadFromFileList(input.files, remoteDir)
   }
   input.click()
-}
-
-/** 浏览器原生拖放：拖入文件 → 上传到当前浏览目录。 */
-function onViewDrop(ev: DragEvent) {
-  const files = ev.dataTransfer?.files
-  if (files && files.length) void onDropFiles(files)
 }
 
 /* ------------------------------------------------- 模态对话框队列 */
@@ -367,13 +415,9 @@ function confirmDlg(payload: string | boolean) {
 </script>
 
 <template>
-  <!-- 浏览器原生拖放上传：文件拖到文件页即入队上传当前目录 -->
-  <div
-    ref="viewEl"
-    class="files-view"
-    @dragover.prevent
-    @drop.prevent="onViewDrop"
-  >
+  <!-- 拖放不再由本页接管：App.vue 上有全窗口热区（任意页面都可拖入上传），
+       此处只负责渲染。重复绑定会导致同一次 drop 触发两次上传。 -->
+  <div ref="viewEl" class="files-view">
     <!-- 未连接：引导回密库页（锁库事件后兜底） -->
     <div v-if="!connected" class="empty-state">
       <Icon name="folder" :size="40" class="dim" />
@@ -396,6 +440,12 @@ function confirmDlg(payload: string | boolean) {
         <span class="sep" />
         <Button iconOnly icon="folder_add" title="新建文件夹" @click="openMsg('newFolder')" />
         <Button iconOnly icon="send" title="上传文件到当前目录" @click="pickUpload()" />
+        <Button
+          iconOnly
+          icon="folder-up"
+          title="上传文件夹到当前目录（保留目录结构）"
+          @click="pickUpload(ui.remote, true)"
+        />
         <Button
           iconOnly
           icon="download"
@@ -598,7 +648,7 @@ function confirmDlg(payload: string | boolean) {
       :position="ctxPos"
       :anchor="ctxAnchor"
       :items="ctxItems"
-      @select="onCtx"
+      @select="onCtxIndex"
       @close="ctxOpen = false"
     />
 

@@ -27,7 +27,12 @@ import (
 // bindTaskCallbacks 装配队列终态回调（进程生命周期一次）。
 func (s *State) bindTaskCallbacks() {
 	q := s.cfg.Queue
-	q.OnTaskFinished = func(_ *transfer.Task, _ bool) {
+	q.OnTaskFinished = func(t *transfer.Task, _ bool) {
+		// 浏览器上传的暂存明文：任务终态才可回收（入队是异步的，handler
+		// 返回时任务还没读文件）。下载任务落盘的是用户文件，前缀判据不命中。
+		if t.Direction == transfer.DirUpload {
+			reapStagedUpload(t.LocalPath)
+		}
 		s.persistPending() // 终态即落续传记录（锁库打断由 Lock 补拍）
 		s.refreshResumeCount()
 	}

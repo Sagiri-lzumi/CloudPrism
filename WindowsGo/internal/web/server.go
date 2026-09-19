@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -601,12 +602,22 @@ func (s *Server) wrapJSON(h func(*http.Request, []byte) (any, error)) http.Handl
 	}
 }
 
-// handleUpload 处理浏览器 multipart 上传：文件先落临时目录（保留原始
-// 文件名），再经 appstate.UploadPaths 入传输队列（复用续传/重试/进度）。
+// handleUpload 处理浏览器 multipart 上传：文件先落暂存目录（保留原始
+// 文件名与**相对路径**），再经 appstate.UploadPaths 入传输队列。
 //
-// 浏览器 FormData 用 <input type=file> 或拖放产生 File 对象，与 Wails 时代
-// 的本地路径语义不同：此处理器把 multipart 内容 staging 成临时文件作为
-// 任务 LocalPath，上传完成后由任务清理逻辑删除。
+// 浏览器 FormData 用 <input type=file> / webkitdirectory 或拖放产生 File 对象，
+// 与 Wails 时代的本地路径语义不同：此处理器把 multipart 内容 staging 成
+// 暂存文件作为任务 LocalPath。**文件夹上传靠 paths 字段还原目录结构**——
+// paths 与 files 是同序平行数组，第 i 项是第 i 个文件的相对路径（如
+// `photos/2026/a.jpg`）。暂存目录按该相对路径镜像成嵌套目录，于是
+// appstate.UploadPaths 走目录展开路径时 walk 出的 rel 就是真实相对路径，
+// 逐段加密与逐层 Mkdir 全部复用既有实现。
+//
+// 不传 paths（旧客户端/脚本调用）时退化为按文件名平铺，与历史行为一致。
+//
+// 暂存文件的回收**不在这里做**：任务入队是异步的，本函数返回时任务尚未读取
+// 本地文件。回收由任务终态回调 appstate.reapStagedUpload 负责；只有入队失败
+// 的分支才由本函数兜底清理。
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// 32MB 内存在内存，更大自动溢出到系统临时目录。
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
@@ -620,26 +631,53 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 相对路径清单（与 files 同序）。解析失败直接拒绝，避免静默丢目录结构。
+	var rels []string
+	if raw := r.FormValue("paths"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &rels); err != nil {
+			s.writeJSON(w, nil, fmt.Errorf("解析上传路径清单失败: %w", err))
+			return
+		}
+	}
+
 	tmpBase, _ := paths.TempDir(true)
 	if tmpBase == "" {
 		tmpBase = os.TempDir()
 	}
 	// 每个文件一个独立子目录，避免同名文件互相覆盖。
-	stageDir, err := os.MkdirTemp(tmpBase, "cp-upload-*")
+	stageDir, err := os.MkdirTemp(tmpBase, appstate.StagedUploadDirPrefix)
 	if err != nil {
 		s.writeJSON(w, nil, fmt.Errorf("创建暂存目录失败: %w", err))
 		return
 	}
-	defer os.RemoveAll(stageDir)
+	// 入队成功前由本函数兜底清理；成功后回收权移交任务终态回调。
+	enqueued := false
+	defer func() {
+		if !enqueued {
+			_ = os.RemoveAll(stageDir)
+		}
+	}()
 
 	localPaths := make([]string, 0, len(fileHeaders))
-	for _, fh := range fileHeaders {
+	for i, fh := range fileHeaders {
+		rel, err := resolveStageRel(rels, i, fh.Filename)
+		if err != nil {
+			s.writeJSON(w, nil, fmt.Errorf("上传路径非法 %q: %w", rels[i], err))
+			return
+		}
+
+		dstPath := filepath.Join(stageDir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+			s.writeJSON(w, nil, fmt.Errorf("创建暂存子目录失败: %w", err))
+			return
+		}
+
 		src, err := fh.Open()
 		if err != nil {
 			s.writeJSON(w, nil, fmt.Errorf("打开上传文件失败: %w", err))
 			return
 		}
-		dst, err := os.Create(filepath.Join(stageDir, filepath.Base(filepath.Clean(fh.Filename))))
+		dst, err := os.Create(dstPath)
 		if err != nil {
 			src.Close()
 			s.writeJSON(w, nil, fmt.Errorf("创建暂存文件失败: %w", err))
@@ -656,14 +694,93 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			s.writeJSON(w, nil, fmt.Errorf("关闭暂存文件失败: %w", err))
 			return
 		}
-		localPaths = append(localPaths, dst.Name())
+		localPaths = append(localPaths, dstPath)
 	}
 
-	if err := s.st.UploadPaths(r.Context(), localPaths, remoteDir); err != nil {
+	// 交整棵暂存根目录：UploadPaths 会 walk 出每个文件的真实相对路径，
+	// 逐段加密后按层 Mkdir 到远端，目录结构因此完整保留。
+	if err := s.st.UploadPaths(r.Context(), []string{stageDir}, remoteDir); err != nil {
 		s.writeJSON(w, nil, bind.Wrap(err))
 		return
 	}
+	enqueued = true
 	s.writeJSON(w, map[string]any{"enqueued": len(localPaths)}, nil)
+}
+
+// resolveStageRel 得出第 i 个上传文件的暂存相对路径。
+//
+// 优先取 paths[i]（清洗后）；该下标不存在、或清洗后为空串（客户端没上报路径信息）
+// 时退回 multipart 里的原始文件名，等价于平铺上传。文件名同样过 filepath.Base，
+// 防止构造出带目录分隔符的文件名越出暂存根。
+//
+// 非法路径返回错误：调用方整体拒绝本次上传，不做「丢掉这段路径继续传」的降级，
+// 否则用户会得到一棵缺目录的密库树却毫无提示。
+func resolveStageRel(rels []string, i int, filename string) (string, error) {
+	rel := ""
+	if i < len(rels) {
+		cleaned, err := sanitizeUploadRel(rels[i])
+		if err != nil {
+			return "", err
+		}
+		rel = cleaned
+	}
+	if rel != "" {
+		return rel, nil
+	}
+	base := filepath.Base(filepath.Clean(filename))
+	if base == "." || base == string(filepath.Separator) || base == "" {
+		return "", errors.New("无法从文件名推出可用名称")
+	}
+	return base, nil
+}
+
+// sanitizeUploadRel 清洗浏览器上报的相对路径。
+//
+// 这是**不可信输入**：可能来自被篡改的客户端，可能含 `..`、绝对路径、盘符、
+// NUL。任何一段非法都返回错误，由调用方整体拒绝本次上传——宁可报错也不能
+// 静默丢掉目录结构（那正是 v38 前的老毛病）。
+//
+// 返回 POSIX 风格（/ 分隔）的相对路径；空串表示"无可用的路径信息"，调用方
+// 按文件名平铺处理。
+func sanitizeUploadRel(raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	if strings.ContainsRune(raw, 0) {
+		return "", errors.New("路径含 NUL")
+	}
+	// 统一分隔符后再判定，防止 Windows 风格反斜杠绕过检查
+	p := strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")
+	if p == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(p, "/") {
+		return "", errors.New("路径为绝对路径")
+	}
+	// 盘符（C:/…）与 UNC（//server/share）都以「根」起始，一律拒绝
+	if len(p) >= 2 && p[1] == ':' {
+		return "", errors.New("路径含盘符")
+	}
+
+	segs := make([]string, 0, 8)
+	for _, seg := range strings.Split(p, "/") {
+		switch seg {
+		case "", ".":
+			continue // 冗余段直接丢弃
+		case "..":
+			return "", errors.New("路径含上跳段 ..")
+		}
+		segs = append(segs, seg)
+	}
+	if len(segs) == 0 {
+		return "", nil
+	}
+	clean := path.Clean(strings.Join(segs, "/"))
+	// path.Clean 之后仍以 .. 开头说明构造异常，兜底再拦一次
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", errors.New("路径清洗后仍为上跳路径")
+	}
+	return clean, nil
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, v any, err error) {

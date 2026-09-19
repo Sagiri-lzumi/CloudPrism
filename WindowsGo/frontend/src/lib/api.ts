@@ -8,6 +8,8 @@
 // Go 侧错误约定见 internal/bind/apierr.go：Code 常量 + {code,message} JSON。
 
 import type {appstate} from '../types/appstate'
+// 仅取类型（type-only import），避免与 upload.ts 形成运行期循环
+import type {UploadItem} from './upload'
 
 /** ApiCode 全集（镜像 internal/bind/apierr.go）。 */
 export const ApiCode = {
@@ -156,11 +158,15 @@ export const Settings = {
 
 /** Transfer 域：上传/下载/任务管理。 */
 export const Transfer = {
-  // 浏览器 multipart 流上传：files 为浏览器 File 对象（input/drag-drop），
-  // 后端 staging 成临时文件后入传输队列。
-  Upload: async (files: File[], remoteDir: string): Promise<void> => {
+  // 浏览器 multipart 流上传：items 为「File + 相对路径」（见 lib/upload.ts），
+  // 后端按 paths 把 staging 镜像成嵌套目录再入队，从而保留文件夹结构。
+  //
+  // paths 与 files 是**同序平行数组**：第 i 个文件的相对路径即 paths[i]。
+  // 旧客户端不带 paths 时后端退化为按文件名平铺上传。
+  Upload: async (items: UploadItem[], remoteDir: string): Promise<void> => {
     const fd = new FormData()
-    for (const f of files) fd.append('files', f)
+    for (const it of items) fd.append('files', it.file, it.file.name)
+    fd.append('paths', JSON.stringify(items.map((it) => it.rel)))
     fd.append('remoteDir', remoteDir)
     const resp = await fetch('/api/transfer/upload', {method: 'POST', body: fd})
     if (!resp.ok) {
