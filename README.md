@@ -42,9 +42,9 @@ exe，内嵌本地 HTTP 服务与系统托盘，界面在系统默认浏览器�
 
 ## 使用
 
-从 [Release](https://github.com/Sagiri-lzumi/CloudPrism/tree/main/Release) 取
-`CloudPrismGo.exe` 运行。程序常驻系统托盘，并自动打开浏览器指向本地服务
-（默认端口 7840，被占用时顺延）。
+运行 `CloudPrismGo.exe` 即可。程序常驻系统托盘，并自动打开浏览器指向本地服务
+（默认端口 7840，被占用时顺延）。发布包按 `Release/<日期>-<版本>-Go-dir/` 与
+`...-Go-exe/` 两种形态产出：目录版含 exe、随包资源与使用说明，单文件版只有 exe。
 
 首次运行进入初始化向导：选择存储位置 → 测试连接 → 设置主密码 → 选择是否
 加密文件名。其中两项在建库后不可更改：
