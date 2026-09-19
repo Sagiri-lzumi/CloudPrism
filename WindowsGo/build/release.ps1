@@ -2,7 +2,7 @@
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File build\release.ps1 [-Tag <tag>] [-Clean] [-SkipNpmCi] [-SkipFrontend]
-# 默认 Tag=v1；产物落在仓库根 Release\<yyyy-MM-dd>-<Tag>-Go-{dir,exe}/：
+# 默认 Tag=v1.1（当前是 1 的大版本，标签形态 v1.1/v1.2…）；产物落在仓库根 Release\<yyyy-MM-dd>-<Tag>-Go-{dir,exe}/：
 #   -dir：CloudPrismGo.exe + assets\{icon.ico,baidu_guide.md}（随包资源，
 #         便于日后替换/增补）+ data\tmp\（运行期临时数据目录占位）+
 #         README-便携版.txt
@@ -24,7 +24,7 @@
 # 全部路径用 $PSScriptRoot 相对定位（不写任何绝对路径，便于仓库整体搬迁）；
 # 任一步失败立即退出并给出非 0 码。
 param(
-    [string]$Tag = "v1",
+    [string]$Tag = "v1.1",
     [switch]$Clean,
     [switch]$SkipNpmCi,
     [switch]$SkipFrontend
