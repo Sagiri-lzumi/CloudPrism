@@ -195,7 +195,7 @@ const dlg = reactive({open: false})
 
     <!-- 空态 -->
     <div v-else class="empty-state">
-      <Icon name="sync" :size="40" class="dim" />
+      <span class="plate"><Icon name="sync" :size="32" /></span>
       <p class="lead">暂无任务</p>
       <p class="sub">上传/下载任务会显示在这里，可重试失败项或在结束后清空列表。</p>
       <Button v-if="connected" icon="send" @click="pickUpload">上传文件…</Button>

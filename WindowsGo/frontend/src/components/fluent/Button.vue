@@ -1,6 +1,6 @@
 <!--
-  Button.vue —— 通用按钮（qfw PushButton 对应物）。
-  视觉：32px 高、radius 4、hover 半透明黑/白 8%、pressed 12%；
+  Button.vue —— 通用按钮（次级操作）。
+  视觉：32px 高、radius 6、hover 半透明文字色 7%、pressed 12% 并轻微内缩；
   图标+文字弹性布局，disabled 透明度 40%。颜色全部走 theme.css token。
 -->
 <script setup lang="ts">
@@ -53,17 +53,18 @@ const emit = defineEmits<{click: [e: MouseEvent]}>()
   border: none;
   border-radius: var(--radius-ctrl);
   cursor: default; /* 桌面应用语义：不用手型 */
-  transition: background var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 
 .cp-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
+/* 按压：底色加深 + 轻微内缩，给出"按下去了"的触感 */
 .cp-btn:active:not(:disabled) {
   background: color-mix(in srgb, var(--text) 12%, transparent);
-  transform: scale(0.98);
-  transition: transform var(--dur-fast) var(--ease);
+  transform: scale(.96);
 }
 
 .cp-btn:disabled {

@@ -420,7 +420,7 @@ function confirmDlg(payload: string | boolean) {
   <div ref="viewEl" class="files-view">
     <!-- 未连接：引导回密库页（锁库事件后兜底） -->
     <div v-if="!connected" class="empty-state">
-      <Icon name="folder" :size="40" class="dim" />
+      <span class="plate"><Icon name="folder" :size="32" /></span>
       <p class="lead">尚未连接密库</p>
       <p class="sub">连接后即可浏览文件。锁库或断开后浏览状态会重置。</p>
       <Button icon="certificate" @click="navigate('vaults')">前往连接</Button>
@@ -862,19 +862,20 @@ function confirmDlg(payload: string | boolean) {
   color: var(--heading);
 }
 
-/* 网格：固定 110px 卡片自动换行（v15 加宽以容纳 header band） */
+/* 网格：固定列宽自动换行。列宽是缩略图承托面的唯一宽度来源
+   （GridCard 用 width:100% 填满列，不另写尺寸）。 */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 110px);
+  grid-template-columns: repeat(auto-fill, 118px);
   justify-content: center;
-  gap: 6px;
+  gap: 10px;
 }
 
-/* 手机：卡片放大到 148px（110px 在手机上过小，缩略图难辨认） */
+/* 手机：列宽放大到 156px（118px 在手机上过小，缩略图难辨认） */
 @media (max-width: 640px) {
   .grid {
-    grid-template-columns: repeat(auto-fill, 148px);
-    gap: 8px;
+    grid-template-columns: repeat(auto-fill, 156px);
+    gap: 10px;
   }
 }
 

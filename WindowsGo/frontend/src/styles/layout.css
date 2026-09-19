@@ -12,7 +12,12 @@
   grid-template-columns: 48px 1fr; /* NavRail | 内容 */
   grid-template-rows: 1fr auto auto; /* 内容 | TransferBar(可无) | StatusBar */
   height: 100%;
-  background: var(--bg-page);
+  /* 底色 + 环境光渐层（Mica 近似的极淡纵深；渐层不覆盖到子面板，
+     卡片仍是实色面，保证文字对比度不受影响） */
+  background-color: var(--bg-page);
+  background-image: var(--bg-ambient);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
 }
 
 .app-nav {
@@ -66,8 +71,13 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  min-height: 44px;
-  padding: 0 8px;
+  min-height: 46px;
+  padding: 0 10px;
+  /* 半透底 + 毛玻璃：内容滚动到其下方时能透出一点点，形成层次；
+     backdrop-filter 不可用时退化为实色底（@supports 在 theme.css 里兜了
+     --nav-bg，这里用 surface 半透即可，缺省也是可读的） */
+  background: var(--nav-bg);
+  backdrop-filter: blur(12px) saturate(1.4);
   border-bottom: 1px solid var(--divider);
 }
 
@@ -104,8 +114,23 @@
   text-align: center;
 }
 
+/* 图标圆盘：空态的主视觉。极淡的品牌色圆底 + 描边，
+   让"什么都没有"的页面也有一个视觉落点，而不是一行灰字漂在白板上。 */
+.empty-state .plate {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 2px;
+  color: var(--accent);
+  background: var(--accent-softer);
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
+  border-radius: var(--radius-round);
+}
+
 .empty-state .lead {
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   font-weight: 600;
   color: var(--heading);
 }
@@ -114,7 +139,7 @@
   font-size: 0.857rem;
   color: var(--text2);
   max-width: 420px;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 /* ---- 视图切换动画容器（base.css 的 .page-* 配合） ---- */

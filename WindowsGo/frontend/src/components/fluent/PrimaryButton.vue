@@ -1,7 +1,7 @@
 <!--
-  PrimaryButton.vue —— 主操作按钮（qfw PrimaryPushButton 对应物）。
-  视觉：accent 品牌蓝底白字，hover 微提亮、pressed 压暗并缩放 0.98；
-  与 Button 共用 32px/radius 4 尺寸体系，语义上只用于每个页面的主操作。
+  PrimaryButton.vue —— 主操作按钮。
+  视觉：品牌色渐变底 + 白字 + 品牌色投影（唯一"浮"起来的控件，用于每页主操作，
+  与次级按钮的扁平观感拉开层级）；按压轻微内缩。尺寸与 Button 同体系（32px）。
 -->
 <script setup lang="ts">
 import Icon from './Icon.vue'
@@ -46,25 +46,31 @@ const emit = defineEmits<{click: [e: MouseEvent]}>()
   font-size: 0.857rem;
   font-weight: 600;
   color: var(--text-on-accent);
-  background: var(--accent);
+  background: var(--accent-grad);
   border: none;
   border-radius: var(--radius-ctrl);
   cursor: default;
-  transition: background var(--dur-fast) var(--ease);
+  /* 品牌色投影：主操作的"重量"来源 */
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .12), 0 6px 16px -6px var(--accent-ring);
+  transition: filter var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 
+/* hover/active 用 filter 提亮/压暗：渐变底无法靠改 background 颜色实现，
+   覆盖 filter 才能让整套渐变一起变化 */
 .cp-btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
+  filter: brightness(1.07);
 }
 
 .cp-btn-primary:active:not(:disabled) {
-  background: var(--accent-pressed);
-  transform: scale(0.98);
-  transition: transform var(--dur-fast) var(--ease);
+  filter: brightness(.94);
+  transform: scale(.96);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .16);
 }
 
 .cp-btn-primary:disabled {
-  opacity: 0.4;
+  opacity: .4;
+  box-shadow: none;
 }
 
 .icon-only {

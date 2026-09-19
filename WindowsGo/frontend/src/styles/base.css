@@ -16,8 +16,9 @@
 
 html {
     font-size: var(--font-size);
-    /* 文字渲染口径：ClearType 类亚像素在部分 WebView2 版本会糊，
-       灰度抗锯齿观感更接近 Qt 原生（Qt 默认字体平滑） */
+    /* color-scheme 由 theme.css 按明暗切换：让原生滚动条、表单控件、
+       <input type=date> 之类的浏览器内建 UI 也跟随主题，否则深色下会突兀发白 */
+    /* 文字渲染口径：灰度抗锯齿的观感比亚像素更接近桌面原生渲染 */
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
 }
@@ -36,6 +37,8 @@ body {
     background: var(--bg-page);
     user-select: none; /* 桌面应用语义：文本可选处显式放开（.selectable） */
     cursor: default;
+    /* 触摸端点击高亮在桌面式 UI 里只会造成脏闪 */
+    -webkit-tap-highlight-color: transparent;
 }
 
 ::selection {
@@ -43,16 +46,18 @@ body {
     color: inherit;
 }
 
-/* ---- 文本层级（qfw：Title 28 / Subtitle 20 / Body 14 / Caption 12） ---- */
+/* ---- 文本层级（Title 28 / Subtitle 20 / Body 14 / Caption 12） ---- */
 .title {
     font-size: 2rem;    /* 28px @14 */
     font-weight: 600;
+    letter-spacing: -.01em; /* 大字号收紧字距，避免松散感 */
     color: var(--heading);
 }
 
 .subtitle {
     font-size: 1.43rem; /* 20px @14 */
     font-weight: 600;
+    letter-spacing: -.005em;
     color: var(--heading);
 }
 
@@ -99,26 +104,26 @@ a:hover,
     cursor: text;
 }
 
-/* ---- 滚动条（Fluent 细条：悬停才亮、宽度 10px） ---- */
+/* ---- 滚动条（细条：悬停才亮，圆头，不抢占视觉） ---- */
 ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
 }
 
 ::-webkit-scrollbar-thumb {
     background: transparent;
-    border-radius: 5px;
-    border: 2px solid transparent;
+    border-radius: var(--radius-round);
+    border: 3px solid transparent;
     background-clip: content-box;
 }
 
 :hover::-webkit-scrollbar-thumb,
 ::-webkit-scrollbar-thumb:hover {
-    background-color: color-mix(in srgb, var(--muted) 55%, transparent);
+    background-color: color-mix(in srgb, var(--muted) 45%, transparent);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background-color: color-mix(in srgb, var(--muted) 75%, transparent);
+    background-color: color-mix(in srgb, var(--muted) 70%, transparent);
 }
 
 ::-webkit-scrollbar-track {
@@ -136,10 +141,10 @@ a:hover,
 
 :focus-visible {
     outline: 2px solid var(--accent);
-    outline-offset: 1px;
+    outline-offset: 2px;
 }
 
-/* ---- 动效基元（计划第 5 条：统一 180ms 缓动） ---- */
+/* ---- 动效基元（统一时长/缓动，见 theme.css 的 --dur / --ease*） ---- */
 .fade-enter-active,
 .fade-leave-active {
     transition: opacity var(--dur) var(--ease);
@@ -150,9 +155,10 @@ a:hover,
     opacity: 0;
 }
 
-/* 页面切换：opacity + 轻微上移 */
+/* 页面切换：opacity + 轻微上移（位移量克制，避免"整页弹跳"的廉价感） */
 .page-enter-active {
-    transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+    transition: opacity var(--dur) var(--ease-emphasized),
+        transform var(--dur) var(--ease-emphasized);
 }
 
 .page-leave-active {
@@ -161,17 +167,17 @@ a:hover,
 
 .page-enter-from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(6px);
 }
 
 .page-leave-to {
     opacity: 0;
 }
 
-/* 弹出层入场（菜单/对话框）：淡入 + 缩放 0.96→1 */
+/* 弹出层入场（菜单/对话框）：淡入 + 轻微放大，缓动带一点"落定"感 */
 .pop-enter-active {
-    transition: opacity var(--dur-fast) var(--ease),
-        transform var(--dur-fast) var(--ease);
+    transition: opacity var(--dur-fast) var(--ease-emphasized),
+        transform var(--dur-fast) var(--ease-emphasized);
 }
 
 .pop-leave-active {
@@ -180,7 +186,7 @@ a:hover,
 
 .pop-enter-from {
     opacity: 0;
-    transform: scale(.96);
+    transform: scale(.965) translateY(-3px);
 }
 
 .pop-leave-to {

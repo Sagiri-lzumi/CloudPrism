@@ -59,11 +59,13 @@ const connecting = computed(() => ui.opBusy && !connected.value)
   display: flex;
   align-items: center;
   gap: 14px;
-  height: 28px; /* 低调细条：连接详情已移入密库页，不再占用底部视觉 */
+  height: 30px; /* 低调细条：连接详情已移入密库页，不再占用底部视觉 */
   padding: 0 12px;
   font-size: 0.786rem;
   color: var(--text2);
-  background: var(--bg-page);
+  /* 与工具栏/导航轨同族的半透毛玻璃底，整窗层次统一 */
+  background: var(--nav-bg);
+  backdrop-filter: blur(12px) saturate(1.4);
   border-top: 1px solid var(--divider);
   user-select: none;
 }
@@ -78,8 +80,8 @@ const connecting = computed(() => ui.opBusy && !connected.value)
 
 .state .dot {
   flex: none;
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--text2);
   opacity: 0.5;
@@ -92,11 +94,13 @@ const connecting = computed(() => ui.opBusy && !connected.value)
 .state.on .dot {
   background: var(--ok);
   opacity: 1;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent);
 }
 
 .state.busy .dot {
   background: var(--warn);
   opacity: 1;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent);
   animation: status-pulse 1.4s var(--ease) infinite;
 }
 

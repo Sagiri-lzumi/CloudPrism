@@ -274,26 +274,32 @@ async function onDrop(e: DragEvent) {
   color: var(--text2);
   background: transparent;
   border: none;
-  border-radius: 6px;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  border-radius: var(--radius-ctrl);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 
-/* 选中态左侧 2px 指示条（VS Code/ActivityBar 语义） */
+/* 选中态左侧指示条（ActivityBar 语义）：圆头短条 + 淡辉光 */
 .nav-btn.on::before {
   content: "";
   position: absolute;
   left: -4px;
   top: 50%;
   transform: translateY(-50%);
-  width: 2px;
-  height: 22px;
-  border-radius: 2px;
+  width: 3px;
+  height: 20px;
+  border-radius: var(--radius-round);
   background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-ring);
 }
 
 .nav-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   color: var(--text);
+}
+
+.nav-btn:active:not(:disabled) {
+  transform: scale(.94);
 }
 
 .nav-btn:disabled {
@@ -352,12 +358,14 @@ async function onDrop(e: DragEvent) {
   height: 100%;
 }
 
-/* app-nav 底内边距收束（layout.css 已定义网格轨道） */
+/* app-nav 底内边距收束（layout.css 已定义网格轨道）
+   半透底 + 毛玻璃：环境光渐层从下方透出，导航轨不再是"一块死板的灰条" */
 .app-nav {
   display: flex;
   flex-direction: column;
   padding: 8px 4px;
-  background: color-mix(in srgb, var(--surface) 60%, var(--bg-page));
+  background: var(--nav-bg);
+  backdrop-filter: blur(16px) saturate(1.5);
   border-right: 1px solid var(--divider);
   box-sizing: border-box;
 }
