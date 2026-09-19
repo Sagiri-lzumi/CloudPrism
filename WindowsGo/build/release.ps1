@@ -3,7 +3,7 @@
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File build\release.ps1 [-Tag <tag>] [-Clean] [-SkipNpmCi] [-SkipFrontend]
 # 默认 Tag=v1.1（当前是 1 的大版本，标签形态 v1.1/v1.2…）；产物落在仓库根 Release\<yyyy-MM-dd>-<Tag>-Go-{dir,exe}/：
-#   -dir：CloudPrismGo.exe + assets\{icon.ico,baidu_guide.md}（随包资源，
+#   -dir：CloudPrismGo.exe + assets\{icon.ico,self_test_guide.md,baidu_guide.md}（随包资源，
 #         便于日后替换/增补）+ data\tmp\（运行期临时数据目录占位）+
 #         README-便携版.txt
 #   -exe：仅 CloudPrismGo.exe（Web 模式，浏览器打开界面，无需 WebView2）
@@ -166,9 +166,10 @@ $assetsDir = Join-Path $dirOut "assets"
 New-Item -ItemType Directory -Force -Path $assetsDir | Out-Null
 Copy-Item (Join-Path $root "build\windows\icon.ico") (Join-Path $assetsDir "icon.ico")
 
-# 随包交付文档（源 = WindowsGo\docs；用户自测指南 + 视觉对照表 + 百度凭证教程）
-# v38 起百度教程收归本仓库（原在已移除的 Python 参考实现 assets/ 下）
-foreach ($doc in @("self_test_guide.md", "ui_polish_v1.md", "baidu_guide.md")) {
+# 随包交付文档（源 = WindowsGo\docs；用户自测指南 + 百度凭证教程）
+# 只放**面向用户**的文档。内部工程文档（如 ui_polish_v1.md 这类对照/审计表）
+# 不进包 —— 它们讲的是实现沿革与内部取舍，对使用者没有意义。
+foreach ($doc in @("self_test_guide.md", "baidu_guide.md")) {
     $docSrc = Join-Path $root "docs\$doc"
     if (Test-Path $docSrc) {
         Copy-Item $docSrc (Join-Path $assetsDir $doc)
@@ -218,7 +219,6 @@ CloudPrism 便携版（Go 版）说明
     assets\icon.ico         应用图标（随包资源）
     assets\baidu_guide.md   百度网盘开放平台凭证获取教程
     assets\self_test_guide.md 加密链路自测指南（新建库→上传→验证解密→续传）
-    assets\ui_polish_v1.md  UI 视觉对照表（对照 Python 版，含待确认项）
     data\                   运行期数据（日志/缓存/临时文件，可整目录删除，
                             不影响云端密库数据）
     data\logs\              日志（cloudprism.log，排障用）
