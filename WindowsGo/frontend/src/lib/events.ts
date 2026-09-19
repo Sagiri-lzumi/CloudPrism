@@ -21,7 +21,7 @@ export const EvtOpError = 'st:op-error'
 /** EvtLocked 自动/手动锁库广播：载荷 null，前端立即回引导态。 */
 export const EvtLocked = 'st:locked'
 
-/** 全部事件名集合（用于 Wails 侧事件订阅去重等场景）。 */
+/** 全部事件名集合（用于事件订阅去重等场景）。 */
 export const ALL_EVENTS = [
   EvtFrame,
   EvtDropped,

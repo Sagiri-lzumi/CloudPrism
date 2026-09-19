@@ -1,10 +1,10 @@
 // Package transfer 提供并发传输任务队列：并发调度、聚合进度与自动重试。
 //
-// 职责对齐 WindowsPy/src/cloudprism/core/transfer_queue.py 的 TransferQueue，
+// 职责对齐参考实现 transfer_queue.py 的 TransferQueue，
 // 但去掉 Qt 信号与线程模型：Python 靠 QThread + 信号事件循环，Go 端任务
 // 执行体由调用方注入的 Runner 提供（绑定层组合 pipeline 加密/解密管线），
 // 队列只负责状态机——补位调度、自动重试、取消、脏续传校验与字节级聚合
-// 进度——并通过回调把事件推给上层（Wails 绑定层转发到前端）。
+// 进度——并通过回调把事件推给上层（由 web 帧循环转发到前端）。
 //
 // 状态机与 Python 逐态对齐：waiting / running / done / failed / cancelled；
 // 失败自动重试 1 次（AUTO_RETRIES），仍失败置 failed 供界面手动重试。
@@ -151,7 +151,7 @@ type Queue struct {
 	MaxWorkers    int // 单任务并行加密核数
 	MaxConcurrent int
 
-	// 回调（均锁外调用，可 nil）：事件转发到 Wails 绑定层。
+	// 回调（均锁外调用，可 nil）：事件转发到上层（web 帧循环）。
 	OnTaskProgress func(*Task)
 	OnTaskFinished func(*Task, bool) // success 表示成功与否
 	OnAggregate    func(done, total int64)

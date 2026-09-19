@@ -4,7 +4,7 @@
 //
 // 本包是 CloudPrism Go 端唯一允许直接触碰 Windows API 的位置：上层 pkg/*
 // 只依赖这里导出的语义化函数，从而保证 pkg/ 保持 GUI 与平台无关，
-// 未来 Android 端可整体抽出复用（对照 WindowsPy 把 DPAPI 直接写在
+// 未来 Android 端可整体抽出复用（对照参考实现把 DPAPI 直接写在
 // storage/baidu_backend.py 里、无法跨平台复用的做法）。
 //
 // 全部实现走纯 syscall，不依赖 cgo —— 本机无 gcc，且 CGO_ENABLED=0

@@ -17,7 +17,7 @@ import (
 )
 
 // 百度网盘开放平台（XPAN）接口常量。
-// 对照 WindowsPy/src/cloudprism/storage/baidu_backend.py:34-49
+// 对照参考实现 baidu_backend.py:34-49
 const (
 	baiduOAuthTokenURL = "https://openapi.baidu.com/oauth/2.0/token"
 	baiduXpanBase      = "https://pan.baidu.com/rest/2.0/xpan"

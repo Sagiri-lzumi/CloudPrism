@@ -849,7 +849,7 @@ const version = ref('读取运行时信息…')
           <span class="set-icon"><Icon name="cloud" :size="17" /></span>
           <div class="set-body">
             <div class="set-title">CloudPrism</div>
-            <div class="set-content">文件加密云端保险库（WindowsGo 版：Wails v2 + WebView2）</div>
+            <div class="set-content">文件加密云端保险库（Go 内嵌 Web 服务版）</div>
           </div>
         </div>
         <div class="about-note">{{ version }}</div>

@@ -394,8 +394,8 @@ func decryptCpenc(t *testing.T, password string, data []byte) (*cryptox.Header, 
 // decryptRange 复刻 Python 侧 Decryptor.decrypt_range_to_bytes 的随机访问语义：
 // 按 16 字节块对齐拉取密文超集，从 firstBlock 起解密，再切片到 [start, end)。
 //
-// 对照 WindowsPy/src/cloudprism/core/decryptor.py:99-134
-// 与 WindowsPy/src/cloudprism/crypto/stream_cipher.py:50-81
+// 对照参考实现 decryptor.py:99-134
+// 与参考实现 stream_cipher.py:50-81
 func decryptRange(t *testing.T, password string, data []byte, hdr *cryptox.Header, start, end int64) []byte {
 	t.Helper()
 

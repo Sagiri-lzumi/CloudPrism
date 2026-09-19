@@ -19,7 +19,7 @@ import (
 // 刻意不使用 math/big —— 流式路径上每 16 字节就要算一次计数器，
 // big.Int 的堆分配与通用运算会直接成为吞吐瓶颈。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/stream_cipher.py:41-48
+// 对照参考实现 stream_cipher.py:41-48
 func CounterBlockAt(iv [protocol.IVLen]byte, blockIdx uint64) [protocol.IVLen]byte {
 	var counter [protocol.IVLen]byte
 
@@ -59,7 +59,7 @@ type CTR struct {
 // 文件头的 SaltLen/IVLen 是从文件里读出来的，被篡改时长度可能不为 16，
 // 因此这两个检查是真实可达的防线，不是形式主义的断言。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/stream_cipher.py:32-39
+// 对照参考实现 stream_cipher.py:32-39
 func NewCTR(key, iv []byte) (*CTR, error) {
 	if len(key) != protocol.KeyLen {
 		return nil, fmt.Errorf("密钥长度必须为 %d 字节，实为 %d", protocol.KeyLen, len(key))
@@ -83,7 +83,7 @@ func NewCTR(key, iv []byte) (*CTR, error) {
 // 主要供测试与 Python 端 _keystream_block 对拍；业务路径应直接用 XORAt，
 // 后者走标准库 CTR 的 AES-NI 汇编实现，比逐块 ECB 更快。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/stream_cipher.py:41-48
+// 对照参考实现 stream_cipher.py:41-48
 func (c *CTR) KeystreamBlock(blockIdx uint64) [protocol.BlockSize]byte {
 	var out [protocol.BlockSize]byte
 	counter := CounterBlockAt(c.iv, blockIdx)
@@ -103,7 +103,7 @@ func (c *CTR) KeystreamBlock(blockIdx uint64) [protocol.BlockSize]byte {
 //
 // dst 容量小于 src 长度时 panic：这是调用方的分配错误，静默截断会产出损坏文件。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/stream_cipher.py:71-76
+// 对照参考实现 stream_cipher.py:71-76
 func (c *CTR) XORAt(dst, src []byte, blockIdx uint64) {
 	if len(dst) < len(src) {
 		panic(fmt.Sprintf("cryptox: dst 容量 %d 小于 src 长度 %d", len(dst), len(src)))

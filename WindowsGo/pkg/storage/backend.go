@@ -8,7 +8,7 @@
 // 路径约定（两端一致）：所有路径参数均为相对后端根目录的相对路径，以 `/`
 // 分隔，不含协议前缀，首尾斜杠可有可无。
 //
-// 对照 WindowsPy/src/cloudprism/storage/backend.py
+// 对照参考实现 backend.py
 package storage
 
 import "context"

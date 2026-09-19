@@ -1,7 +1,7 @@
 // Package pipeline 提供加密上传 / 下载解密的数据管线。
 //
 // 与 Python 端 Encryptor / Decryptor / RangeMapper 的职责对齐
-// （WindowsPy/src/cloudprism/core/encryptor.py、core/decryptor.py、
+// （参考实现 encryptor.py、core/decryptor.py、
 // streaming/range_mapper.py），但并发模型不同：Go 端用 goroutine +
 // ReaderAt/WriterAt 原地并行，无进程池开销，分段粒度收紧到 ShardAlign
 // （1MiB），峰值内存 = workers × 1MiB。
@@ -10,7 +10,7 @@
 // （文件头不参与计数，两端一致），分片偏移恒为 16 的倍数，各片独立从块首
 // 生成密钥流，并行产物与单核顺序产物逐字节一致 —— CTR 无完整性校验，
 // 任何错位都静默损坏数据，对齐纪律由 shard.go 的常量与测试共同钉死
-// （WindowsPy 端曾因分段未对齐静默损坏 ≥8MiB 非对齐文件，阶段 0 已修）。
+// （参考实现曾因分段未对齐静默损坏 ≥8MiB 非对齐文件，阶段 0 已修）。
 //
 // 本包不感知后端类型（Backend 接口只搬运字节），不做上传调度（归传输
 // 队列），只回答一个问题：给定输入，产出逐字节正确的密文/明文。

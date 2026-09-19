@@ -52,7 +52,7 @@ import (
 // 密钥由主密码 + Salt 派生；GCM 认证标签即密码校验器 ——
 // 标签通过 = 密码正确，失败 = 密码错误。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/vault.py:1-40
+// 对照参考实现 vault.py:1-40
 const (
 	// vaultPrefixLen 是明文前缀长度：12 + 4 + 16 + 16 + 16 + 4 = 68。
 	vaultPrefixLen = 68
@@ -91,7 +91,7 @@ var (
 
 // VaultMetadata 是 Vault Marker 的明文前缀字段 + 内部明文中的配置。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/vault.py:55-66
+// 对照参考实现 vault.py:55-66
 type VaultMetadata struct {
 	Version         uint32 // Marker 格式版本（1 / 2 / 3）
 	VaultID         []byte // 16 字节 UUID
@@ -108,7 +108,7 @@ type VaultMetadata struct {
 // recoveryBlob 非空时以「recoveryLen + blob」追加到尾部（v3）；
 // 传 nil 或空切片则一个字节都不追加，与 Python 侧 `if recovery_blob:` 的判断一致。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/vault.py:75-125
+// 对照参考实现 vault.py:75-125
 func CreateMarker(meta VaultMetadata, masterPassword string, recoveryBlob []byte) ([]byte, error) {
 	if err := meta.validate(); err != nil {
 		return nil, err
@@ -175,12 +175,12 @@ func CreateMarker(meta VaultMetadata, masterPassword string, recoveryBlob []byte
 //   - ErrVaultPassword GCM 标签校验失败 = **主密码错误**
 //
 // 上层（vault manager / bind 层）通常把三者统一呈现为「主密码错误」以对齐
-// WindowsPy 的行为；区分它们只是为了让日志可诊断。
+// 参考实现的行为；区分它们只是为了让日志可诊断。
 //
 // 返回的 VaultID / Salt / IV 都是新分配的副本，不别名入参：调用方传进来的
 // 很可能是池化缓冲或马上要被复用的下载缓冲，持有子切片会读到脏数据。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/vault.py:127-220
+// 对照参考实现 vault.py:127-220
 func VerifyMarker(fileBytes []byte, masterPassword string) (*VaultMetadata, error) {
 	if len(fileBytes) < vaultPrefixLen {
 		return nil, ErrVaultShort
@@ -270,7 +270,7 @@ func VerifyMarker(fileBytes []byte, masterPassword string) (*VaultMetadata, erro
 // 用户离线保存的「恢复码」就是 recoverySecret 的 Base32 形式（16 字符），
 // 凭它可在忘记主密码时解出主密码；服务端零参与。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/vault.py:226-239
+// 对照参考实现 vault.py:226-239
 func BuildRecoveryBlob(recoverySecret []byte, masterPassword string) ([]byte, error) {
 	var rsalt [protocol.SaltLen]byte
 	if _, err := rand.Read(rsalt[:]); err != nil {
@@ -299,7 +299,7 @@ func buildRecoveryBlobWithSalt(recoverySecret []byte, masterPassword string, rsa
 // ErrRecoveryFormat（长度不足 / 明文非 UTF-8）与 ErrRecoverySecret（GCM 标签失败）。
 // 界面上两者都应显示为「恢复码无效」，不透露具体原因。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/vault.py:241-265
+// 对照参考实现 vault.py:241-265
 func DecryptRecoveryBlob(blob, recoverySecret []byte) (string, error) {
 	// 最短合法布局：rsalt(16) + 至少 1 字节密文 + Tag(16) = 33
 	if len(blob) < protocol.SaltLen+protocol.GCMTagLen+1 {
@@ -333,7 +333,7 @@ func DecryptRecoveryBlob(blob, recoverySecret []byte) (string, error) {
 // 布局异常（长度不足 / PayloadLen 越界）时返回 (原文件, nil)，与 Python 一致 ——
 // 宁可不动，也不要产出一个被截断的 Marker。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/vault.py:267-286
+// 对照参考实现 vault.py:267-286
 func SplitRecoveryTail(fileBytes []byte) (head, tail []byte) {
 	// 前缀本身已含 4 字节 PayloadLen，这里再多要 4 字节是照抄 Python 的
 	// `len < prefix_len + 4` 守卫；对真实 Marker（载荷至少 16 字节）永不触发，
@@ -355,7 +355,7 @@ func SplitRecoveryTail(fileBytes []byte) (head, tail []byte) {
 // 16 字节随机数：VaultID 在两端都只作为不透明标识符存储与回读，从不解析 UUID
 // 的版本位与变体位，因此不必刻意构造 v4 格式。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/vault.py:288-312
+// 对照参考实现 vault.py:288-312
 func GenerateMetadata(filenameEnc bool, name string) (VaultMetadata, error) {
 	meta := VaultMetadata{
 		Version:         protocol.VaultVersion,

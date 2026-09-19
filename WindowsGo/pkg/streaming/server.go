@@ -1,7 +1,7 @@
 // Package streaming 提供令牌化流式解密代理：本地 HTTP 服务把加密容器
-// 按 Range 请求解密为明文流，喂给 WebView2 的 <video>/<audio>，明文不落盘。
+// 按 Range 请求解密为明文流，喂给浏览器的 <video>/<audio>，明文不落盘。
 //
-// 对照 WindowsPy/src/cloudprism/streaming/proxy_server.py，差异与动机：
+// 对照参考实现 proxy_server.py，差异与动机：
 //
 //   - 端点令牌化：/s/{token}/{display-name} 与 /t/{token}，替代 Python 的
 //     裸路径 GET —— 密文路径不暴露、展示名供 MIME 推断、注册时一次性

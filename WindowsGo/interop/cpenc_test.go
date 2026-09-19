@@ -14,7 +14,7 @@ import (
 
 // parallelThreshold 是 Python 侧走多核并行加密的最小文件尺寸。
 //
-// 对照 WindowsPy/src/cloudprism/core/encryptor.py:100 的
+// 对照参考实现 encryptor.py:100 的
 // `if max_workers <= 1 or total < 4 * 1024 * 1024`。写死在这里是为了
 // 断言 hash_only 夹具确实踩在并行分支上 —— 若 Python 侧调高了门槛而
 // 夹具没重生成，这些用例会退化成「又测了一遍单核路径」，静默失去价值。

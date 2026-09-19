@@ -8,13 +8,11 @@ import (
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/protocol"
 )
 
-// 黄金向量由 WindowsPy 端真实运行 Kdf 后打印得到，不是 Go 侧自查拼装。
-// 复现方式（仓库根目录）：
+// 黄金向量由参考实现（Python，v38 已移除）真实运行 Kdf 后打印得到，
+// 不是 Go 侧自查拼装。原始复现命令已随参考实现一并消失，因此这些常量是
+// **冻结值**：只能核对、不可重算，改动即视为密文格式不兼容。
 //
-//	cd WindowsPy
-//	..\.venv\Scripts\python.exe -c "from cloudprism.crypto.kdf import Kdf; print(Kdf.derive_key('test', bytes(16)).hex())"
-//
-// 第一组同时是 WindowsPy/tests/vectors.py:13-16 里既有的跨端向量，
+// 第一组同时是参考实现 tests/vectors.py:13-16 里既有的跨端向量，
 // 也是阶段 2 spike S4 已经验证通过的那一条。
 const (
 	// pw="test"，salt=0x00*16

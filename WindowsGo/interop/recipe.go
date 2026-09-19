@@ -1,6 +1,6 @@
 // 明文确定性配方：跨包（interop / pipeline 等）复用。
 //
-// 契约源头是 WindowsPy/interop/gen_vectors.py:156-166 的 recipe_plain：
+// 契约源头是 WindowsGo/interop/gen_vectors.py:156-166 的 recipe_plain：
 // sha256(seed ‖ uint32be(counter)) 首尾相接后截断到 size。vectors.json
 // 的 recipe 字段（algo=sha256_counter_v1）记录种子；>=4MiB 的并行用例
 // 明文/密文均不落盘，只记两端哈希 —— 任何用方都必须先经本函数重建明文，

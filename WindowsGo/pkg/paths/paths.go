@@ -1,17 +1,16 @@
 // Package paths 定义便携数据路径（WindowsGo 端）。
 //
-// 便携化语义与 Python 端一致（对照 core/paths.py）：设置、凭证等持久化
-// 数据一律放在程序目录旁的 data/ 子目录，跟随程序目录走——绿色版拷走即
-// 整体迁移；不写注册表、不写 %APPDATA%，不污染系统。
+// 便携化语义：设置、凭证等持久化数据一律放在程序目录旁的 data/ 子目录，
+// 跟随程序目录走——绿色版拷走即整体迁移；不写注册表、不写 %APPDATA%，
+// 不污染系统。
 //
-// 与 Python 端的差异及理由：
-//   - Python 打包态取 sys.executable 目录、源码运行上溯到 WindowsPy/；
-//     Go 端统一以 os.Executable() 所在目录为准（wails 产出的 exe、开发态
-//     go run 的临时二进制都各带一份 data/，语义一致且无需上溯魔法）。
+// 约定：
+//   - 数据目录统一以 os.Executable() 所在目录为准（go build 产出的 exe、
+//     开发态 go run 的临时二进制都各带一份 data/，语义一致且无需上溯魔法）。
 //   - 开发态覆盖：环境变量 CLOUDPRISM_DATA_DIR 非空时数据目录整体重定向
-//     （wails dev / go test 等场景不想让数据写进临时目录/源码树时使用）。
-//   - qfluentwidgets 的 qfluent_config.json 是 Python 端库专属文件，
-//     Go 端不存在该库，故不提供对应函数。
+//     （go run / go test 等场景不想让数据写进临时目录/源码树时使用）。
+//   - 历史说明：参考实现曾按打包态/源码态分别取路径，另有 qfluent_config.json
+//     这类库专属文件；本端单一实现，均不再需要。
 package paths
 
 import (

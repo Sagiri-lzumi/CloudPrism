@@ -21,7 +21,7 @@ import (
 // 非 nil 时复用（命中 Session 密钥缓存，避免每文件重跑 PBKDF2）；nil 时
 // 随机生成。IV 非 nil 仅用于测试注入定值。
 //
-// 对照 WindowsPy/src/cloudprism/core/encryptor.py
+// 对照参考实现 encryptor.py
 type Encryptor struct {
 	Sess    *session.Session
 	Workers int    // 并行分片内核数；<=1 或小文件自动退化为顺序

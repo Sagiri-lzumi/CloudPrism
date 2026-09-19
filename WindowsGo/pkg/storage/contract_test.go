@@ -12,7 +12,7 @@ import (
 
 // 存储后端契约测试：本地/WebDAV/百度网盘三类后端跑同一组用例，验证
 // Backend 接口语义一致、可无缝互换。上层依赖该契约，不感知后端类型。
-// 对照 WindowsPy/tests/test_backend_contract.py 的 14 个用例。
+// 对照参考实现 tests/test_backend_contract.py 的 14 个用例。
 
 // sampleBytes 256 字节测试数据（bytes(range(256)) 的 Go 版）。
 func sampleBytes() []byte {

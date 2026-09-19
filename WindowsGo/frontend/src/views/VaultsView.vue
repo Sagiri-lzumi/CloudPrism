@@ -701,7 +701,7 @@ async function onOtherConfirm(payload: string | boolean) {
   border-radius: 22px;
 }
 
-/* hero 云朵：内联 fluent 实心 svg（绕开 Icon 组件，WebView2 下 100% 可控） */
+/* hero 云朵：内联 fluent 实心 svg（绕开 Icon 组件，浏览器下 100% 可控） */
 .hero-cloud {
   width: 56px;
   height: 56px;

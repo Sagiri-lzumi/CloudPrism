@@ -13,7 +13,7 @@ import (
 //	16 字节 —— Vault Marker 加密载荷、恢复码块
 //	12 字节 —— 文件名加密、缩略图磁盘缓存
 //
-// 分叉的根源是 WindowsPy 端 vault.py:109 直接把 Marker 的 16 字节 IV 当 GCM
+// 分叉的根源是参考实现 vault.py:109 直接把 Marker 的 16 字节 IV 当 GCM
 // nonce 用（未截断），而 filename.py:82 用的是 FILENAME_NONCE_LEN=12。
 // Go 标准库的 cipher.NewGCM 只接受 12 字节，因此 Vault 路径必须显式放宽
 // nonce 长度，否则所有现存密库都打不开，且症状伪装成「主密码错误」，
@@ -24,7 +24,7 @@ import (
 // 仅供 Vault Marker 载荷与恢复码块使用（见 CreateMarker / VerifyMarker /
 // BuildRecoveryBlob / DecryptRecoveryBlob）。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/vault.py:109、vault.py:237
+// 对照参考实现 vault.py:109、vault.py:237
 func NewGCM16(key []byte) (cipher.AEAD, error) {
 	block, err := newAES256(key)
 	if err != nil {
@@ -37,7 +37,7 @@ func NewGCM16(key []byte) (cipher.AEAD, error) {
 //
 // 仅供文件名加密与缩略图磁盘缓存使用（见 EncryptFilename / DecryptFilename）。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/filename.py:82-83
+// 对照参考实现 filename.py:82-83
 func NewGCM12(key []byte) (cipher.AEAD, error) {
 	block, err := newAES256(key)
 	if err != nil {

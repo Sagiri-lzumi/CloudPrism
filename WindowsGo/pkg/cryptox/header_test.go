@@ -10,7 +10,7 @@ import (
 )
 
 // 文件头黄金向量：salt = 0x11*16、iv = 0x22*16，
-// 由 WindowsPy 端 FileHeader.build 真实运行后打印（header.py:55-84）。
+// 由参考实现 FileHeader.build 真实运行后打印（header.py:55-84）。
 const (
 	goldenHeaderSalt = "11111111111111111111111111111111"
 	goldenHeaderIV   = "22222222222222222222222222222222"

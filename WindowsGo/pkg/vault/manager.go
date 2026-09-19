@@ -1,9 +1,9 @@
 // Package vault 提供密库生命周期管理与增量同步引擎（非 GUI 内核）。
 //
 //   - manager：新建 / 连接 / 重命名密库 + 恢复码（v3），
-//     对照 WindowsPy/src/cloudprism/core/vault_manager.py；
+//     对照参考实现 vault_manager.py；
 //   - sync：本地目录 → 云端单向增量同步，
-//     对照 WindowsPy/src/cloudprism/core/sync_engine.py。
+//     对照参考实现 sync_engine.py。
 //
 // 密码学一律经 pkg/cryptox / pkg/session 触碰，本包禁止自行拼装格式字节。
 // 所有上传都落在 storage.Backend 接口上——三后端在此无差别可用。

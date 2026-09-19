@@ -11,7 +11,7 @@ import (
 )
 
 // CTR 黄金向量。输入为 key = 0x00..0x1f，明文 pt[i] = (i*7+3) % 256（100 字节，
-// 刻意不是 16 的倍数），由 WindowsPy 端 AesCtrStreamCipher 真实运行后打印。
+// 刻意不是 16 的倍数），由参考实现 AesCtrStreamCipher 真实运行后打印。
 //
 // 复现方式见 kdf_test.go 顶部的说明；iv 有两组：
 //   - ffffffffffffffff0000000000000000：低 64 位全 1，验证跨 64 位边界的进位
@@ -245,7 +245,7 @@ func TestXORAtPartialFinalBlock(t *testing.T) {
 
 // TestAlignedShardsMatchSequential 是阶段 0 那个缺陷的回归防线。
 //
-// WindowsPy 端曾因并行分段未做 16 字节对齐，让 ≥8MiB 的非 16 倍数文件
+// 参考实现曾因并行分段未做 16 字节对齐，让 ≥8MiB 的非 16 倍数文件
 // 整段密钥流错位、密文永久损坏，而解密**不报错、静默输出垃圾**
 // （CTR 无完整性校验）。这里断言：按 BlockSize 对齐的分段加密，
 // 产物必须与一次性顺序加密逐字节相等。

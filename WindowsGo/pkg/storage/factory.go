@@ -8,7 +8,7 @@ import (
 
 // 存储后端构造工厂与描述工具（非 GUI）。
 //
-// 对照 WindowsPy/src/cloudprism/core/backend_factory.py。按类型键与参数
+// 对照参考实现 backend_factory.py。按类型键与参数
 // 构造后端实例，避免初始化向导与密库连接处各自维护构造逻辑。
 // 主密码/密码参数由调用方即时传入，绝不落盘。
 

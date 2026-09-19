@@ -289,7 +289,7 @@ func sortedKeysOf[V any](m map[string]V) []string {
 // ---------------------------------------------------------------------------
 
 func TestQuoteSegmentMatchesPython(t *testing.T) {
-	// 期望值由 WindowsPy 环境实测 urllib.parse.quote 得到
+	// 期望值由参考实现环境实测 urllib.parse.quote 得到
 	cases := []struct {
 		in, want string
 	}{

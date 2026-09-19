@@ -16,7 +16,7 @@ import (
 //
 //   - bindTaskCallbacks：装配队列终态回调（New 时调用一次）——任务终态
 //     即同步续传记录与横幅计数；进度与聚合不进回调，由状态帧按 10Hz 汇总
-//     （差异清单 #7，避免 Wails IPC 风暴）；
+//     （差异清单 #7，避免逐任务 IPC 风暴）；
 //   - makeRunner：按连接构造执行器（上传=加密→分块上传；下载=解密落盘），
 //     Runner 在队列调度 goroutine 中执行；
 //   - UploadPaths / DownloadFiles：本地/远端路径展开成任务集合。

@@ -1,6 +1,6 @@
 // Package thumb 提供远程图片的服务端缩略图生成与两级缓存。
 //
-// 与 WindowsPy/src/cloudprism/core/thumbnail.py 的职责对齐但实现有意不同
+// 与参考实现 thumbnail.py 的职责对齐但实现有意不同
 // （差异清单见阶段 8 文档）：
 //
 //   - Python 取密文头部明文后**原样**交给 QImage 渐进解析（可能是不完整的

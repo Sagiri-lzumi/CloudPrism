@@ -1,6 +1,6 @@
 // Package session 提供主密码会话与密钥派生缓存。
 //
-// 对照 WindowsPy/src/cloudprism/core/session.py。Session 持有用户主密码
+// 对照参考实现 session.py。Session 持有用户主密码
 // （仅存内存，不落盘、不上传）与按 salt 缓存的派生密钥：同一会话内对
 // 相同 salt 的派生结果只做一次 PBKDF2（200000 次迭代较慢，缓存可显著
 // 缩短同一密库上的重复开库/加解密路径）。

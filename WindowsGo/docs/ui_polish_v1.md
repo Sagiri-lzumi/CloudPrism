@@ -1,4 +1,8 @@
-# WindowsGo UI 视觉对照检查表 v1（对照 WindowsPy）
+# WindowsGo UI 视觉对照检查表 v1（历史存档）
+
+> 归档说明：本表是 v1 阶段「Go 端视觉还原参考实现」时的逐条对照清单。v38 起
+> 参考实现已移除，表中的「参考实现侧」取值仅作历史记录；后续 UI 迭代以
+> `frontend/src/styles/theme.css` 的 token 与 `docs/ARCHITECTURE.md` 为准。
 
 > 活文档：随代码演进迭代。目的 = 把「UI 不如 Python 版好看」的观感问题拆成
 > 可核对的条目；每项给 Python 源锚点 + Go 现状 + 结论（已一致 / 已改 / 待确认）。
@@ -37,7 +41,7 @@
 | C3 | 对话框/菜单圆角阴影与 hover | init_wizard.py:65-318、quick_connect.py（qfw 对话框） | Go 向导/恢复码对话框用 --radius-card + --shadow-pop；关闭钮 hover、遮罩深浅需实测复核 |
 | C4 | 窗口默认尺寸 | main_window.py:154（1200×700） | Go main.go:90-93 为 1280×800 + Min 960×600（更大不劣化，留待用户偏好确认） |
 | C5 | 深色主题观感 | theme.py dark 分支 | token 对译但 QSS 与 CSS 渲染路径不同，深色下卡片层次感需截图确认 |
-| C6 | 文字渲染观感 | Qt 字体平滑 | WebView2 灰度抗锯齿（base.css 已设 antialiased），粗细观感需实测确认 |
+| C6 | 文字渲染观感 | Qt 字体平滑 | 浏览器灰度抗锯齿（base.css 已设 antialiased），粗细观感需实测确认 |
 
 ## 操作说明
 

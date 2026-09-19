@@ -1,14 +1,14 @@
-// Package appstate 是应用唯一有状态对象，取代 WindowsPy 的 AppController。
+// Package appstate 是应用唯一有状态对象，取代参考实现的 AppController。
 //
 // 职责边界（见 docs/ARCHITECTURE.md 分层表）：
-//   - 允许依赖 pkg/* 与 internal/*，禁止依赖 Wails 绑定层 —— UI 事件一律
-//     经注入的 Emit 函数出口（bind/events 合帧器在装配时注入）；
+//   - 允许依赖 pkg/* 与 internal/*，禁止依赖绑定层 —— UI 事件一律
+//     经注入的 Emit 函数出口（internal/web 的帧循环在装配时注入）；
 //   - 连接 / 锁库 / 文件浏览 / 传输编排 / 同步 / 统计 / 自动锁全部收口于此，
 //     internal/bind 各域只做薄适配，不写业务逻辑。
 //
 // 线程模型：所有公开方法并发安全（内部互斥锁）；PBKDF2 派生的秒级耗时
-// 阶段在调用方 goroutine 内同步执行 —— Wails 绑定调用运行在独立 goroutine，
-// 不会冻结 UI（Python 端 run_busy 的背景线程需求在 Go 侧天然消失）。
+// 阶段在调用方 goroutine 内同步执行 —— 每个 HTTP 请求各占一条 goroutine，
+// 不会冻结界面（参考实现 run_busy 的背景线程需求在 Go 侧天然消失）。
 package appstate
 
 import (

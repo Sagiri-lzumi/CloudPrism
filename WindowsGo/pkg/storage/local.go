@@ -17,7 +17,7 @@ import (
 // 本地后端不涉及网络，但落盘的加密文件格式与云端完全一致，整个目录可随时
 // 迁移到 WebDAV 或百度网盘后端。
 //
-// 对照 WindowsPy/src/cloudprism/storage/local_backend.py
+// 对照参考实现 local_backend.py
 type Local struct {
 	root string // 已 EvalSymlinks + Abs 规范化的绝对根路径
 }

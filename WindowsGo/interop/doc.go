@@ -1,9 +1,14 @@
-// Package interop 承载 Go 与 Python 两端的跨语言互操作夹具。
+// Package interop 承载密文格式的跨语言互操作夹具。
 //
-// 本包只有测试代码，不产出任何二进制。夹具（testdata/）由 Python 侧的
-// gen_vectors.py 一次性生成并提交入库，Go 侧只读；反向夹具（testdata/go/）
-// 由 Go 侧在 CLOUDPRISM_INTEROP_EMIT=1 时写出，Python 侧的
-// WindowsPy/tests/test_interop_go.py 只读。两侧互为对方的 oracle。
+// 本包只有测试代码，不产出任何二进制。
+//
+// v38 起 Python 参考实现已整体移除，本包随之从「两侧互为 oracle」退化为
+// **单侧 + 冻结夹具**：testdata/ 下的夹具由参考实现在移除前用 gen_vectors.py
+// 一次性生成并入库，此后只读且**不可再生**；反向夹具（testdata/go/）仍由本端
+// 在 CLOUDPRISM_INTEROP_EMIT=1 时写出，但已无对端消费者，仅作回归留档。
+//
+// 因此：**夹具即契约**。夹具与实现冲突时以夹具为准；确需变更格式时，必须
+// 同步升级 pkg/protocol 版本并补迁移说明，不能再指望「重跑生成器」。
 //
 // 与 pkg/cryptox 自带的黄金向量测试的分工：
 //

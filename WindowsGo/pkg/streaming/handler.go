@@ -19,10 +19,10 @@ var errContainerShort = errors.New("streaming: 远端密文不足，容器不完
 
 // setCommonHeaders 输出代理共用响应头。
 //
-// CORS：Wails 页面与代理端口不同源，<video>/<img> 标签不需要跨源许可，
-// 但前端文本预览用 fetch 拉取必须放行；代理仅监听回环且 URL 带一次性
-// 令牌、无 Cookie/凭据，放开 * 无实际安全面（记录于 docs/ARCHITECTURE
-// 差异清单「前端跨源拉取」）。
+// CORS：v33 前代理是独立端口、与页面跨源，故需放行 fetch 拉取；v35 起
+// 媒体链路已改为同源相对路径（/s/ /t/ /d/ 直接挂在主 mux 上），该头不再
+// 有调用方依赖，保留只为兼容旧缓存与外部直连。端点 URL 带一次性令牌、
+// 无 Cookie/凭据，放开 * 无实际安全面（记录于 docs/ARCHITECTURE 差异清单）。
 func setCommonHeaders(h http.Header) {
 	h.Set("Access-Control-Allow-Origin", "*")
 	h.Set("X-Content-Type-Options", "nosniff")

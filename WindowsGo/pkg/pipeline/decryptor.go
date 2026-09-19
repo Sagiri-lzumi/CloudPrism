@@ -21,7 +21,7 @@ import (
 // 拉取明文区间，供缩略图与流式代理），以及 Python 端缩略图/流式依赖的
 // 头部随机访问语义 —— 本包只产出明文字节，不感知调用场景。
 //
-// 对照 WindowsPy/src/cloudprism/core/decryptor.py
+// 对照参考实现 decryptor.py
 type Decryptor struct {
 	Sess    *session.Session
 	Backend storage.Backend

@@ -54,7 +54,7 @@ type Server struct {
 	mu      sync.Mutex
 	clients map[chan event]struct{}
 
-	// 10Hz 状态帧合帧循环（替代 Wails 时代 bind.Events 的 Wails 专用循环）。
+	// 10Hz 状态帧合帧循环（替代 Wails 时代的 bind.Events 专用循环）。
 	// Listen 启动、Shutdown 停止；帧走 collect 进 SSE 广播。
 	frameMu   sync.Mutex
 	frameStop chan struct{}

@@ -9,10 +9,10 @@ import (
 
 // DeriveKey 从主密码 + 盐派生 32 字节 AES-256 密钥。
 //
-// 主密码统一按 UTF-8 编码后参与派生，保证 WindowsPy 与 Go 端字节级一致；
+// 主密码统一按 UTF-8 编码后参与派生，保证参考实现与 Go 端字节级一致；
 // 派生出的密钥仅存在于内存中，不落盘、不上传云端，调用方负责用后清零。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/kdf.py:34-46
+// 对照参考实现 kdf.py:34-46
 func DeriveKey(masterPassword string, salt []byte) [protocol.KeyLen]byte {
 	return DeriveKeyRaw([]byte(masterPassword), salt)
 }
@@ -22,7 +22,7 @@ func DeriveKey(masterPassword string, salt []byte) [protocol.KeyLen]byte {
 // 供非字符串密钥材料复用同一套参数 —— 目前唯一调用方是恢复码块：
 // rkey = PBKDF2(恢复码随机密钥, rsalt)（见 vault.py:236）。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/kdf.py:48-63
+// 对照参考实现 kdf.py:48-63
 func DeriveKeyRaw(password, salt []byte) [protocol.KeyLen]byte {
 	var key [protocol.KeyLen]byte
 

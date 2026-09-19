@@ -854,7 +854,7 @@ function confirmDlg(payload: string | boolean) {
 }
 
 /* 行类型图标（裸 Icon，随 accent/text2 着色）；
-   overflow visible + border-box 固定尺寸，防 WebView2 渲染下被裁切 */
+   overflow visible + border-box 固定尺寸，防浏览器渲染下被裁切 */
 .row-ic {
   flex: none;
   color: var(--text2);

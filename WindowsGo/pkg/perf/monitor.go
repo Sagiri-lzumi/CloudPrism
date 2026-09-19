@@ -1,12 +1,16 @@
 // Package perf 提供性能指标采集：传输速度、缓存占用、进程 CPU 使用率。
 //
-// 对照 WindowsPy/src/cloudprism/gui/perf_monitor.py 的 PerfMonitor，但修正
+// 对照参考实现 perf_monitor.py 的 PerfMonitor，但修正
 // 一处 Python 死接线：Python 的速度依赖 TransferWorker.report_bytes()，
 // 而该方法从未被调用（速度恒 0）；Go 端由绑定层把队列的累计完成字节
 // （Queue.Aggregate 的 done）注入为 doneGetter，速度按两次采样差分计算。
 //
-// 本包不持有定时器：绑定层（Wails）按 1s 周期调用 Sample() 并把结果推给
-// 前端状态栏，职责与 Qt 的 QTimer 解耦。
+// 本包不持有定时器：由上层按固定周期调用 Sample() 并把结果推给前端，
+// 职责与定时器解耦。
+//
+// 注意（v33 迁移遗留）：Web 化改造后生产代码未再接入本包（当前仅测试引用），
+// 速度/缓存指标实际上不上屏。需要么接回状态帧、么整体移除，已记入
+// Plan/AgentsTodolist 的遗留清单；在未接线前不要当作在用能力。
 package perf
 
 import (

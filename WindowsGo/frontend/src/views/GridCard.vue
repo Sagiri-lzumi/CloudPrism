@@ -202,7 +202,7 @@ const multiMode = computed(() => ui.multi.length > 1)
 }
 
 /* 类别图标（裸 Icon，随 text2/accent/err 着色）；
-   overflow visible + border-box 固定尺寸，防 WebView2 渲染下被裁切 */
+   overflow visible + border-box 固定尺寸，防浏览器渲染下被裁切 */
 .ic {
   color: var(--text2);
   overflow: visible;

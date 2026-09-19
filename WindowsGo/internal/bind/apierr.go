@@ -1,4 +1,4 @@
-// Package bind 是 Wails 绑定层：5 个域的薄适配 struct（Vault / Files /
+// Package bind 是 API 绑定层：5 个域的薄适配 struct（Vault / Files /
 // Transfer / Settings / Preview）把 internal/appstate 的错误映射为带 Code
 // 的 ApiError 后抛出，**不写任何业务逻辑**。分层约束见 docs/ARCHITECTURE.md。
 package bind
@@ -40,7 +40,7 @@ type ApiError struct {
 	Message string `json:"message"`
 }
 
-// Error 实现 error 接口。Wails 只把 err.Error() 字符串带给前端，
+// Error 实现 error 接口。服务端只把 err.Error() 字符串带给前端，
 // 故 code 以 [code] 前缀编码进消息，api.ts 解包还原结构化字段。
 func (e *ApiError) Error() string { return "[" + e.Code + "] " + e.Message }
 

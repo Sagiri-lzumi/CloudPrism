@@ -74,7 +74,7 @@ const inner = computed(() => {
 }
 
 /* 宿主与内层 svg 均撑满，内层按自身 viewBox 等比缩放；
-   overflow: visible 防 stroke 描边/边缘在 WebView2 缩放时被宿主裁切 */
+   overflow: visible 防 stroke 描边/边缘在浏览器缩放时被裁切 */
 .fluent-icon svg,
 .icon-svg,
 .icon-svg svg {

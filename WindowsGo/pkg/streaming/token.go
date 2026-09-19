@@ -13,7 +13,7 @@ import (
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/protocol"
 )
 
-// 令牌化解密代理的端点设计（WindowsPy 的裸路径 GET 在 WebView2 下的升级）：
+// 令牌化解密代理的端点设计（参考实现的裸路径 GET 在浏览器下的升级）：
 //
 //	/s/{token}/{display-name}  视频/音频流端点（Range + 流式解密）
 //	/t/{token}                 缩略图端点（绑定层用 pkg/thumb 生成 JPEG 后注入）

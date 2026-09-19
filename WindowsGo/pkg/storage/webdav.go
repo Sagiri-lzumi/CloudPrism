@@ -21,7 +21,7 @@ import (
 // 的分块 PUT —— 而断点续传语义依赖它（见 UploadChunked）。这也让状态码容错
 // 可以逐字对齐 Python 端。
 //
-// 对照 WindowsPy/src/cloudprism/storage/webdav_backend.py
+// 对照参考实现 webdav_backend.py
 type WebDAV struct {
 	baseURL string // 已去尾斜杠的 WebDAV 根地址
 	user    string // Basic 认证用户名（可为空 = 匿名）

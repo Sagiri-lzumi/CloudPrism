@@ -83,7 +83,7 @@ function pick(i: number) {
 
 /* 倒三角容器：固定 16px flex 容器，强制 svg 几何居中。
    v27 起 chevron 用内联 svg（绕开 Icon 组件 normalize/双源机制，
-   WebView2 真实渲染下 100% 可控）。*/
+   浏览器真实渲染下 100% 可控）。*/
 .combo-chev {
   display: inline-flex;
   align-items: center;

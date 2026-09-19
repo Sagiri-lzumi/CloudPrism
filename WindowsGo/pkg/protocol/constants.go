@@ -1,10 +1,10 @@
 // Package protocol 集中定义 CloudPrism 加密容器的二进制格式常量。
 //
 // 本包是 Go 端的最内层：不 import 任何项目内其它包，只依赖标准库，
-// 因而可独立编译与单测。WindowsPy 端与 Go 端必须使用完全一致的取值，
+// 因而可独立编译与单测。参考实现与 Go 端必须使用完全一致的取值，
 // 任何常量改动都会破坏跨端互操作性，修改前必须同步两端并升级版本号。
 //
-// 每条常量都标注了 Python 侧真源行号（WindowsPy/src/cloudprism/constants.py）。
+// 每条常量都标注了 Python 侧真源行号（参考实现 constants.py）。
 // 真源以代码为准、不以文档反推：vault.py 的 docstring 曾把 VerifyMagic 的偏移
 // 写成 9（实际拼装为 13），照文档实现会导致所有现存密库打不开且症状伪装成
 // 「主密码错误」。

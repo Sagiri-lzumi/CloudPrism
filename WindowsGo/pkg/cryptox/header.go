@@ -45,7 +45,7 @@ var (
 //
 // 密文自 HeaderLength 起，明文长度 == 密文长度（CTR 无填充）。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/header.py:3-13
+// 对照参考实现 header.py:3-13
 type Header struct {
 	Version      uint32
 	HeaderLength uint32
@@ -63,9 +63,9 @@ func (h *Header) CipherOffset() int64 { return int64(h.HeaderLength) }
 // Build 构建 .cpenc 文件头字节序列（全部大端序）。
 //
 // salt 与 iv 的长度必须 ≤ 255（协议规定恒为 16），超限返回 ErrHeaderFieldTooLong。
-// flags 传 0x00、version 传 protocol.Version 即得到与 WindowsPy 端逐字节相同的头。
+// flags 传 0x00、version 传 protocol.Version 即得到与参考实现逐字节相同的头。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/header.py:55-84
+// 对照参考实现 header.py:55-84
 func Build(salt, iv []byte, flags byte, version uint32) ([]byte, error) {
 	if len(salt) > 0xFF || len(iv) > 0xFF {
 		return nil, fmt.Errorf("%w: salt=%d iv=%d", ErrHeaderFieldTooLong, len(salt), len(iv))
@@ -96,7 +96,7 @@ func Build(salt, iv []byte, flags byte, version uint32) ([]byte, error) {
 // （header.py:111-112 解包后直接返回）。保持宽容是为了兼容历史上可能存在的
 // 非常规取值；真正决定密文偏移的是 HeaderLength 字段本身，由调用方使用。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/header.py:86-122
+// 对照参考实现 header.py:86-122
 func Parse(r io.Reader) (*Header, error) {
 	h := &Header{}
 
@@ -141,7 +141,7 @@ func Parse(r io.Reader) (*Header, error) {
 
 // ParseBytes 从字节序列解析文件头（便捷方法）。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/header.py:124-127
+// 对照参考实现 header.py:124-127
 func ParseBytes(data []byte) (*Header, error) {
 	return Parse(bytes.NewReader(data))
 }

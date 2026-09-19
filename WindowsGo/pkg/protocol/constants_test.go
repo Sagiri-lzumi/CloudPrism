@@ -7,7 +7,7 @@ import (
 
 // TestWireFormatConstants 把每个协议常量的取值钉死。
 //
-// 这不是「断言常量等于常量」的同义反复：这些取值的真源是 WindowsPy 侧的
+// 这不是「断言常量等于常量」的同义反复：这些取值的真源是参考实现侧的
 // constants.py。一旦有人手滑改动（例如为了快把 KDFIterations 调小、
 // 或把 FilenameNonceLen「统一」成 16），Go 端产出的密文与密库将与 Python 端
 // 不再互通，而症状是「文件打不开」「密库报密码错误」，不是编译错误。

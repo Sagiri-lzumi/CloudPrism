@@ -11,7 +11,7 @@ import (
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/protocol"
 )
 
-// Vault Marker 黄金向量。全部由 WindowsPy 端 VaultMarker.create / verify /
+// Vault Marker 黄金向量。全部由参考实现 VaultMarker.create / verify /
 // split_recovery_tail **真实运行后打印**（脚本见 Release/_spike/gen_golden.py，
 // 调用的是 vault.py:75-286 的生产代码，不是复刻实现），因此下面这些十六进制
 // 常量是「Go 与 Python 产出逐字节相等」的实证，而非 Go 侧自查拼装的结果。

@@ -1,6 +1,6 @@
 // Package update 检查 CloudPrism 的新版本（GitHub Releases 公共 API）。
 //
-// 对照 WindowsPy/src/cloudprism/core/update_checker.py：匿名限额 60 次/小时
+// 对照参考实现 update_checker.py：匿名限额 60 次/小时
 // （手动检查场景足够）；仅做版本对比与下载页跳转，不自动下载。仓库未来
 // 若转私有需在此补充 token 认证。
 package update

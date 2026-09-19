@@ -33,7 +33,7 @@ var (
 // 选 Base32 而非 Base64 是为了规避云盘对大小写敏感与 +、/、= 等特殊字符的限制；
 // 去填充是为了保持云端文件名整洁，解码时再补齐。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/filename.py:25-35
+// 对照参考实现 filename.py:25-35
 func B32EncodeNoPad(data []byte) string { return b32NoPad.EncodeToString(data) }
 
 // B32DecodeNoPad 解码去填充的 Base32 字符串。
@@ -64,7 +64,7 @@ func B32EncodeNoPad(data []byte) string { return b32NoPad.EncodeToString(data) }
 // 刻意不做 TrimSpace：Python 端也不去空白，多一层宽松只会让
 // 「云端文件名被人手动改过」这类问题更难定位。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/filename.py:38-59
+// 对照参考实现 filename.py:38-59
 func B32DecodeNoPad(s string) ([]byte, error) {
 	return b32NoPad.DecodeString(strings.ToUpper(s))
 }
@@ -79,7 +79,7 @@ func B32DecodeNoPad(s string) ([]byte, error) {
 //
 // ⚠️ 用的是 12 字节 nonce（NewGCM12），与 Vault Marker 的 16 字节不可混用。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/filename.py:71-86
+// 对照参考实现 filename.py:71-86
 func EncryptFilename(plain string, key []byte) (string, error) {
 	var nonce [protocol.FilenameNonceLen]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -109,7 +109,7 @@ func encryptFilenameWithNonce(plain string, key []byte, nonce []byte) (string, e
 // 三类失败用不同 error 区分，但上层通常都当作「该条目无法显示原名」处理：
 // 目录树遇到解不开的名字时应回退展示密文名，而不是让整个列表加载失败。
 //
-// 对照 WindowsPy/src/cloudprism/crypto/filename.py:88-108
+// 对照参考实现 filename.py:88-108
 func DecryptFilename(encoded string, key []byte) (string, error) {
 	raw, err := B32DecodeNoPad(encoded)
 	if err != nil {

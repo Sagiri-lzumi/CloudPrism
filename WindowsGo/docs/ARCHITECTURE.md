@@ -1,18 +1,20 @@
 # CloudPrism Go 端架构
 
 本文件是 `WindowsGo/` 的活文档：目录职责、分层依赖规则、构建验证命令，
-以及**与 `WindowsPy/` 的有意差异清单**。每完成一个阶段就回来更新对应小节，
-不要等到最后一次性补写。
+以及**与已移除的 Python 参考实现之间的历史差异清单**。每完成一个阶段就回来
+更新对应小节，不要等到最后一次性补写。
 
-协议常量、字节布局等**兼容契约**不在本文件重复，唯一真源是
-`WindowsPy/src/cloudprism/`（Go 侧代码注释逐条标注对照行号）。
+协议常量、字节布局等**兼容契约**不在本文件重复：v38 起唯一真源是
+`interop/testdata/` 下的冻结黄金向量（见 `interop/README.md`）。Go 侧代码注释
+仍逐条标注当年对照的参考实现文件名与行号，供语义回溯。
 
 ---
 
 ## 1. 目标与边界
 
-- **字节级兼容**：同一份密库、同一个主密码，Go 端与 Python 端必须能互读互写，
-  产物逐字节相等。这是所有设计决策的最高约束。
+- **格式冻结**：密文与元数据格式由 `interop/testdata/` 的黄金向量钉死，任何改动
+  都属不兼容变更。v38 前这条表述为「Go 端与 Python 端互读互写、产物逐字节相等」，
+  参考实现移除后由冻结向量承接同一职责。
 - **绿色便携**：用户数据（配置、凭证、缓存、日志）全部落在
   exe 同级的 `data/`，不写注册表、不写 `%AppData%`、**不写 `%TEMP%`**。
   目录不可写时静默降级，绝不让应用启动失败。
@@ -36,7 +38,7 @@ WindowsGo/
 │   ├── scripts/gen-icons.mjs   图标注册表生成器（按源码引用裁剪，prebuild 自动跑，详见 §8.2）
 │   └── src/lib/icons.gen.ts    ★ 生成物，勿手工编辑；图标显式 import 表
 ├── pkg/                        ★ GUI 无关核心，零平台 import
-│   ├── protocol/               格式常量的单一真源（逐条标注 Python 对照行号）
+│   ├── protocol/               格式常量的单一真源（逐条标注参考实现对照行号）
 │   ├── cryptox/                KDF / AES-CTR / GCM(12,16) / 文件头 / 文件名 / Vault
 │   ├── session/                主密码与「盐 → 派生密钥」缓存
 │   ├── vault/                  密库生命周期 + 同步索引
@@ -49,7 +51,7 @@ WindowsGo/
 │   ├── storage/                三后端：local / webdav / baidu
 │   └── streaming/              令牌化流式解密代理（/s/ 播放 /t/ 缩略图 /d/ 下载）
 ├── internal/
-│   ├── appstate/               唯一有状态对象，取代 WindowsPy 的 AppController
+│   ├── appstate/               唯一有状态对象，取代参考实现的 AppController
 │   ├── bind/                   6 个域 struct（Vault/Files/Transfer/Settings/Preview/Lan）+ ContextHolder
 │   ├── web/                    HTTP server：/api/* JSON + /api/events SSE + 静态前端 + 10Hz 合帧循环
 │   │                           + 同源媒体路由 /s/ /t/ /d/ + 访问闸门 auth.go（局域网档）
@@ -57,7 +59,7 @@ WindowsGo/
 │   ├── tray/                   系统托盘（getlantern/systray，纯 syscall）
 │   ├── platform/win/           dpapi / shell / dialogs(IFileOpenDialog) / FatalMessage —— 唯一 syscall 出口
 │   └── loggingx/               slog + 脱敏 handler + 2MB×3 轮转
-├── interop/                    跨语言黄金向量夹具（testdata/ 入库，向量由 Python 侧生成）
+├── interop/                    冻结黄金向量夹具（testdata/ 入库，参考实现移除前生成，不可再生）
 └── docs/                       本文件 + manual_smoke.md
 ```
 
@@ -132,10 +134,12 @@ HTTP/SSE 与后端交互，不再依赖 Chromium Mojo IPC。
 
 ---
 
-## 5. 与 WindowsPy 的有意差异清单
+## 5. 与参考实现的有意差异清单（历史）
 
-「字节级兼容」只约束**密文与元数据格式**；实现层面的行为差异是有意为之，
-逐条记录如下（后续阶段继续追加）。
+「格式冻结」只约束**密文与元数据格式**；实现层面的行为差异是有意为之，逐条
+记录如下。**下表的「Python 端行为」一列描述的是 v38 前已移除的参考实现**，
+保留是为了说明每条决策的来由（很多 Go 端做法是「修掉参考实现的某个缺陷」）；
+新增差异不必再往表里加对立项 —— 已无第二实现可比。
 
 | # | 差异 | Python 端行为 | Go 端行为 | 理由 |
 |---|---|---|---|---|
@@ -149,7 +153,7 @@ HTTP/SSE 与后端交互，不再依赖 Chromium Mojo IPC。
 | 8 | 百度凭证刷新 | 多线程可同时触发刷新（竞态） | `sync.Mutex` 串行化，`errno=111` 只重试一次 | 修掉既有竞态 |
 | 9 | 设置存储 | QSettings IniFormat（`data/cloudprism.ini`） | `data/config.json`（原子写：tmp + rename）；首启只读导入 INI 一次 | 摆脱 Qt 依赖；老用户数据无缝迁移 |
 | 10 | 传输任务生命周期 | `_release_worker` / `thread.wait(5000)` / `_graveyard` | `context` + `WaitGroup` | 整类生命周期问题天然消失 |
-| 11 | 速度统计 | `PerfMonitor.report_bytes()` 无生产调用方，状态栏恒为 `--` | 取队列 `done_bytes` 差分 | 修好死接线 |
+| 11 | 速度统计 | `PerfMonitor.report_bytes()` 无生产调用方，状态栏恒为 `--` | 曾取队列 `done_bytes` 差分；**v33 Web 化后未接线，指标当前不上屏** | 曾修掉参考实现的死接线，但迁移时自身掉线（`pkg/perf` 仅测试引用）—— 待接回或整体移除 |
 | 12 | 拖出到资源管理器 | `filesDraggedOut` 信号 | 浏览器原生下载（`<a download>` 指向 /d/ 流式端点）| 浏览器可直接落盘解密文件；目录暂不支持下载（zip 打包后续） |
 | 13 | 毛玻璃/亚克力材质 | Qt 实底绘制，无亚克力 | 主题预留 `--acrylic-bg`（`color-mix` 82% 表面色半透明）；**放弃** Wails 窗口级 translucent | 窗口级 translucent 在 Win10/11 行为不一致、影响文字锐度、拖慢合成，CSS 近似零平台风险 |
 | 14 | 代理响应缓存头 | 无 `Cache-Control`（Qt 播放器不缓存响应） | 流式响应恒发 `Cache-Control: no-store` | Chromium 会拼 206 片段入磁盘缓存——解密后的明文内容会落盘，必须显式禁止 |

@@ -12,7 +12,7 @@ import (
 )
 
 // 文件名加密黄金向量：key = 0x5A*32、nonce = 00..0b（12 字节定值），
-// 由 WindowsPy 端 AES.new(key, MODE_GCM, nonce) + b32_encode_nopad 真实运行后
+// 由参考实现 AES.new(key, MODE_GCM, nonce) + b32_encode_nopad 真实运行后
 // 打印（filename.py:71-86）。定值 nonce 只用于对拍 —— 生产路径的 nonce 每次随机。
 const (
 	goldenFilenameKey   = "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"

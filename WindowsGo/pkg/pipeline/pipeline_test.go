@@ -18,7 +18,7 @@ import (
 )
 
 // interopTestdata 是黄金夹具目录（interop/testdata，跨包共享防双份漂移）：
-// 由 WindowsPy 端 gen_vectors.py 一次性生成提交，Go 侧只读。
+// 由 interop/gen_vectors.py 在参考实现移除前一次性生成提交，此后只读。
 // go test 的工作目录恒为包目录，故可用相对路径引用。
 const interopTestdata = "../../interop/testdata"
 
@@ -55,7 +55,7 @@ func loadVectors(t *testing.T) *vectorsDoc {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(interopTestdata, "vectors.json"))
 	if err != nil {
-		t.Fatalf("读取黄金向量失败（夹具缺失？先运行 WindowsPy/interop/gen_vectors.py）: %v", err)
+		t.Fatalf("读取黄金向量失败（夹具缺失？先运行 WindowsGo/interop/gen_vectors.py）: %v", err)
 	}
 	var doc vectorsDoc
 	if err := json.Unmarshal(raw, &doc); err != nil {

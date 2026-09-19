@@ -21,8 +21,8 @@
 #   适用于「本轮只改后端/只打包」的场景。dist 必须已是最新（go:embed 直接
 #   吃它），S1 自检仍会校验 exe 内嵌资源与 dist 一致，装错产物会立即失败。
 #
-# 全部路径用 $PSScriptRoot 相对定位（不写任何绝对路径，风格对齐
-# WindowsPy/build/_package.ps1）；任一步失败立即退出并给出非 0 码。
+# 全部路径用 $PSScriptRoot 相对定位（不写任何绝对路径，便于仓库整体搬迁）；
+# 任一步失败立即退出并给出非 0 码。
 param(
     [string]$Tag = "v1",
     [switch]$Clean,
@@ -161,19 +161,14 @@ if (Test-Path $dirOut) { Remove-Tree $dirOut }
 New-Item -ItemType Directory -Force -Path $dirOut | Out-Null
 Copy-Item $exe $dirOut
 
-# 随包资源：图标与百度凭证教程（源 = 构建资源 + Python 资产目录）
+# 随包资源：图标
 $assetsDir = Join-Path $dirOut "assets"
 New-Item -ItemType Directory -Force -Path $assetsDir | Out-Null
 Copy-Item (Join-Path $root "build\windows\icon.ico") (Join-Path $assetsDir "icon.ico")
-$guideSrc = Join-Path $repo "WindowsPy\assets\baidu_guide.md"
-if (Test-Path $guideSrc) {
-    Copy-Item $guideSrc (Join-Path $assetsDir "baidu_guide.md")
-} else {
-    Write-Host "[release] 提示：未找到 WindowsPy\assets\baidu_guide.md，跳过" -ForegroundColor Yellow
-}
 
-# 随包交付文档（源 = WindowsGo\docs；用户自测指南 + 视觉对照表）
-foreach ($doc in @("self_test_guide.md", "ui_polish_v1.md")) {
+# 随包交付文档（源 = WindowsGo\docs；用户自测指南 + 视觉对照表 + 百度凭证教程）
+# v38 起百度教程收归本仓库（原在已移除的 Python 参考实现 assets/ 下）
+foreach ($doc in @("self_test_guide.md", "ui_polish_v1.md", "baidu_guide.md")) {
     $docSrc = Join-Path $root "docs\$doc"
     if (Test-Path $docSrc) {
         Copy-Item $docSrc (Join-Path $assetsDir $doc)
