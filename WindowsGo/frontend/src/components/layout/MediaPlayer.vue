@@ -325,7 +325,7 @@ onBeforeUnmount(() => {
   outline: none;
 }
 
-/* 中央播放钮：半透明黑圆钮悬浮（Fluent 媒体风格） */
+/* 中央播放钮：半透明黑圆钮悬浮在画面上方（媒体控件底，不随主题变化） */
 .big-play {
   position: absolute;
   top: calc(50% - 34px);
@@ -337,9 +337,9 @@ onBeforeUnmount(() => {
   width: 68px;
   height: 68px;
   color: #fff;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--scrim-media);
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   backdrop-filter: blur(4px);
 }
 
@@ -351,16 +351,7 @@ onBeforeUnmount(() => {
   animation: cpspin 1.2s linear infinite;
 }
 
-/* 中央钮淡入淡出（避免显隐生硬跳变） */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity var(--dur) var(--ease);
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
+/* 中央钮淡入淡出：.fade-* 基元已在 styles/base.css 全局定义，此处不再重复 */
 
 @keyframes cpspin {
   to {
@@ -457,13 +448,15 @@ onBeforeUnmount(() => {
 
 .err-msg {
   margin: 0;
-  color: #d13438;
+  /* 媒体区恒黑底（不随明暗主题）：从语义色派生亮变体，
+     保证两主题下黑底上均可读，且源头仍走 token */
+  color: color-mix(in srgb, var(--err) 70%, #fff);
   font-weight: 600;
 }
 
 .err-sub {
   margin: 0 0 10px;
-  color: #c4c4c4;
+  color: color-mix(in srgb, var(--text2) 40%, #fff);
   font-size: 0.857rem;
 }
 

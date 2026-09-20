@@ -97,6 +97,6 @@ func (s *State) checkAutoLockDue() {
 	}
 	if idleFor >= time.Duration(min)*time.Minute {
 		s.cfg.Log.Info("空闲超时，自动锁定密库", "idleMin", min)
-		s.Lock()
+		s.LockVault()
 	}
 }

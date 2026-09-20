@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -102,6 +103,49 @@ func TestBaiduListDir(t *testing.T) {
 			t.Errorf("应携带 errno=-9，实得 %v", err)
 		}
 	})
+}
+
+// TestBaiduListDirPaginates 验证超过单页上限（1000 条）的目录按 start 分页
+// 循环取全 —— 旧实现单次 limit=1000，会在第 1000 条静默截断；上层
+// deleteRemoteRecursive「先列后删」因此漏删尾部条目。
+func TestBaiduListDirPaginates(t *testing.T) {
+	b, m := newBaiduPair(t, defaultCred())
+	ctx := context.Background()
+
+	const total = baiduListPageSize + 27 // 跨两页：第二页不满页终止
+	m.mu.Lock()
+	for i := 0; i < total; i++ {
+		m.addFile(fmt.Sprintf("/big/f%04d.cpenc", i), []byte{byte(i)})
+	}
+	m.mu.Unlock()
+
+	entries, err := b.ListDir(ctx, "/big")
+	if err != nil {
+		t.Fatalf("ListDir(/big) 失败: %v", err)
+	}
+	if len(entries) != total {
+		t.Fatalf("应翻页取全 %d 条，实得 %d（截断回归）", total, len(entries))
+	}
+	// 首尾都在：分页取全的证据（截断 bug 只丢尾部）
+	names := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		names[e.Name] = true
+	}
+	for _, want := range []string{
+		"f0000.cpenc", "f0999.cpenc", "f1000.cpenc",
+		fmt.Sprintf("f%04d.cpenc", total-1),
+	} {
+		if !names[want] {
+			t.Errorf("缺条目 %s（翻页未取全）", want)
+		}
+	}
+	// 恰好两页请求：第二页不满页即终止，无需第三页探测
+	m.mu.Lock()
+	hits := m.listHits
+	m.mu.Unlock()
+	if hits != 2 {
+		t.Errorf("应恰发 2 次 list 请求（两页），实得 %d", hits)
+	}
 }
 
 func TestBaiduGetSizeHeadExists(t *testing.T) {

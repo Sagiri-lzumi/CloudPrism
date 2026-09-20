@@ -136,18 +136,21 @@ void loadChildren(root.value)
 
 <style scoped>
 .dt {
-  padding: 12px 6px;
+  /* 宿主是外壳侧栏的「目录」分区：底色/边框由侧栏统一提供，
+     本组件只负责可滚动的树本身（v1.3 前它是文件页里独立的一栏，
+     自带 surface 底与右分隔线） */
+  flex: 1;
+  min-height: 0;
+  padding: 0 0 8px;
   overflow-y: auto;
-  height: 100%;
-  background: var(--surface);
-  border-right: 1px solid var(--divider);
+  background: transparent;
 }
 
 .dt-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
+  height: 30px;
   padding: 0 8px 0 0;
   border-radius: var(--radius-ctrl);
   cursor: default;
@@ -198,7 +201,8 @@ void loadChildren(root.value)
 .dt-label {
   flex: 1;
   min-width: 0;
-  font-size: 0.85rem;
+  /* 与外壳侧栏导航项同字号：树与导航在同一栏里，字号不一致会显得是两套控件 */
+  font-size: 0.857rem;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;

@@ -174,12 +174,12 @@ const multiMode = computed(() => ui.multi.length > 1)
   height: 16px;
   background: var(--accent);
   border-radius: 50%;
-  z-index: 2;
+  z-index: var(--z-raise);
   box-shadow: 0 0 0 1.5px var(--surface), 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .gc-check-ic {
-  color: #fff;
+  color: var(--text-on-accent);
 }
 
 /* 更多按钮：header 右上角；hover/选中时显半透 surface 底 */
@@ -213,16 +213,19 @@ const multiMode = computed(() => ui.multi.length > 1)
 }
 
 /* 缩略图承托面：一层比卡片略深的浅色面，给所有条目一个统一的"落位框"；
-   宽高比不一的图片按 contain 内嵌，不会被裁掉，也不会把网格撑得参差。 */
+   宽高比不一的图片按 contain 内嵌，不会被裁掉，也不会把网格撑得参差。
+   盒子取 4:3 而非正方形：照片与截图以 3:2 / 4:3 为主，方形盒会让它们上下各留
+   一大块空，缩略图看起来"很小、很飘"；4:3 把留白压到最小，同时仍能容纳竖图。 */
 .thumb {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 96px;
-  margin: 0 6px 2px; /* 左右内缩 6px：承托面比卡片窄一圈，形成层次 */
+  aspect-ratio: 4 / 3;
+  margin: 0 6px 3px; /* 左右内缩 6px：承托面比卡片窄一圈，形成层次 */
   overflow: hidden;
-  border-radius: 10px; /* 内层面圆角略小于外卡（12），嵌套才自然 */
+  /* 内层面圆角略小于外卡（--radius-card = 12），嵌套才自然 */
+  border-radius: 10px;
   background: color-mix(in srgb, var(--text) 4%, transparent);
 }
 
@@ -245,8 +248,6 @@ const multiMode = computed(() => ui.multi.length > 1)
 .img {
   width: 100%;
   height: 100%;
-  max-width: 96px;
-  max-height: 96px;
   border-radius: 8px;
   object-fit: contain;
   opacity: 0;
@@ -309,7 +310,7 @@ const multiMode = computed(() => ui.multi.length > 1)
 
   .thumb {
     height: 124px;
-    border-radius: 12px;
+    border-radius: var(--radius-card);
   }
 
   .img {

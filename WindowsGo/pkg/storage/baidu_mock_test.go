@@ -337,6 +337,19 @@ func (m *baiduMock) methodList(w http.ResponseWriter, r *http.Request) {
 			items = append(items, itemJSON(name, m.entries[p]))
 		}
 	}
+	// 对齐真实接口的 start/limit 分页语义：超出范围的 start 返回空页
+	// （后端据此判尾页终止翻页循环）。
+	start, _ := strconv.Atoi(r.URL.Query().Get("start"))
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = baiduListPageSize // 缺省同真实接口按全量返回
+	}
+	if start >= len(items) {
+		items = []any{}
+	} else {
+		end := min(start+limit, len(items))
+		items = items[start:end]
+	}
 	m.writeJSON(w, map[string]any{"errno": 0, "list": items})
 }
 

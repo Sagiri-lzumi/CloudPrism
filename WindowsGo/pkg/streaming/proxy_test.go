@@ -571,3 +571,31 @@ func TestClientAbortSilent(t *testing.T) {
 		t.Fatalf("中断后服务端不健康: status=%d len=%d", status, len(data))
 	}
 }
+
+// TestContentDisposition 下载头必须同时携带 ASCII 回退名与 RFC 5987 编码原名，
+// 且引号/换行不得进入回退名（防响应头注入/拆分）。
+func TestContentDisposition(t *testing.T) {
+	// 纯 ASCII：两参数一致
+	got := contentDisposition("clip.mp4")
+	want := `attachment; filename="clip.mp4"; filename*=UTF-8''clip.mp4`
+	if got != want {
+		t.Errorf("ASCII 名不符:\n got %q\nwant %q", got, want)
+	}
+
+	// 中文原名：回退名逐字节替换 '_'（照片 = 6 字节 UTF-8），原名百分号编码保留
+	got = contentDisposition("照片.jpg")
+	want = `attachment; filename="______.jpg"; filename*=UTF-8''%E7%85%A7%E7%89%87.jpg`
+	if got != want {
+		t.Errorf("中文名编码不符:\n got %q\nwant %q", got, want)
+	}
+
+	// 注入防御：引号/反斜杠/换行不进回退名，特殊字节全部百分号编码
+	got = contentDisposition("a\"b\\c\r\nX-Evil: 1.mp4")
+	want = `attachment; filename="a_b_c__X-Evil: 1.mp4"; filename*=UTF-8''a%22b%5Cc%0D%0AX-Evil%3A%201.mp4`
+	if got != want {
+		t.Errorf("注入防御不符:\n got %q\nwant %q", got, want)
+	}
+	if strings.ContainsAny(got, "\r\n") {
+		t.Errorf("头值不得携带换行，got %q", got)
+	}
+}

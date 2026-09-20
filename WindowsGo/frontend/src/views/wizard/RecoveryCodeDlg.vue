@@ -90,11 +90,12 @@ function onKey(e: KeyboardEvent) {
 .rc-mask {
   position: fixed;
   inset: 0;
-  z-index: 1700;
+  /* 最高一档叠加模态：须盖住向导（+100）与快速连接（+150） */
+  z-index: calc(var(--z-modal) + 200);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--veil);
 }
 
 .rc-panel {
@@ -171,13 +172,5 @@ function onKey(e: KeyboardEvent) {
   gap: 8px;
 }
 
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity var(--dur) var(--ease);
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
+/* .fade-* 过渡基元已在 styles/base.css 全局定义，此处删除重复副本。 */
 </style>

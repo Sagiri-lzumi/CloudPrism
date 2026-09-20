@@ -9,7 +9,7 @@
 //   - 「已定义未使用」也应为 0（本项目的既定标准：无消费点的 token 一律删掉，
 //     历史上连亚克力近似 token 都因无消费点被删除）。
 //
-// 豁免：由 JS 在运行时写到元素 style 上的变量（如 --tree-w / --split-l），
+// 豁免：由 JS 在运行时写到元素 style 上的变量（如 --insp-w），
 // 按设计不出现在 CSS 里，列在 RUNTIME_SET。
 
 import {readFileSync, readdirSync, statSync} from 'node:fs'
@@ -19,7 +19,7 @@ import {fileURLToPath} from 'node:url'
 const SRC = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'src')
 
 /** 由前端 JS 运行时写入内联样式的自定义属性，CSS 侧自然"未定义"。 */
-const RUNTIME_SET = new Set(['--tree-w', '--split-l', '--preview-w'])
+const RUNTIME_SET = new Set(['--insp-w'])
 
 // 定义：`--x: <值>` 且前面是行首/`;`/`{`/空白 —— 不能简单用 `^` 锚行首，
 // 否则 `:root{--a:1px;--b:2px}` 这种写在一行的定义会被漏掉，审计就会误报

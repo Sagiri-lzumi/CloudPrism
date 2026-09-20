@@ -2,6 +2,8 @@
   Button.vue —— 通用按钮（次级操作）。
   视觉：32px 高、radius 6、hover 半透明文字色 7%、pressed 12% 并轻微内缩；
   图标+文字弹性布局，disabled 透明度 40%。颜色全部走 theme.css token。
+  danger：红字 + 淡红描边（批量删除等破坏性次级操作；FilesView 早已在传
+  danger 属性但此处未定义 prop，属性静默 fallthrough 无任何效果——缺陷修复）。
 -->
 <script setup lang="ts">
 import Icon from './Icon.vue'
@@ -15,8 +17,10 @@ withDefaults(
     iconOnly?: boolean
     /** 悬停提示（原生 tooltip 足够，避免自绘弹层开销） */
     title?: string
+    /** 危险次级操作：红字 + 淡红描边 */
+    danger?: boolean
   }>(),
-  {disabled: false, iconOnly: false},
+  {disabled: false, iconOnly: false, danger: false},
 )
 
 const emit = defineEmits<{click: [e: MouseEvent]}>()
@@ -26,7 +30,7 @@ const emit = defineEmits<{click: [e: MouseEvent]}>()
   <button
     type="button"
     class="cp-btn"
-    :class="{'icon-only': iconOnly}"
+    :class="{'icon-only': iconOnly, danger}"
     :disabled="disabled"
     :title="title"
     @click="(e: MouseEvent) => emit('click', e)"
@@ -69,6 +73,22 @@ const emit = defineEmits<{click: [e: MouseEvent]}>()
 
 .cp-btn:disabled {
   opacity: 0.4;
+}
+
+/* 危险次级操作：红字 + 淡红描边（与主按钮红填充拉开重量差：
+   破坏性主操作才用纯红，次级警示用描边即可）。描边用 box-shadow 实现
+   而非 border，避免改变按钮盒尺寸破坏 32px 高对齐。 */
+.cp-btn.danger {
+  color: var(--err);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--err) 45%, transparent);
+}
+
+.cp-btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--err) 8%, transparent);
+}
+
+.cp-btn.danger:active:not(:disabled) {
+  background: color-mix(in srgb, var(--err) 14%, transparent);
 }
 
 .icon-only {

@@ -20,7 +20,16 @@ import (
 	"image/color"
 	"image/jpeg"
 
-	// 注册附加解码格式（标准库 image.Decode 不识别 BMP/WebP）
+	// 格式注册：image.Decode 按内容匹配**已注册**格式，未注册即返回
+	// `image: unknown format`。标准库的 PNG/GIF 不会被 image 包自动注册，
+	// 同样必须空白导入——漏一项的后果是缩略图静默退化成占位图标（前端不报错）。
+	// 回归守卫见 internal/appstate/thumb_format_test.go（不能放在本目录：
+	// 本目录的 thumb_test.go 自己 import 了 image/png|gif 造夹具，会把
+	// 缺失的解码器顺带注册上，使测试永远全绿而真实二进制是坏的）。
+	_ "image/gif"
+	_ "image/png"
+
+	// x/image 提供的附加格式（标准库 image 不认 BMP/WebP）
 	_ "golang.org/x/image/bmp"
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"

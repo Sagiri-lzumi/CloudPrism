@@ -126,7 +126,7 @@ func TestConcurrencyCap(t *testing.T) {
 	c := newCountingRunner()
 	c.gate = make(chan struct{})
 	c.started = make(chan *Task, 8)
-	q.Runner = c.run
+	q.SetRunner(c.run)
 
 	dir := t.TempDir()
 	const n = 6
@@ -186,13 +186,13 @@ func TestAutoRetryThenDone(t *testing.T) {
 	q := bindQueue(t, b)
 
 	var tries int32
-	q.Runner = func(ctx context.Context, task *Task, report func(float64)) error {
+	q.SetRunner(func(ctx context.Context, task *Task, report func(float64)) error {
 		if atomic.AddInt32(&tries, 1) == 1 {
 			return fmt.Errorf("网络抖动")
 		}
 		report(1.0)
 		return nil
-	}
+	})
 	local := writeLocal(t, t.TempDir(), "src.bin", []byte("data"))
 	task := NewTask(local, "f.cpenc", DirUpload)
 	q.Enqueue([]*Task{task})
@@ -218,10 +218,10 @@ func TestAutoRetryExhausted(t *testing.T) {
 	}
 	q := bindQueue(t, b)
 	var tries int32
-	q.Runner = func(ctx context.Context, task *Task, report func(float64)) error {
+	q.SetRunner(func(ctx context.Context, task *Task, report func(float64)) error {
 		atomic.AddInt32(&tries, 1)
 		return fmt.Errorf("持续故障")
-	}
+	})
 	local := writeLocal(t, t.TempDir(), "src.bin", []byte("data"))
 	task := NewTask(local, "f.cpenc", DirUpload)
 	q.Enqueue([]*Task{task})
@@ -248,14 +248,14 @@ func TestManualRetry(t *testing.T) {
 	q := bindQueue(t, b)
 	c := newCountingRunner()
 	c.failFirst = AutoRetries + 1 // 连败（含自动重试）后置 failed
-	q.Runner = func(ctx context.Context, task *Task, report func(float64)) error {
+	q.SetRunner(func(ctx context.Context, task *Task, report func(float64)) error {
 		if c.count(task) < c.failFirst {
 			c.runs[task]++
 			return fmt.Errorf("持续故障")
 		}
 		report(1.0)
 		return nil
-	}
+	})
 	local := writeLocal(t, t.TempDir(), "src.bin", []byte("data"))
 	task := NewTask(local, "f.cpenc", DirUpload)
 	q.Enqueue([]*Task{task})
@@ -280,11 +280,11 @@ func TestCancelAllWaitingAndRunning(t *testing.T) {
 	}
 	q := bindQueue(t, b)
 	started := make(chan *Task, 4)
-	q.Runner = func(ctx context.Context, task *Task, report func(float64)) error {
+	q.SetRunner(func(ctx context.Context, task *Task, report func(float64)) error {
 		started <- task
 		<-ctx.Done() // 运行中的任务：观察取消
 		return ctx.Err()
-	}
+	})
 	dir := t.TempDir()
 	var tasks []*Task
 	for i := 0; i < 3; i++ {
@@ -327,10 +327,10 @@ func TestClearSuppressesCallbacks(t *testing.T) {
 	block := make(chan struct{})
 	var cbCount int32
 	q.OnTaskFinished = func(task *Task, success bool) { atomic.AddInt32(&cbCount, 1) }
-	q.Runner = func(ctx context.Context, task *Task, report func(float64)) error {
+	q.SetRunner(func(ctx context.Context, task *Task, report func(float64)) error {
 		<-block
 		return nil
-	}
+	})
 	local := writeLocal(t, t.TempDir(), "s.bin", []byte("x"))
 	task := NewTask(local, "f.cpenc", DirUpload)
 	q.Enqueue([]*Task{task})
@@ -370,7 +370,7 @@ func TestRebindRestoresCallbacks(t *testing.T) {
 	q.Bind(newSession(t), b, nil)
 	var cbCount atomic.Int32
 	q.OnTaskFinished = func(task *Task, success bool) { cbCount.Add(1) }
-	q.Runner = func(ctx context.Context, task *Task, report func(float64)) error { return nil }
+	q.SetRunner(func(ctx context.Context, task *Task, report func(float64)) error { return nil })
 	local := writeLocal(t, t.TempDir(), "s.bin", []byte("x"))
 	task := NewTask(local, "f.cpenc", DirUpload)
 	q.Enqueue([]*Task{task})
@@ -419,7 +419,7 @@ func TestDirtyResumeDeletesPartial(t *testing.T) {
 	}
 	q := bindQueue(t, b)
 	var deleted atomic.Bool
-	q.Runner = func(ctx context.Context, task *Task, report func(float64)) error {
+	q.SetRunner(func(ctx context.Context, task *Task, report func(float64)) error {
 		// 真实 runner 上传前应确认远端半成品已清理
 		ok, err := b.Exists(ctx, task.RemotePath)
 		if err != nil {
@@ -431,7 +431,7 @@ func TestDirtyResumeDeletesPartial(t *testing.T) {
 		deleted.Store(true)
 		report(1.0)
 		return nil
-	}
+	})
 
 	dir := t.TempDir()
 	local := writeLocal(t, dir, "src.bin", []byte("version-1"))
@@ -474,10 +474,10 @@ func TestCleanResumeKeepsRemote(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := bindQueue(t, b)
-	q.Runner = func(ctx context.Context, task *Task, report func(float64)) error {
+	q.SetRunner(func(ctx context.Context, task *Task, report func(float64)) error {
 		report(1.0)
 		return nil
-	}
+	})
 	dir := t.TempDir()
 	local := writeLocal(t, dir, "src.bin", make([]byte, 2048))
 	st, err := os.Stat(local)
@@ -518,10 +518,10 @@ func TestDownloadPrepareTotal(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := bindQueue(t, b)
-	q.Runner = func(ctx context.Context, task *Task, report func(float64)) error {
+	q.SetRunner(func(ctx context.Context, task *Task, report func(float64)) error {
 		report(1.0)
 		return nil
-	}
+	})
 	task := NewTask("unused.bin", "f.cpenc", DirDownload)
 	q.Enqueue([]*Task{task})
 	waitIdle(t, q, 3*time.Second)
@@ -546,10 +546,10 @@ func TestAggregateDoneFull(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := bindQueue(t, b)
-	q.Runner = func(ctx context.Context, task *Task, report func(float64)) error {
+	q.SetRunner(func(ctx context.Context, task *Task, report func(float64)) error {
 		report(1.0)
 		return nil
-	}
+	})
 	dir := t.TempDir()
 	sizes := []int64{100, 2000, 30000}
 	var total int64

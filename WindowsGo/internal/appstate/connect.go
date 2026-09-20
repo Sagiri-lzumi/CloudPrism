@@ -133,11 +133,14 @@ func (s *State) OpenVault(ctx context.Context, req OpenRequest) (OpenVaultResult
 // applyConnection 装载连接上下文：先锁旧连接，再装配队列/代理/缓存/
 // 同步引擎，最后探测续传记录。返回错误时连接不生效。
 func (s *State) applyConnection(conn *connState) error {
-	s.Lock() // 切换连接前先彻底清场（幂等：未连接时为空操作）
+	s.LockVault() // 切换连接前先彻底清场（幂等：未连接时为空操作）
 
 	// 传输队列绑定：注入密库元信息盐，上传加密复用命中密钥缓存
 	s.cfg.Queue.Bind(conn.sess, conn.backend, conn.meta.Salt)
-	s.cfg.Queue.Runner = s.makeRunner(conn)
+	// Runner 必须走 SetRunner（queue 锁内赋值）：applyConnection 与调度
+	// goroutine 并发执行，直接写字段即数据竞争；SetRunner 在锁内写入
+	// 并 kick，竞争窗口不再存在。
+	s.cfg.Queue.SetRunner(s.makeRunner(conn))
 	s.applyTransferPrefsLocked()
 
 	// 大文件分块读缓存：必须先于代理装配 —— 代理构造后立刻 startProxy，
@@ -210,9 +213,11 @@ func (s *State) rememberCurrentVault(conn *connState, webdavUser string) {
 	s.cfg.Store.Sync()
 }
 
-// Lock 锁定密库：清会话与后端引用，中断传输，重置界面所需状态。
+// LockVault 锁定密库：清会话与后端引用，中断传输，重置界面所需状态。
 // 对照 app.py _lock_vault。幂等（未连接时为空操作）。
-func (s *State) Lock() {
+// 命名避开 Lock：State 同时持有 mu，业务方法叫 Lock 极易与
+// sync.Mutex 惯用名混淆（误读为单纯取锁）。
+func (s *State) LockVault() {
 	s.mu.Lock()
 	conn := s.conn
 	s.conn = nil

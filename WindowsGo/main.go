@@ -37,9 +37,11 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// basePort 默认监听端口；被占用时顺延至 basePort+tryPorts。
+// basePort 默认监听端口；被占用时最多顺延 maxPortOffset 个端口。
+// 单实例探测与实际监听共用同一范围：探测范围若小于监听范围，
+// 会漏掉落在尾部端口上的已在运行实例，导致多开。
 const basePort = 7840
-const tryPorts = 10
+const maxPortOffset = 10
 
 func main() {
 	app := NewApp()
@@ -55,8 +57,8 @@ func main() {
 	srv := web.New(app.log, app.st, app.holder, app.vault, app.files,
 		app.transfer, app.settings, app.preview, app.lan, dist)
 
-	// 单实例：若 basePort..basePort+3 已有 CloudPrism 实例（ping 应答），
-	// 直接打开其界面并退出，避免多开。
+	// 单实例：若 basePort..basePort+maxPortOffset-1 已有 CloudPrism 实例
+	// （ping 应答），直接打开其界面并退出，避免多开。
 	if existing := detectRunningInstance(); existing != "" {
 		app.log.Info("检测到已在运行的实例，打开其界面", "url", existing)
 		_ = win.OpenURL(existing)
@@ -135,7 +137,7 @@ func main() {
 	// onQuit 直接 signal quitCh → 主流程继续走优雅收尾（tray.Run 返回后）。
 	tray.Run(
 		func() { _ = win.OpenURL(url) }, // 打开界面
-		func() { app.st.Lock() },        // 锁定密库
+		func() { app.st.LockVault() },   // 锁定密库
 		func() {
 			select {
 			case quitCh <- struct{}{}:
@@ -152,7 +154,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
-	app.st.Lock()
+	app.st.LockVault()
 	tray.Quit()
 	app.log.Info("CloudPrism 退出")
 	app.closeLog()
@@ -163,7 +165,7 @@ func main() {
 // 返回其 URL；无则空串。
 func detectRunningInstance() string {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
-	for p := basePort; p <= basePort+3; p++ {
+	for p := basePort; p < basePort+maxPortOffset; p++ {
 		resp, err := client.Post(
 			fmt.Sprintf("http://127.0.0.1:%d/api/app/ping", p),
 			"application/json",
@@ -182,10 +184,11 @@ func detectRunningInstance() string {
 }
 
 // listenOn 从 basePort 起尝试绑 host（"127.0.0.1" 或 "0.0.0.0"），
-// 最多顺延 tryPorts 次；token 透传给访问闸门（空串 = 纯本机 fail-closed 模式）。
-// 返回实际监听端口。所有端口均不可绑时返回 error。
+// 范围与单实例探测一致（maxPortOffset 个端口）；token 透传给访问闸门
+// （空串 = 纯本机 fail-closed 模式）。返回实际监听端口。所有端口均不可绑时
+// 返回 error。
 func listenOn(srv *web.Server, host string, token string) (int, error) {
-	for p := basePort; p < basePort+tryPorts; p++ {
+	for p := basePort; p < basePort+maxPortOffset; p++ {
 		addr, err := srv.Listen(host, p, token)
 		if err != nil {
 			continue // 端口被占（非本程序，detectRunningInstance 已排除本程序），顺延
@@ -201,7 +204,7 @@ func listenOn(srv *web.Server, host string, token string) (int, error) {
 		}
 		return port, nil
 	}
-	return 0, fmt.Errorf("无可绑端口（尝试 %d-%d 均失败）", basePort, basePort+tryPorts-1)
+	return 0, fmt.Errorf("无可绑端口（尝试 %d-%d 均失败）", basePort, basePort+maxPortOffset-1)
 }
 
 // fatal 报告致命错误并终止进程。

@@ -4,7 +4,7 @@
 // 依赖仅 x/sys（纯 syscall：DPAPI/COM 对话框/托盘）+ x/image（缩略图）。
 module github.com/Sagiri-lzumi/cloudprism/windowsgo
 
-go 1.25.0
+go 1.27
 
 require golang.org/x/sys v0.47.0
 

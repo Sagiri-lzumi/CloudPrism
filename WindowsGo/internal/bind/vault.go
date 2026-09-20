@@ -36,10 +36,11 @@ func (v *Vault) Open(req appstate.OpenRequest) (appstate.OpenVaultResult, error)
 	return res, nil
 }
 
-// Lock 锁定当前密库（打断任务/清缓存/广播 st:locked 都在 core 完成）。
+// Lock 锁定当前密库（打断任务/清缓存/广播 st:locked 都在 core 完成）；
+// 转发 State.LockVault（State 侧已改名避开 sync.Mutex 惯用名）。
 func (v *Vault) Lock() {
 	v.st.Activity()
-	v.st.Lock()
+	v.st.LockVault()
 }
 
 // State 取全局状态快照（页面初始化/下拉刷新的一次性查询）。

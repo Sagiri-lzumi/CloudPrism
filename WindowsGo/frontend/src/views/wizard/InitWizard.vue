@@ -15,6 +15,7 @@ import {Vault, unwrap} from '../../lib/api'
 import {showInfo, showWarning} from '../../lib/toast'
 import Button from '../../components/fluent/Button.vue'
 import PrimaryButton from '../../components/fluent/PrimaryButton.vue'
+import Checkbox from '../../components/fluent/Checkbox.vue'
 import Icon from '../../components/fluent/Icon.vue'
 import LineEdit from '../../components/fluent/LineEdit.vue'
 import ProgressBar from '../../components/fluent/ProgressBar.vue'
@@ -495,10 +496,9 @@ function enterAt(e: KeyboardEvent) {
 
               <!-- 连接：主密码 / 恢复码 -->
               <template v-else>
-                <label class="chk">
-                  <input v-model="form.useRecovery" type="checkbox" />
+                <Checkbox v-model="form.useRecovery">
                   忘记主密码？改用恢复码开库
-                </label>
+                </Checkbox>
                 <div v-if="!form.useRecovery" class="fld">
                   <label>主密码</label>
                   <LineEdit v-model="form.master" password placeholder="输入主密码" />
@@ -552,11 +552,12 @@ function enterAt(e: KeyboardEvent) {
 .wiz-mask {
   position: fixed;
   inset: 0;
-  z-index: 1600;
+  /* 叠加模态：基准 --z-modal 之上留偏移，确保盖住可能同时打开的 MessageBox */
+  z-index: calc(var(--z-modal) + 100);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--veil);
 }
 
 .wiz-panel {
@@ -793,16 +794,6 @@ function enterAt(e: KeyboardEvent) {
   color: var(--err);
 }
 
-.chk {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.857rem;
-  color: var(--text);
-  cursor: pointer;
-  user-select: none;
-}
-
 .ok-box {
   display: flex;
   align-items: center;
@@ -868,13 +859,5 @@ function enterAt(e: KeyboardEvent) {
   gap: 8px;
 }
 
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity var(--dur) var(--ease);
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
+/* .fade-* 过渡基元已在 styles/base.css 全局定义，此处删除重复副本。 */
 </style>

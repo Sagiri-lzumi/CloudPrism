@@ -1,12 +1,21 @@
 <!--
-  App.vue —— 应用外壳：48px 导航轨（内联 NavRail）+ 页面区 + 底栏。
-  页面：files = 文件浏览（三栏）；transfers = 传输任务；vaults = 密库
-  （未连接引导/已连接信息，双态自处理）；settings = 偏好设置。
+  App.vue —— 应用外壳：可折叠侧栏（品牌头 + 导航 + 目录树 + 页脚）+ 页面区 + 单条底栏。
+
+  页面：files = 文件浏览；transfers = 传输任务；vaults = 密库（未连接引导/已连接
+  信息，双态自处理）；settings = 偏好设置。
+
+  导航语义（v1.3 重构）：
+  · 侧栏是「去哪」的唯一入口，导航项一律**图标 + 文字**，不再靠 tooltip 猜；
+  · 「目录树」不是导航，是文件页的上下文——只在本页且已连接时出现在侧栏，
+    与导航项用分区标题隔开（此前它是文件页里独立的一栏，白占 200px 宽）；
+  · 「锁定密库」保留在页脚（高频且在任意页面都需要），「退出应用」降级为页脚
+    次级图标钮——它不是导航目的地，不该与四个页面平级。
+
   全局快捷键：F5 刷新、Ctrl+L 锁库、Ctrl+U 上传、Ctrl+D 下载选中；
   输入控件聚焦时全部忽略，避免打断输入。
 -->
 <script setup lang="ts">
-import {onBeforeUnmount, onMounted, ref} from 'vue'
+import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import {
   ui,
   start,
@@ -19,6 +28,7 @@ import {
   onDropFiles,
   downloadSel,
   clearRecovery,
+  type PageId,
 } from './lib/store'
 import FilesView from './views/FilesView.vue'
 import TransfersView from './views/TransfersView.vue'
@@ -27,6 +37,7 @@ import SettingsView from './views/SettingsView.vue'
 import RecoveryCodeDlg from './views/wizard/RecoveryCodeDlg.vue'
 import TransferBar from './components/layout/TransferBar.vue'
 import StatusBar from './components/layout/StatusBar.vue'
+import DirTree from './components/DirTree.vue'
 import InfoBar from './components/fluent/InfoBar.vue'
 import Icon from './components/fluent/Icon.vue'
 
@@ -49,18 +60,41 @@ onBeforeUnmount(() => {
   window.removeEventListener('drop', onDrop)
 })
 
-/* --------------------------------------------------- 页面导航定义 */
+/* --------------------------------------------------- 侧栏导航定义 */
 
-// NavRail 中段导航项：icon/name/page
-const NAV_ITEMS = [
-  {page: 'files', icon: 'folder', title: '文件', badge: false},
-  {page: 'transfers', icon: 'sync', title: '传输', badge: true},
-  {page: 'vaults', icon: 'certificate', title: '密库', badge: false},
-  {page: 'settings', icon: 'setting', title: '设置', badge: false},
-] as const
+// 侧栏导航项：icon/name/page
+const NAV_ITEMS: ReadonlyArray<{page: PageId; icon: string; title: string}> = [
+  {page: 'files', icon: 'folder', title: '文件'},
+  {page: 'transfers', icon: 'sync', title: '传输'},
+  {page: 'vaults', icon: 'certificate', title: '密库'},
+  {page: 'settings', icon: 'setting', title: '设置'},
+]
 
-const connected = () => !!ui.snap?.connected
-const isFilePage = () => ui.page === 'files'
+/** 传输项的角标：仅在有活动任务时出现，让「传输」不只是个入口。 */
+const transferBadge = computed(() => {
+  const n = ui.snap?.transferTasks ?? 0
+  return n > 0 ? String(n > 99 ? '99+' : n) : ''
+})
+
+function badgeOf(page: PageId): string {
+  return page === 'transfers' ? transferBadge.value : ''
+}
+
+/* ------------------------------------------------------ 侧栏折叠 */
+
+const NAV_KEY = 'cp-nav-collapsed'
+const navCollapsed = ref(localStorage.getItem(NAV_KEY) === '1')
+
+function toggleNav() {
+  navCollapsed.value = !navCollapsed.value
+  localStorage.setItem(NAV_KEY, navCollapsed.value ? '1' : '0')
+}
+
+const connected = computed(() => !!ui.snap?.connected)
+const isFilePage = computed(() => ui.page === 'files')
+
+/** 目录树只在文件页出现：它表达的是「当前浏览位置」，不是全局导航。 */
+const showTree = computed(() => isFilePage.value && connected.value)
 
 /* ------------------------------------------------------ 全局快捷键 */
 
@@ -72,17 +106,17 @@ function onGlobalKey(e: KeyboardEvent) {
 
   if (e.key === 'F5') {
     e.preventDefault()
-    if (connected() && isFilePage()) reloadDir()
+    if (connected.value && isFilePage.value) reloadDir()
     return
   }
   if (!mod) return
   const k = e.key.toLowerCase()
   if (k === 'l') {
-    if (connected()) void lockVault()
+    if (connected.value) void lockVault()
   } else if (k === 'u') {
-    if (connected() && isFilePage()) void pickUpload()
+    if (connected.value && isFilePage.value) void pickUpload()
   } else if (k === 'd') {
-    if (connected() && isFilePage() && ui.sel) void downloadSel()
+    if (connected.value && isFilePage.value && ui.sel) void downloadSel()
   }
 }
 
@@ -161,42 +195,69 @@ async function onDrop(e: DragEvent) {
 </script>
 
 <template>
-  <div class="app-shell">
-    <!-- NavRail：图标导轨，上下两组（对照 qfw ActivityBar） -->
+  <div class="app-shell" :class="{collapsed: navCollapsed}">
+    <!-- 侧栏：品牌头 + 导航（+ 文件页目录树）+ 页脚 -->
     <nav class="app-nav">
-      <div class="nav-group top">
+      <div class="brand">
+        <span class="brand-mark"><Icon name="cloud" :size="17" /></span>
+        <span class="brand-name lbl">CloudPrism</span>
+        <button
+          type="button"
+          class="collapse-btn"
+          :title="navCollapsed ? '展开侧栏' : '收起侧栏'"
+          :aria-label="navCollapsed ? '展开侧栏' : '收起侧栏'"
+          :aria-expanded="!navCollapsed"
+          @click="toggleNav"
+        >
+          <Icon :name="navCollapsed ? 'care_right_solid' : 'care_left_solid'" :size="12" />
+        </button>
+      </div>
+
+      <div class="nav-body">
+        <p class="nav-title lbl">浏览</p>
         <button
           v-for="n in NAV_ITEMS"
           :key="n.page"
           type="button"
-          class="nav-btn"
+          class="nav-item"
           :class="{on: ui.page === n.page}"
-          :title="n.title"
+          :title="navCollapsed ? n.title : undefined"
           @click="navigate(n.page)"
         >
-          <Icon :name="n.icon" :size="20" />
+          <Icon :name="n.icon" :size="17" class="nav-ic" />
+          <span class="nav-label lbl">{{ n.title }}</span>
+          <span v-if="badgeOf(n.page)" class="nav-badge">{{ badgeOf(n.page) }}</span>
         </button>
+
+        <!-- 目录树：文件页的上下文，与导航用分区标题隔开 -->
+        <template v-if="showTree">
+          <p class="nav-title lbl">目录</p>
+          <div class="nav-tree"><DirTree /></div>
+        </template>
       </div>
-      <div class="nav-space" />
-      <div class="nav-group bottom">
-        <span class="dot" :class="connected() ? 'ok' : ''" title="连接状态" />
+
+      <!-- 页脚：只放「随时可用」的动作。连接态不在这里重复——
+           它是状态不是动作，且底栏（StatusBar）已按项目约定承担该职责
+           （含「完整性核对中 / 可续传」这类事件驱动辅助），两处都显示会互相打架。 -->
+      <div class="nav-foot">
         <button
           type="button"
-          class="nav-btn"
-          :class="{dim: !connected()}"
-          :title="connected() ? '锁定密库（Ctrl+L）' : '未连接'"
-          :disabled="!connected()"
+          class="foot-btn"
+          :disabled="!connected"
+          :title="connected ? '锁定密库（Ctrl+L）' : '未连接'"
           @click="lockVault"
         >
-          <Icon :name="connected() ? 'lock' : 'lock_open'" :size="20" />
+          <Icon :name="connected ? 'lock' : 'lock_open'" :size="15" />
+          <span class="lbl">锁定密库</span>
         </button>
         <button
           type="button"
-          class="nav-btn"
-          title="退出"
+          class="foot-btn icon-only"
+          title="退出应用"
+          aria-label="退出应用"
           @click="quitApp"
         >
-          <Icon name="power_button" :size="20" />
+          <Icon name="power_button" :size="15" />
         </button>
       </div>
     </nav>
@@ -217,9 +278,11 @@ async function onDrop(e: DragEvent) {
       </Transition>
     </main>
 
-    <!-- 底栏：传输条（仅活动时占位）+ 状态条 -->
-    <TransferBar class="app-transfer" />
-    <StatusBar class="app-status" />
+    <!-- 底栏：单条区域，传输条仅活动时在此展开（外框与顶边只由 .app-foot 提供） -->
+    <footer class="app-foot">
+      <TransferBar />
+      <StatusBar />
+    </footer>
 
     <!-- 通知条 host（队列在 lib/toast） -->
     <InfoBar />
@@ -251,99 +314,265 @@ async function onDrop(e: DragEvent) {
 </template>
 
 <style scoped>
-/* 导航轨按钮组 */
-.nav-group {
+/* ============================================================ 侧栏
+   宽度走 --nav-w（折叠时由 .app-shell.collapsed 换成 56px），
+   品牌头/导航项/页脚全部按同一变量排版，折叠只切一个值。 */
+.app-nav {
   display: flex;
   flex-direction: column;
+  width: var(--nav-w, 192px);
+  min-width: var(--nav-w, 192px);
+  padding: 0;
+  background: var(--nav-bg);
+  backdrop-filter: blur(16px) saturate(1.5);
+  border-right: 1px solid var(--divider);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* ---- 品牌头 ---- */
+.brand {
+  display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 9px;
+  flex: none;
+  height: 52px;
+  padding: 0 8px 0 12px;
 }
 
-.nav-space {
-  flex: 1;
-}
-
-.nav-btn {
-  position: relative;
+.brand-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  margin: 2px 0;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-radius: var(--radius-ctrl);
+}
+
+.brand-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.929rem;
+  font-weight: 650;
+  color: var(--heading);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
   color: var(--text2);
   background: transparent;
   border: none;
   border-radius: var(--radius-ctrl);
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
-    transform var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
-/* 选中态左侧指示条（ActivityBar 语义）：圆头短条 + 淡辉光 */
-.nav-btn.on::before {
-  content: "";
-  position: absolute;
-  left: -4px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 20px;
-  border-radius: var(--radius-round);
+.collapse-btn:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+}
+
+/* ---- 导航主体（可滚动：目录树长起来时导航项不被顶出视野） ---- */
+.nav-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 分区标题：把「去哪」与「在哪」两种语义分开 */
+.nav-title {
+  margin: 10px 8px 4px;
+  font-size: 0.714rem;
+  font-weight: 600;
+  color: var(--text2);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  height: 34px;
+  padding: 0 8px;
+  margin-bottom: 1px;
+  font-family: inherit;
+  font-size: 0.857rem;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  /* 选中态是「整块圆角面」而不是细指示条：与苹果风侧栏一致 */
+  border-radius: var(--radius-ctrl);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.nav-item:hover:not(.on) {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.nav-item.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.nav-ic {
+  flex: none;
+  color: var(--text2);
+}
+
+.nav-item.on .nav-ic {
+  color: var(--accent);
+}
+
+.nav-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 活动任务角标：让「传输」这个入口自己带上状态 */
+.nav-badge {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 0.714rem;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--text-on-accent);
   background: var(--accent);
-  box-shadow: 0 0 8px var(--accent-ring);
+  border-radius: var(--radius-round);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
-.nav-btn:hover:not(:disabled) {
+/* ---- 目录树宿主 ----
+   树自己要撑满剩余高度并可滚动；侧栏已提供左右内边距，树不再自带。 */
+.nav-tree {
+  flex: 1;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---- 页脚：随时可用的动作（锁定 / 退出） ---- */
+.nav-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  border-top: 1px solid var(--divider);
+}
+
+.foot-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  font-family: inherit;
+  font-size: 0.857rem;
+  color: var(--text2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-ctrl);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.foot-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--text) 7%, transparent);
   color: var(--text);
 }
 
-.nav-btn:active:not(:disabled) {
-  transform: scale(.94);
+.foot-btn:disabled {
+  opacity: 0.4;
 }
 
-.nav-btn:disabled {
-  opacity: 0.3;
+/* 退出：次级图标钮，不与「锁定密库」争夺视觉权重 */
+.foot-btn.icon-only {
+  flex: none;
+  width: 30px;
+  justify-content: center;
+  padding: 0;
 }
 
-.nav-btn.on {
-  color: var(--accent);
-  background: var(--accent-soft);
+/* ============================================================ 折叠态
+   只切 --nav-w 与隐藏文字；图标仍居中，命中区不变。 */
+.app-shell.collapsed .lbl {
+  display: none;
 }
 
-.nav-btn.on:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+.app-shell.collapsed .brand {
+  justify-content: center;
+  padding: 0 4px;
 }
 
-.nav-btn.dim {
-  color: var(--text2);
+.app-shell.collapsed .brand-mark {
+  display: none;
 }
 
-/* 底部操作簇：小圆点 + 锁定/退出，整体圆角聚组，hover 分明 */
-.nav-group.bottom {
-  gap: 2px;
-  padding-top: 6px;
-  margin-top: 6px;
-  border-top: 1px solid var(--divider);
+.app-shell.collapsed .nav-item,
+.app-shell.collapsed .foot-btn {
+  justify-content: center;
+  gap: 0;
+  padding: 0;
 }
 
-/* 连接状态点（导航轨底部） */
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin: 4px 0 4px;
-  background: var(--warn);
-  opacity: 0.85;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent);
+/* 折叠时不给树留位置（它的内容没有可用宽度） */
+.app-shell.collapsed .nav-tree {
+  display: none;
 }
 
-.dot.ok {
-  background: var(--ok);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 16%, transparent);
+.app-shell.collapsed .nav-title {
+  display: none;
 }
 
-/* 页面切换淡入（qfw StackedWidget 过渡语义） */
+/* 角标在折叠态改为吸附在图标右上角，避免把 34px 的行撑破 */
+.app-shell.collapsed .nav-badge {
+  position: absolute;
+  top: 1px;
+  right: 6px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  font-size: 0.643rem;
+  line-height: 15px;
+}
+
+/* 折叠时页脚两钮竖排（56px 宽放不下「图标 + 文字」并排） */
+.app-shell.collapsed .nav-foot {
+  flex-direction: column;
+}
+
+.app-shell.collapsed .foot-btn.icon-only {
+  width: 100%;
+}
+
+/* ============================================================ 页面过渡 */
 .page-enter-active,
 .page-leave-active {
   transition: opacity var(--dur) var(--ease);
@@ -358,18 +587,6 @@ async function onDrop(e: DragEvent) {
   height: 100%;
 }
 
-/* app-nav 底内边距收束（layout.css 已定义网格轨道）
-   半透底 + 毛玻璃：环境光渐层从下方透出，导航轨不再是"一块死板的灰条" */
-.app-nav {
-  display: flex;
-  flex-direction: column;
-  padding: 8px 4px;
-  background: var(--nav-bg);
-  backdrop-filter: blur(16px) saturate(1.5);
-  border-right: 1px solid var(--divider);
-  box-sizing: border-box;
-}
-
 /* ---- 全窗口拖放遮罩 ----
    铺满视口、压住内容但低于模态框。pointer-events: none 是关键：
    遮罩若可接收指针事件，它自己就成了 drop 落点，虽然 window 上的 drop
@@ -377,13 +594,13 @@ async function onDrop(e: DragEvent) {
 .drop-veil {
   position: fixed;
   inset: 0;
-  z-index: 800;
+  z-index: var(--z-veil);
   display: flex;
   align-items: center;
   justify-content: center;
   pointer-events: none;
-  /* 兼容性优先：不用 color-mix，深浅两主题下都是标准遮罩观感 */
-  background: rgba(0, 0, 0, .28);
+  /* 提示级暗罩：比模态遮罩轻，且不随主题变化（见 theme.css 的 --scrim-hint） */
+  background: var(--scrim-hint);
   backdrop-filter: blur(2px);
   animation: veil-in var(--dur-fast) var(--ease);
 }
@@ -437,53 +654,80 @@ async function onDrop(e: DragEvent) {
   to { transform: rotate(360deg); }
 }
 
-/* ---- 手机（≤640px）：导航轨竖轨 → 底部横排 TabBar ----
+/* ---- 手机（≤640px）：侧栏 → 底部横排 TabBar ----
    本组件 scoped 规则的 specificity 高于 layout.css 的裸类选择器，
-   故导航轨的形态覆盖必须写在这里，写进 layout.css 会被这里压掉。 */
+   故侧栏的形态覆盖必须写在这里，写进 layout.css 会被这里压掉。
+   品牌头与目录树是桌面语义（640px 下没有可用宽度），隐去；
+   四个导航项平分宽度，右侧保留「锁定 / 退出」两个图标钮——
+   它们是任意页面都用得到的动作，不该因为窄屏而消失。 */
 @media (max-width: 640px) {
   .app-nav {
-    grid-row: 4;
-    grid-column: 1;
     flex-direction: row;
     align-items: center;
+    width: auto;
+    min-width: 0;
     padding: 4px 6px;
     border-right: none;
     border-top: 1px solid var(--divider);
   }
 
-  /* 横排后原左侧选中指示条改为底部 2px 短条（TabBar 选中语义） */
-  .nav-btn.on::before {
-    left: 50%;
-    top: auto;
-    bottom: 0;
-    width: 22px;
-    height: 2px;
-    transform: translateX(-50%);
+  .brand {
+    display: none;
   }
 
-  /* 上下两组由纵向堆叠改横向：导航项 | 弹性空隙 | 锁定/退出 */
-  .nav-group {
-    flex-direction: row;
-    gap: 4px;
-  }
-
-  .nav-space {
+  /* 横排时导航主体不再滚动，四项平分剩余宽度 */
+  .nav-body {
     flex: 1;
+    flex-direction: row;
+    align-items: center;
+    gap: 2px;
+    padding: 0;
+    min-width: 0;
+    overflow: visible;
   }
 
-  /* 操作簇的分隔线由顶部改为左侧（横排后"上"变"左"） */
-  .nav-group.bottom {
-    padding: 0 0 0 8px;
-    margin: 0 0 0 8px;
+  .nav-title,
+  .nav-tree {
+    display: none;
+  }
+
+  .nav-item {
+    flex: 1;
+    height: 46px;
+    flex-direction: column;
+    gap: 1px;
+    justify-content: center;
+    padding: 0;
+    font-size: 0.714rem;
+  }
+
+  /* 页脚收成右侧动作簇：竖排改为横排，去掉顶边改左边的分隔线 */
+  .nav-foot {
+    flex: none;
+    flex-direction: row;
+    gap: 2px;
+    padding: 0 0 0 6px;
+    margin-left: 6px;
     border-top: none;
     border-left: 1px solid var(--divider);
   }
 
-  /* 触摸目标放大到 44px（iOS HIG 最小点击区），避免手机误触 */
-  .nav-btn {
-    width: 44px;
-    height: 44px;
-    margin: 0;
+  .foot-btn {
+    flex: none;
+    width: 42px;
+    height: 42px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  /* 横排下只留图标：文字会把这 42px 的格子挤爆 */
+  .foot-btn .lbl {
+    display: none;
+  }
+
+  /* 触摸目标：文字标签在横排下必须常显（图标 + 文字才够明确） */
+  .app-shell.collapsed .nav-item .lbl {
+    display: block;
   }
 }
 </style>

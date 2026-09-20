@@ -9,13 +9,14 @@
   快照由 10Hz 帧驱动（ui.snap），无需本地定时器。
 -->
 <script setup lang="ts">
-import {computed, onMounted, reactive, ref} from 'vue'
+import {computed, onMounted, onUnmounted, reactive, ref} from 'vue'
 import {ui, openVault, navigate, lockVault, endOp} from '../lib/store'
 import {Settings, Vault, unwrap} from '../lib/api'
 import {fmtSize, fmtConnectSec} from '../lib/format'
 import {showError, showInfo, showSuccess, showWarning} from '../lib/toast'
 import Button from '../components/fluent/Button.vue'
 import PrimaryButton from '../components/fluent/PrimaryButton.vue'
+import Checkbox from '../components/fluent/Checkbox.vue'
 import Icon from '../components/fluent/Icon.vue'
 import Card from '../components/fluent/Card.vue'
 import LineEdit from '../components/fluent/LineEdit.vue'
@@ -44,6 +45,11 @@ async function refreshRecents() {
 onMounted(() => {
   // 未连接时拉取最近列表；已连接态由连接流程负责跳页，此页不展示 recents
   void refreshRecents()
+  window.addEventListener('keydown', onKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
 })
 
 function openWizard() {
@@ -159,6 +165,21 @@ async function doQuickConnect() {
 }
 
 /* ----------------------------------------------------- 已连接功能区 */
+
+/** 快速连接面板的 Esc 关闭。
+ *  .qc-mask 上没有可聚焦元素、也没绑键盘事件，不注册全局监听就没法用键盘退出
+ *  （本页其余浮层——MessageBox / RoundMenu / 向导 / 恢复码——都已各自支持 Esc，
+ *  这里补齐最后一块）。
+ *  守卫三点：面板没开不响应；连接进行中不响应（此时关闭会让用户误以为已取消，
+ *  而实际上请求仍在飞）；上层还压着向导或重命名对话框时不响应，
+ *  避免一次 Esc 顺着关掉两层。 */
+function onKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  if (!qc.open || qc.busy) return
+  if (showWiz.value || renameDlg.open) return
+  e.preventDefault()
+  qc.open = false
+}
 
 // 自动锁文案（索引语义：0=从不 1/2/3=5/15/30 分钟）
 const AUTOLOCK_LABELS = ['从不（不自动锁定）', '5 分钟', '15 分钟', '30 分钟']
@@ -389,6 +410,12 @@ async function onOtherConfirm(payload: string | boolean) {
     <template v-else>
       <div class="v-conn">
         <div class="v-inner">
+          <!-- 页头：与设置/传输两页统一的大标题模式（见 components.css .page-head） -->
+          <div class="page-head">
+            <h1 class="page-h1">密库</h1>
+            <p class="page-sub">当前密库的连接信息与存储配置</p>
+          </div>
+
           <!-- 概览卡：图标 + 库名/后端 + 快捷操作（锁定/重命名） -->
           <section class="ov-card">
             <span class="ov-icon"><Icon name="cloud" :size="22" /></span>
@@ -404,7 +431,7 @@ async function onOtherConfirm(payload: string | boolean) {
 
           <!-- ============ 连接信息 ============ -->
           <div class="group-title">连接信息</div>
-          <div class="set-card">
+          <div class="set-card accent-icon">
             <span class="set-icon"><Icon name="globe" :size="17" /></span>
             <div class="set-body">
               <div class="set-title">存储位置</div>
@@ -412,14 +439,14 @@ async function onOtherConfirm(payload: string | boolean) {
             </div>
             <div class="set-right"><span class="ch-badge">{{ snap().backend }}</span></div>
           </div>
-          <div class="set-card">
+          <div class="set-card accent-icon">
             <span class="set-icon"><Icon name="folder" :size="17" /></span>
             <div class="set-body">
               <div class="set-title">密库路径</div>
               <div class="set-content">{{ snap().vaultPath || '根目录' }}</div>
             </div>
           </div>
-          <div class="set-card">
+          <div class="set-card accent-icon">
             <span class="set-icon"><Icon name="hide" :size="17" /></span>
             <div class="set-body">
               <div class="set-title">文件名加密</div>
@@ -434,14 +461,14 @@ async function onOtherConfirm(payload: string | boolean) {
               </span>
             </div>
           </div>
-          <div class="set-card">
+          <div class="set-card accent-icon">
             <span class="set-icon"><Icon name="date_time" :size="17" /></span>
             <div class="set-body">
               <div class="set-title">本次连接</div>
               <div class="set-content">自连接起已持续 {{ fmtConnectSec(snap().connectedSec) }}，锁定后重连需重新验证</div>
             </div>
           </div>
-          <div class="set-card">
+          <div class="set-card accent-icon">
             <span class="set-icon"><Icon name="stop_watch" :size="17" /></span>
             <div class="set-body">
               <div class="set-title">自动锁定</div>
@@ -455,7 +482,7 @@ async function onOtherConfirm(payload: string | boolean) {
 
           <!-- ============ 云端占用 ============ -->
           <div class="group-title">云端占用</div>
-          <div class="set-card">
+          <div class="set-card accent-icon">
             <span class="set-icon"><Icon name="pie_single" :size="17" /></span>
             <div class="set-body">
               <div class="set-title">密库空间统计</div>
@@ -479,7 +506,7 @@ async function onOtherConfirm(payload: string | boolean) {
 
           <!-- ============ 同步与安全 ============ -->
           <div class="group-title">同步与安全</div>
-          <div class="set-card">
+          <div class="set-card accent-icon">
             <span class="set-icon"><Icon name="sync" :size="17" /></span>
             <div class="set-body">
               <div class="set-title">文件夹同步</div>
@@ -521,7 +548,7 @@ async function onOtherConfirm(payload: string | boolean) {
             </ul>
           </template>
 
-          <div class="set-card">
+          <div class="set-card accent-icon">
             <span class="set-icon"><Icon name="qrcode" :size="17" /></span>
             <div class="set-body">
               <div class="set-title">恢复码</div>
@@ -539,7 +566,7 @@ async function onOtherConfirm(payload: string | boolean) {
 
           <!-- ============ 其它密库 ============ -->
           <div class="group-title">其它密库</div>
-          <div class="set-card">
+          <div class="set-card accent-icon">
             <span class="set-icon"><Icon name="library" :size="17" /></span>
             <div class="set-body">
               <div class="set-title">同一位置的其它密库</div>
@@ -593,10 +620,9 @@ async function onOtherConfirm(payload: string | boolean) {
               <LineEdit v-model="qc.webdavPass" password placeholder="服务器密码（应用专用密码）" />
             </div>
 
-            <label class="chk">
-              <input v-model="qc.useRecovery" type="checkbox" />
+            <Checkbox v-model="qc.useRecovery" class="chk">
               忘记主密码？改用恢复码开库
-            </label>
+            </Checkbox>
 
             <div v-if="!qc.useRecovery" class="qc-fld">
               <label>主密码</label>
@@ -834,8 +860,10 @@ async function onOtherConfirm(payload: string | boolean) {
   padding: 18px 24px 28px;
 }
 
+/* 单列内容列宽：与设置页统一为 860px（此前本页 760 / 设置页 860，切换页面时
+   中间列会左右跳动） */
 .v-inner {
-  max-width: 760px;
+  max-width: 860px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -896,65 +924,16 @@ async function onOtherConfirm(payload: string | boolean) {
   flex: none;
 }
 
-/* 分组标题（对照 SettingsView 同款） */
-.group-title {
-  margin: 14px 4px 2px;
-  font-size: 0.857rem;
-  font-weight: 600;
-  color: var(--muted);
-}
+/* 分组标题、设置卡骨架（.group-title / .set-card / .set-icon / .set-body /
+   .set-title / .set-content / .set-right）**已全部收敛到 styles/components.css**，
+   此处不再重复定义。历史问题：本页曾整份复制一份「accent 图标 + 阴影」变体，
+   因 scoped 选择器带 [data-v-*]、特异性高于全局同名类，导致全局窄屏规则对本页
+   失效（同一套骨架两处维护、改一处漏一处）。现在本页只用全局骨架 + 两个语义
+   变体类（模板上的 .accent-icon 与全局的 .set-card.ok），字号也随之与设置页统一
+   （标题 14px / 说明 12px）。
+   下面只保留仅本页使用、无需上收的补充规则。 */
 
-.group-title:first-child {
-  margin-top: 0;
-}
-
-/* 设置卡（对照 SettingsView .set-card：图标+标题+说明+右侧控件） */
-.set-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-height: 56px;
-  padding: 10px 16px;
-  background: var(--surface);
-  border: 1px solid var(--stroke-card);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
-  transition: border-color var(--dur-fast) var(--ease);
-}
-
-.set-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 34px;
-  height: 34px;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-radius: 8px;
-}
-
-.set-body {
-  flex: 1;
-  min-width: 0;
-}
-
-.set-title {
-  font-size: 0.857rem;
-  font-weight: 600;
-  color: var(--heading);
-}
-
-.set-content {
-  margin-top: 2px;
-  overflow: hidden;
-  font-size: 0.786rem;
-  line-height: 1.45;
-  color: var(--text2);
-  text-overflow: ellipsis;
-  overflow-wrap: anywhere;
-}
-
+/* 说明行里的强调片段（当前值 / 错误态） */
 .set-content .em {
   color: var(--heading);
   font-weight: 600;
@@ -963,13 +942,6 @@ async function onOtherConfirm(payload: string | boolean) {
 
 .set-content .err {
   color: var(--err);
-}
-
-.set-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: none;
 }
 
 .set-value {
@@ -1081,11 +1053,12 @@ async function onOtherConfirm(payload: string | boolean) {
 .qc-mask {
   position: fixed;
   inset: 0;
-  z-index: 1650;
+  /* 叠加模态：高于基准 --z-modal，低于恢复码对话框（+200）与通知条 */
+  z-index: calc(var(--z-modal) + 150);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--veil);
 }
 
 .qc-panel {
@@ -1156,15 +1129,10 @@ async function onOtherConfirm(payload: string | boolean) {
   color: var(--text);
 }
 
+/* 只负责复选框在表单里的垂直节奏；外观（尺寸/勾选态/字号）全部由 Checkbox 组件负责，
+   此处不要再写 display/gap/font-size —— 会与组件内 .cp-chk 的规则同权重打架 */
 .chk {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   margin-top: 4px;
-  font-size: 0.857rem;
-  color: var(--text);
-  cursor: pointer;
-  user-select: none;
 }
 
 .qc-status {
@@ -1184,15 +1152,7 @@ async function onOtherConfirm(payload: string | boolean) {
   margin-top: 16px;
 }
 
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity var(--dur) var(--ease);
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
+/* .fade-* 过渡基元已在 styles/base.css 全局定义，此处删除重复副本。 */
 
 /* ============================================================ 响应式
  * 手机（≤640px）适配。
@@ -1209,24 +1169,8 @@ async function onOtherConfirm(payload: string | boolean) {
  * ============================================================ */
 
 @media (max-width: 640px) {
-  .set-card {
-    flex-wrap: wrap;
-    align-items: flex-start;
-    gap: 8px 10px;
-    padding: 10px 12px;
-  }
-
-  /* min-width 兜底：与图标同行时也给文本留出可读宽度 */
-  .set-body {
-    min-width: 120px;
-  }
-
-  /* flex-basis 100% 强制换行；沿用右对齐承接原视觉层级 */
-  .set-right {
-    flex: 1 1 100%;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
+  /* 设置卡的窄屏换行（.set-card/.set-body/.set-right）已在 styles/components.css
+     统一处理，此处不再重复 —— 重复的 scoped 副本特异性更高，会让全局规则形同虚设。 */
 
   /* 概览卡（本页独有结构）：库名/后端占第一行，重命名/锁定换第二行 */
   .ov-card {

@@ -165,7 +165,7 @@ const menuStyle = computed(() => ({left: pos.value.left + 'px', top: pos.value.t
 <style scoped>
 .cp-menu {
   position: fixed;
-  z-index: 1000;
+  z-index: var(--z-menu);
   min-width: 140px;
   padding: 4px;
   background: var(--surface);
@@ -186,7 +186,7 @@ const menuStyle = computed(() => ({left: pos.value.left + 'px', top: pos.value.t
   color: var(--text);
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-ctrl); /* 与菜单容器/控件的圆角口径一致（原为一次性 4px） */
   text-align: left;
   transition: background var(--dur-fast) var(--ease);
 }

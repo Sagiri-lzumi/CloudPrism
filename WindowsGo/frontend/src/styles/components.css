@@ -150,6 +150,74 @@
   transform: rotate(180deg);
 }
 
+/* ============================================================ 页头与分组
+
+   ---- 页头（设置 / 传输 / 密库三页共用）----
+   分工：工具栏（layout.css 的 .cp-toolbar）只放动作，页题下沉到内容区做
+   大标题 + 一行副标题（macOS「大标题」观感）。FilesView 的工具栏本就只有
+   动作按钮、没有页题，是这一约定的原型；此前 Settings/Transfers 把页题以
+   12px 小字挤在工具栏里，且两页各写了一份**完全重复**的 .page-title/.count，
+   VaultsView 则干脆没有页题 —— 现统一到此处，三页共用。
+   ============================================================ */
+
+.page-head {
+  padding: 2px 4px 12px;
+}
+
+.page-h1 {
+  margin: 0;
+  font-size: 1.43rem; /* 14px 基准下的 20px：macOS 大标题档，显著高于正文 */
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--heading);
+}
+
+.page-sub {
+  margin: 3px 0 0;
+  font-size: 0.857rem;
+  color: var(--text2);
+}
+
+/* 轻量计数徽章：内联在页题/副标题里（如「3 个进行中」） */
+.count {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 0.786rem;
+  font-weight: 400;
+  color: var(--text2);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  border-radius: var(--radius-round);
+  vertical-align: 1px;
+}
+
+/* ---- 分组标题（设置 / 密库两页共用；此前各写一份且上下间距不一致）---- */
+.group-title {
+  margin: 16px 4px 6px; /* 组间距较旧值（4px / 2px）加大，让分组边界更清楚 */
+  font-size: 0.857rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.group-title:first-child {
+  margin-top: 0;
+}
+
+/* ---- 设置卡的图标块变体（骨架见文件开头）---- */
+
+/* ① 成功态：图标染语义绿 */
+.set-card.ok .set-icon {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+
+/* ② 品牌色常态：密库管理页的信息卡用（默认骨架是中性底、仅「可点卡」hover
+   才染色）。权重 (0,3,0) 低于可点卡的 hover 规则 (0,4,0)，故二者可叠加；
+   当前密库页没有既 accent 又可点的卡，无需为这种组合额外定义。 */
+.set-card.accent-icon .set-icon {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 /* ============================================================ 响应式
  * 手机（≤640px）：设置卡骨架「图标 + 文本 + 右侧操作」横排在 375px 下会崩。
  * 根因：.set-body 是 flex:1 且 min-width:0，允许一直收缩到 0，而 .set-right

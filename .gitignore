@@ -266,4 +266,6 @@ WindowsGo/frontend/package.json.md5
 .workbuddy/
 
 .gocache/
+# Go 构建临时目录
+.gotmp/
 .gitattributes

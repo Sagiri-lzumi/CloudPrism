@@ -1,12 +1,13 @@
 /*
- * theme.css —— 明暗主题 token（v38 现代 Web 化基准）。
+ * theme.css —— 明暗主题 token（苹果风迁移基准）。
  *
  * 取值口径：
- *  - 品牌色 `--accent #0067b8` 与语义色沿用参考实现的主题常量（逐字保留，
- *    不随明暗变化），保证加密库 UI 的识别色稳定；
- *  - 表面分层、圆角、阴影按「现代 Web 化」重定：更柔的分层阴影（三层叠加）、
- *    更大的圆角（卡片 12 / 控件 6）、极淡环境光渐层（--bg-ambient，由
- *    layout.css 的 .app-shell 消费），替代原来扁平的单层阴影观感；
+ *  - 强调色迁 macOS/iOS 系统蓝：浅色 #007AFF / 深色 #0A84FF，主按钮纯色
+ *    填充（弃三段渐变与辉光，Fluent 残留）。历史决策「识别色不随明暗变化」
+ *    由本次迁移推翻——深色下需要更亮的系统蓝保证对比度；
+ *  - 分层走「明度差」而非描边：浅色卡片描边透明（#fff 卡浮在 #f4f5f7
+ *    底上）；深色保留极淡白描边兜底（否则深灰卡沉进黑底"一坨黑"）；
+ *  - 底色干净：移除 --bg-ambient 环境光渐层（Mica 残留），苹果风要平铺底色；
  *  - 字号一律 px 语义（历史教训：pt 在 96DPI 下会放大约 33%）：正文以
  *    1rem = 设置字号（默认 14px），标题用 rem 等比缩放；间距/圆角固定 px。
  *
@@ -23,23 +24,21 @@
 
     color-scheme: light;
 
-    /* ---- 品牌色 ----
-       light/dark 是品牌色的明暗两端，唯一消费点是 --accent-grad（主按钮渐变）；
-       按钮的 hover/按压用 filter 提亮压暗渐变，故不再保留 hover/pressed 取名。 */
-    --accent: #0067b8;
-    --accent-light: #2f9ae0;
-    --accent-dark: #004f8f;
-    --accent-soft: rgba(0, 103, 184, .12);   /* 选中/悬停条目底色 */
-    --accent-softer: rgba(0, 103, 184, .07); /* 更大面积、更淡的底 */
-    --accent-grad: linear-gradient(135deg, var(--accent-light) 0%, var(--accent) 58%, var(--accent-dark) 100%);
-    --accent-ring: rgba(0, 103, 184, .34);   /* 焦点/辉光 */
+    /* ---- 品牌色（苹果系统蓝）----
+       纯色体系：主按钮直接用 --accent 纯色填充（macOS HIG 无渐变主按钮），
+       故不再保留 accent-grad / accent-light / accent-dark；
+       hover/按压仍用 filter 提亮压暗纯色，故无 hover/pressed 取名。 */
+    --accent: #007AFF;
+    --accent-soft: rgba(0, 122, 255, .12);   /* 选中/悬停条目底色 */
+    --accent-softer: rgba(0, 122, 255, .07); /* 更大面积、更淡的底 */
+    --accent-ring: rgba(0, 122, 255, .34);   /* 焦点圈 */
 
     /* ---- 语义色 ---- */
     --ok: #2e7d32;
     --err: #c62828;
     --warn: #ef6c00;
     --muted: #5c5c5c;
-    --link: #0067b8;
+    --link: #007AFF;
     --heading: #16161a;
 
     /* ---- 表面分层 ---- */
@@ -50,15 +49,10 @@
     --surface-pressed: #eceef1;
     --fill-quiet: #f1f3f5;      /* 图标块/安静底 */
     --stroke: rgba(16, 24, 40, .10);
-    --stroke-card: rgba(16, 24, 40, .07);
+    /* 卡片描边透明：浅色靠 #fff 卡 vs #f4f5f7 底的明度差分层（苹果风无描边卡） */
+    --stroke-card: transparent;
     --divider: rgba(16, 24, 40, .07);
     --nav-bg: rgba(255, 255, 255, .72); /* 导航轨半透底（配 backdrop blur） */
-
-    /* 环境光渐层：铺在窗口底色上，给出极淡的纵深，不干扰文字可读性 */
-    --bg-ambient:
-        radial-gradient(1100px 560px at 6% -12%, rgba(0, 103, 184, .10), transparent 62%),
-        radial-gradient(880px 480px at 100% -4%, rgba(94, 114, 235, .08), transparent 58%),
-        radial-gradient(720px 520px at 46% 112%, rgba(0, 170, 200, .06), transparent 62%);
 
     /* ---- 文字色 ---- */
     --text: #1c1c21;
@@ -77,10 +71,31 @@
 
     /* ---- 阴影（三层叠加：贴地细线 + 中景柔散 + 远景扩散） ---- */
     --shadow-1: 0 1px 1px rgba(16, 24, 40, .03), 0 1px 2px rgba(16, 24, 40, .05);
-    --shadow-card: 0 1px 2px rgba(16, 24, 40, .04), 0 4px 12px -4px rgba(16, 24, 40, .08);
+    /* 卡片阴影减淡：分层主要靠明度差，阴影只留极轻的「贴地感」 */
+    --shadow-card: 0 1px 2px rgba(16, 24, 40, .04), 0 2px 8px -2px rgba(16, 24, 40, .05);
     --shadow-pop: 0 4px 8px rgba(16, 24, 40, .06),
                   0 16px 32px -8px rgba(16, 24, 40, .14),
                   0 32px 64px -24px rgba(16, 24, 40, .18);
+
+    /* ---- 浮层层级（z-index 档位：面板 < 遮罩 < 菜单 < 模态 < 通知）----
+       叠加模态（向导/快速连接/恢复码需叠在 MessageBox 之上）用 calc 偏移，
+       相对关系集中在此可查；散点数值一律收编，明暗同值无深色转发。 */
+    --z-raise: 2;      /* 卡内局部抬升（勾选角标） */
+    --z-sheet: 620;    /* 面板级浮层（≤640px 预览全屏） */
+    --z-veil: 800;     /* 全窗遮罩（拖放提示/拖拽拦截） */
+    --z-menu: 1000;    /* 弹出菜单 */
+    --z-modal: 1500;   /* 基准模态对话框 */
+    --z-toast: 2000;   /* 通知条（永远最高） */
+
+    /* 模态遮罩：苹果风半透黑（深色档加深一档，防黑底上穿透感不足） */
+    --veil: rgba(0, 0, 0, .4);
+
+    /* 非模态的两类黑底：刻意不随主题变化（都是压在内容之上的「暗罩」，
+       浅色主题下也不该变亮），故与 --veil 分开取名，不要混用：
+       拖放提示遮罩比模态遮罩更轻（它只是提示，不该压暗整个界面）；
+       媒体控件底更重（要保证白图标压在任意画面上都可读）。 */
+    --scrim-hint: rgba(0, 0, 0, .28);
+    --scrim-media: rgba(0, 0, 0, .55);
 
     /* ---- 动效 ---- */
     --dur: 200ms;
@@ -97,40 +112,36 @@
     --dk-surface-pressed: #32323a;
     --dk-fill-quiet: #2b2b31;
     --dk-stroke: rgba(255, 255, 255, .12);
+    /* 深色卡片保留极淡白描边：深灰卡(#232327)浮在黑底(#1a1a1e)上明度差
+       只有约 6%，描边透明会「一坨黑」，需描边兜底（与浅色策略不同） */
     --dk-stroke-card: rgba(255, 255, 255, .08);
     --dk-divider: rgba(255, 255, 255, .09);
     --dk-nav-bg: rgba(28, 28, 32, .74);
-    --dk-bg-ambient:
-        radial-gradient(1100px 560px at 6% -12%, rgba(24, 130, 210, .18), transparent 62%),
-        radial-gradient(880px 480px at 100% -4%, rgba(96, 112, 235, .14), transparent 58%),
-        radial-gradient(720px 520px at 46% 112%, rgba(0, 150, 185, .10), transparent 62%);
     --dk-text: #f2f2f5;
     --dk-text2: #bfbfc8;
     --dk-ok: #6ecb72;
     --dk-err: #f4746f;
     --dk-warn: #ffb95c;
     --dk-muted: #a1a1ab;
-    --dk-link: #6cb6f5;
-    --dk-accent-light: #4aa8e8;
-    --dk-accent-dark: #00437a;
-    --dk-accent-soft: rgba(56, 148, 220, .22);
-    --dk-accent-softer: rgba(56, 148, 220, .13);
-    --dk-accent-ring: rgba(76, 168, 240, .45);
+    --dk-link: #409CFF;   /* iOS 深色系统蓝（亮变体），深底上比 #0A84FF 更可读 */
+    --dk-accent: #0A84FF;
+    --dk-accent-soft: rgba(10, 132, 255, .26);
+    --dk-accent-softer: rgba(10, 132, 255, .16);
+    --dk-accent-ring: rgba(10, 132, 255, .45);
+    --dk-veil: rgba(0, 0, 0, .5);
     --dk-shadow-1: 0 1px 1px rgba(0, 0, 0, .24), 0 1px 2px rgba(0, 0, 0, .32);
-    --dk-shadow-card: 0 1px 2px rgba(0, 0, 0, .30), 0 4px 12px -4px rgba(0, 0, 0, .45);
+    --dk-shadow-card: 0 1px 2px rgba(0, 0, 0, .22), 0 2px 8px -2px rgba(0, 0, 0, .30);
     --dk-shadow-pop: 0 4px 8px rgba(0, 0, 0, .40),
                      0 16px 32px -8px rgba(0, 0, 0, .55),
                      0 32px 64px -24px rgba(0, 0, 0, .60);
 }
 
-/* 显式深色：品牌色与浅色同值（识别色不随主题变化），
-   只有渐变两端与半透底改用深色下更醒目的取值；其余转发 --dk-* */
+/* 显式深色：强调色换深色系统蓝 #0A84FF（旧「识别色不随主题变化」决策已随
+   苹果风迁移推翻——深底上需更亮的蓝保证对比）；其余转发 --dk-* */
 html[data-theme="dark"] {
     color-scheme: dark;
 
-    --accent: #0067b8;
-    --accent-light: var(--dk-accent-light);
-    --accent-dark: var(--dk-accent-dark);
+    --accent: var(--dk-accent);
     --accent-soft: var(--dk-accent-soft);
     --accent-softer: var(--dk-accent-softer);
     --accent-ring: var(--dk-accent-ring);
@@ -152,7 +163,7 @@ html[data-theme="dark"] {
     --stroke-card: var(--dk-stroke-card);
     --divider: var(--dk-divider);
     --nav-bg: var(--dk-nav-bg);
-    --bg-ambient: var(--dk-bg-ambient);
+    --veil: var(--dk-veil);
 
     --text: var(--dk-text);
     --text2: var(--dk-text2);
@@ -169,8 +180,7 @@ html[data-theme="dark"] {
     html[data-theme="auto"] {
         color-scheme: dark;
 
-        --accent-light: var(--dk-accent-light);
-        --accent-dark: var(--dk-accent-dark);
+        --accent: var(--dk-accent);
         --accent-soft: var(--dk-accent-soft);
         --accent-softer: var(--dk-accent-softer);
         --accent-ring: var(--dk-accent-ring);
@@ -191,7 +201,7 @@ html[data-theme="dark"] {
         --stroke-card: var(--dk-stroke-card);
         --divider: var(--dk-divider);
         --nav-bg: var(--dk-nav-bg);
-        --bg-ambient: var(--dk-bg-ambient);
+        --veil: var(--dk-veil);
 
         --text: var(--dk-text);
         --text2: var(--dk-text2);

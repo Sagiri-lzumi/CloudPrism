@@ -1,0 +1,112 @@
+<!--
+  PageHeader.vue —— 统一页面顶栏（页标题 / 面包屑 + 页面级动作）。
+
+  骨架约定（v1.3 起各页共用，替代此前「只有设置页有标题、动作散落在
+  工具行/右上角/多选条三处」的混乱）：
+  · 高 56px，底色 = 页面底色，底边一条分隔线；
+  · 左区回答「我在哪」——文字标题（`title`）或更丰富的内容（默认插槽，
+    如文件页的可点面包屑），二者取其一；
+  · 右区回答「能做什么」——页面级动作一律走 #actions 插槽，
+    不再允许动作出现在页面其它角落；
+  · 页面级动作超过 3 个时，收敛为「主操作 + 一个「⋯」溢出菜单」，
+    不要一排无文字图标钮。
+
+  状态切换（例如文件页选中条目后把左区换成批量摘要）由调用方自行用
+  v-if 表达——顶栏本身不预设任何页面的状态机。
+-->
+<script setup lang="ts">
+import Icon from '../fluent/Icon.vue'
+
+withDefaults(
+  defineProps<{
+    /** 页标题（默认插槽存在时忽略） */
+    title?: string
+    /** 标题前置图标（可选；icons.ts 注册表 key） */
+    icon?: string
+  }>(),
+  {title: '', icon: ''},
+)
+</script>
+
+<template>
+  <header class="page-head">
+    <div class="ph-lead">
+      <!-- 默认插槽优先：文件页塞的是面包屑，其余页用 title 即可 -->
+      <slot>
+        <span v-if="icon" class="ph-icon"><Icon :name="icon" :size="17" /></span>
+        <h1 class="ph-title">{{ title }}</h1>
+      </slot>
+    </div>
+    <div class="ph-actions">
+      <slot name="actions" />
+    </div>
+  </header>
+</template>
+
+<style scoped>
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+  min-height: 56px;
+  padding: 0 14px;
+  background: var(--bg-page);
+  border-bottom: 1px solid var(--divider);
+}
+
+.ph-lead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* 标题图标块：与 Settings 页的卡片图标同一套「淡品牌底 + 品牌色图形」 */
+.ph-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius-ctrl);
+}
+
+.ph-title {
+  margin: 0;
+  font-size: 1.007rem; /* 14.1px：比正文大一档，不喧宾夺主 */
+  font-weight: 650;
+  color: var(--heading);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ph-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+/* 窄屏：动作区可横向滑动，标题先让位（宁可滑，不要挤成两行） */
+@media (max-width: 640px) {
+  .page-head {
+    gap: 8px;
+    padding: 0 10px;
+  }
+
+  .ph-actions {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .ph-actions::-webkit-scrollbar {
+    display: none;
+  }
+}
+</style>

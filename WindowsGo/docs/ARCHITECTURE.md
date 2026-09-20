@@ -47,7 +47,7 @@ WindowsGo/
 │   ├── thumb/                  缩略图解码与两级缓存
 │   ├── cache/                  大文件分块读缓存（密文、按阈值切块、LRU 淘汰）
 │   ├── secret/                 单个秘密值的加密落盘（DPAPI:/PLAIN: 前缀，局域网令牌用）
-│   ├── perf/  settings/  paths/  update/  syncengine/
+│   ├── settings/  paths/  syncengine/
 │   ├── storage/                三后端：local / webdav / baidu
 │   └── streaming/              令牌化流式解密代理（/s/ 播放 /t/ 缩略图 /d/ 下载）
 ├── internal/
@@ -153,14 +153,14 @@ HTTP/SSE 与后端交互，不再依赖 Chromium Mojo IPC。
 | 8 | 百度凭证刷新 | 多线程可同时触发刷新（竞态） | `sync.Mutex` 串行化，`errno=111` 只重试一次 | 修掉既有竞态 |
 | 9 | 设置存储 | QSettings IniFormat（`data/cloudprism.ini`） | `data/config.json`（原子写：tmp + rename）；首启只读导入 INI 一次 | 摆脱 Qt 依赖；老用户数据无缝迁移 |
 | 10 | 传输任务生命周期 | `_release_worker` / `thread.wait(5000)` / `_graveyard` | `context` + `WaitGroup` | 整类生命周期问题天然消失 |
-| 11 | 速度统计 | `PerfMonitor.report_bytes()` 无生产调用方，状态栏恒为 `--` | 曾取队列 `done_bytes` 差分；**v33 Web 化后未接线，指标当前不上屏** | 曾修掉参考实现的死接线，但迁移时自身掉线（`pkg/perf` 仅测试引用）—— 待接回或整体移除 |
+| 11 | 速度统计 | `PerfMonitor.report_bytes()` 无生产调用方，状态栏恒为 `--` | 曾取队列 `done_bytes` 差分；**v33 Web 化后未接线，指标不上屏**；`pkg/perf` 整包已于 v1.1 移除（含分层违规：pkg 反向 import internal/platform/win） | 零生产引用死代码；后续如需上屏直接从队列聚合接口取数，不再留未接线包 |
 | 12 | 拖出到资源管理器 | `filesDraggedOut` 信号 | 浏览器原生下载（`<a download>` 指向 /d/ 流式端点）| 浏览器可直接落盘解密文件；目录暂不支持下载（zip 打包后续） |
 | 13 | 毛玻璃/亚克力材质 | Qt 实底绘制，无亚克力 | 主题预留 `--acrylic-bg`（`color-mix` 82% 表面色半透明）；**放弃** Wails 窗口级 translucent | 窗口级 translucent 在 Win10/11 行为不一致、影响文字锐度、拖慢合成，CSS 近似零平台风险 |
 | 14 | 代理响应缓存头 | 无 `Cache-Control`（Qt 播放器不缓存响应） | 流式响应恒发 `Cache-Control: no-store` | Chromium 会拼 206 片段入磁盘缓存——解密后的明文内容会落盘，必须显式禁止 |
 | 15 | 页面功能分布 | 连接信息卡、恢复码卡在**设置页** | 恢复码/同步/连接信息并入**密库页**（VaultsView）；设置页只留纯偏好 + 百度凭证 | 与「最近记录/快速重连」同屏同上下文，操作和信息一处找齐 |
 | 16 | 百度授权教程承载 | `gui/baidu_guide.py` 运行时读取 `assets/baidu_guide.md` 文件并弹独立窗口 | 教程 6 步文案内嵌前端（`GUIDE_LINES` 常量），展开卡片展示 | 省掉「运行时资产加载器」整体复杂度；release 随包仍带 md 供人工阅读 |
 | 17 | 并行分段粒度 | 修复后按 worker 数均分、向下 16 对齐（大文件单段可达 GB 级） | 固定 `ShardAlign = 1MiB` 分片（≥4MiB 才启用并行） | goroutine 无进程启动成本；1MiB 粒度进度更平滑、取消更及时、峰值内存 = workers×1MiB；偏移恒 16 对齐 → 与 Python 产物逐字节等价（interop 已验证） |
-| 18 | 检查更新 UI | 设置页「关于」组提供「检查更新」按钮（对比 GitHub Release） | **未接线 UI**：`pkg/update` checker 有单测但无绑定消费；「关于」组只展示 App.Version() 运行时诊断串 | Go 版暂无产品版本号载体；功能等价缺口，已记录待后续接线 |
+| 18 | 检查更新 UI | 设置页「关于」组提供「检查更新」按钮（对比 GitHub Release） | `pkg/update` checker 零生产引用，整包已于 v1.1 移除；「关于」组只展示 App.Version() 运行时诊断串 | Go 版暂无产品版本号载体；后续如需更新检查应基于发布包元数据重新设计 |
 | 19 | 大文件读取 | 无本地读缓存，每次 Range 请求都回源（单次响应受 `MAX_RESPONSE_BYTES` 截断） | `pkg/cache` 密文分块读缓存：读穿命中零下载、未命中按原区间回源并落盘分块 | 重看/回拖不再重复下载；分块大小可配且同时是「是否分块」的阈值 |
 | 20 | 缓存目录默认位置 | 未配置时落 `%TEMP%/cloudprism_cache`，会持续吃满系统盘 | 程序目录旁 `data/cache`，**代码层面不提供 `%TEMP%`/`%AppData%` 兜底**；用户配置进系统目录直接拒绝 | 缓存红线：绝不写系统盘位置；`pkg/paths.ForbiddenCacheDir` 是唯一闸门 |
 | 21 | 跨设备访问 | 无此概念：Qt 窗口只在运行它的那台机器上 | 可选「局域网访问档」：绑 `0.0.0.0` + 访问令牌闸门（回环免令牌，非回环必须带令牌，退出/选目录端点仅本机）；令牌 DPAPI 落盘 `data/lan_token`，**默认关闭** | Web 模式天然可被同网段访问，必须显式开关 + 访问控制，否则等于把密库界面开放给整层楼 |

@@ -10,8 +10,9 @@ import (
 )
 
 // newTestGuard 构造一个带令牌的闸门（日志丢弃，避免污染测试输出）。
+// 端口基准固定 7840；lan=false 对应纯本机档（Host 白名单只认回环/localhost）。
 func newTestGuard(token string) *guard {
-	return newGuard(token, slog.New(slog.NewTextHandler(discard{}, nil)))
+	return newGuard(token, 7840, false, slog.New(slog.NewTextHandler(discard{}, nil)))
 }
 
 // discard 是丢弃写入的 io.Writer（测试里不需要看闸门日志）。
@@ -28,16 +29,117 @@ func okHandler() http.Handler {
 }
 
 // serve 构造一个来源地址可控的请求并跑一遍闸门。
-// remoteAddr 形如 "192.168.1.9:5000" / "127.0.0.1:5000"。
+// remoteAddr 形如 "192.168.1.9:5000" / "127.0.0.1:5000"；
+// Host 默认设为合法的 127.0.0.1:7840（httptest 默认 example.com 会被
+// Host 白名单拦下），需要非法 Host/Origin 的用例用 mutate 覆盖。
 func serve(g *guard, method, target, remoteAddr string, mutate func(*http.Request)) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, target, nil)
 	r.RemoteAddr = remoteAddr
+	r.Host = "127.0.0.1:7840"
 	if mutate != nil {
 		mutate(r)
 	}
 	w := httptest.NewRecorder()
 	g.wrap(okHandler()).ServeHTTP(w, r)
 	return w
+}
+
+/* -------------------------------------------------- 规则 0：Host/Origin 白名单 */
+
+// TestGuardHostWhitelistBlocksDNSRebinding 防线：Host 非本机地址一律 403，
+// 即使来源是回环（DNS rebinding 的请求来源恰是本机浏览器）。
+func TestGuardHostWhitelistBlocksDNSRebinding(t *testing.T) {
+	g := newTestGuard("tok")
+	// 回环来源 + 攻击者域名 Host：rebinding 后浏览器把它当同源，必须拦
+	w := serve(g, http.MethodGet, "/api/app/state", "127.0.0.1:52341", func(r *http.Request) {
+		r.Host = "evil.example.com:7840"
+	})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("攻击者域名 Host 应 403，got %d", w.Code)
+	}
+	// 端口不匹配同样拒绝（可能是别的服务被 rebinding 或扫端口）
+	for _, h := range []string{"127.0.0.1:9999", "localhost", "127.0.0.1"} {
+		w := serve(g, http.MethodGet, "/api/app/state", "127.0.0.1:52341", func(r *http.Request) {
+			r.Host = h
+		})
+		if w.Code != http.StatusForbidden {
+			t.Errorf("Host %q 应 403，got %d", h, w.Code)
+		}
+	}
+	// 合法 Host：回环三种形态 + 大小写不敏感
+	for _, h := range []string{"127.0.0.1:7840", "localhost:7840", "[::1]:7840", "LOCALHOST:7840"} {
+		w := serve(g, http.MethodGet, "/api/app/state", "127.0.0.1:52341", func(r *http.Request) {
+			r.Host = h
+		})
+		if w.Code != http.StatusOK {
+			t.Errorf("合法 Host %q 应放行，got %d", h, w.Code)
+		}
+	}
+	// 纯本机档不认局域网 IP：即使来源就是本机网卡地址也拒绝（fail-closed，
+	// 真正的局域网访问由 e2e 测试覆盖 lan=true 分支）
+	if !g.hostAllowed("192.168.1.9:7840") {
+		// lan=false 时预期拒绝；这里反向断言防误改白名单逻辑
+		t.Log("纯本机档正确拒绝局域网 Host")
+	} else {
+		t.Error("纯本机档不应放行局域网 Host")
+	}
+}
+
+// TestGuardOriginValidationBlocksCSRF：状态变更方法带非白名单 Origin → 403；
+// Origin 缺失（非浏览器客户端）与同源 Origin 放行；GET 不校验。
+func TestGuardOriginValidationBlocksCSRF(t *testing.T) {
+	g := newTestGuard("tok")
+
+	// 回环来源 + 恶意网页 Origin 的 POST：盲打 CSRF 必须拦
+	w := serve(g, http.MethodPost, "/api/vault/open", "127.0.0.1:52341", func(r *http.Request) {
+		r.Header.Set("Origin", "https://evil.example.com")
+	})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("恶意 Origin 的 POST 应 403，got %d", w.Code)
+	}
+	// Origin: null（file:// 页面/沙盒 iframe）：解析不出 host，同样拒绝
+	w = serve(g, http.MethodPost, "/api/vault/open", "127.0.0.1:52341", func(r *http.Request) {
+		r.Header.Set("Origin", "null")
+	})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Origin: null 的 POST 应 403，got %d", w.Code)
+	}
+	// 同端口但白名单外主机的 Origin（重绑后同源假象）也拒绝
+	w = serve(g, http.MethodPost, "/api/vault/open", "127.0.0.1:52341", func(r *http.Request) {
+		r.Header.Set("Origin", "http://evil.example.com:7840")
+	})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("rebinding 同源假象的 POST 应 403，got %d", w.Code)
+	}
+
+	// Origin 缺失：非浏览器客户端（curl/托盘/单实例探测）兼容，放行
+	if w := serve(g, http.MethodPost, "/api/app/ping", "127.0.0.1:52341", nil); w.Code != http.StatusOK {
+		t.Errorf("无 Origin 的 POST 应放行（非浏览器客户端），got %d", w.Code)
+	}
+	// 同源 Origin：本机前端 fetch 的常规形态，放行
+	for _, o := range []string{"http://127.0.0.1:7840", "http://localhost:7840"} {
+		w := serve(g, http.MethodPost, "/api/vault/open", "127.0.0.1:52341", func(r *http.Request) {
+			r.Header.Set("Origin", o)
+		})
+		if w.Code != http.StatusOK {
+			t.Errorf("同源 Origin %q 的 POST 应放行，got %d", o, w.Code)
+		}
+	}
+	// GET 不校验 Origin（跨源标签加载媒体/静态资源不受影响）
+	w = serve(g, http.MethodGet, "/s/abc/file.mp4", "127.0.0.1:52341", func(r *http.Request) {
+		r.Header.Set("Origin", "https://evil.example.com")
+	})
+	if w.Code != http.StatusOK {
+		t.Errorf("带任意 Origin 的 GET 应放行，got %d", w.Code)
+	}
+	// 令牌正确的远端（非回环）POST 同样受 Origin 防线保护
+	w = serve(g, http.MethodPost, "/api/vault/open", "192.168.1.9:5000", func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: "tok"})
+		r.Header.Set("Origin", "https://evil.example.com")
+	})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("远端恶意 Origin 的 POST 应 403（优先于令牌检查），got %d", w.Code)
+	}
 }
 
 /* -------------------------------------------------- 规则 1：回环免令牌 */

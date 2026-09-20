@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,12 +18,20 @@ import (
 //
 // 设计前提：本程序没有用户体系 —— 密库主密钥始终留在主机，远端浏览器只是
 // 界面。因此令牌的职责不是「身份认证」，而是「证明这台设备被授权访问本机
-// 界面」。据此确定三条规则：
+// 界面」。据此确定四条规则：
 //
+//  0. **Host 白名单 + Origin 校验（对回环与非回环一律生效）**：
+//     - Host 只认 127.0.0.1/localhost/[::1]:<port>（局域网档另含本机全部
+//     接口地址:port），防 DNS rebinding —— 攻击者域名重绑到 127.0.0.1 后
+//     浏览器把它当同源，JS 可任意读写响应（含解密下载）；rebinding 请求
+//     的 Host 头仍是攻击者域名，白名单直接 403。
+//     - 状态变更方法（POST/PUT/DELETE/PATCH）校验 Origin：存在且非白名单
+//     主机 → 403，堵住本机浏览器恶意网页对回环端点的盲打 CSRF；缺失则
+//     放行（curl/托盘/单实例探测等非浏览器客户端不发 Origin）。
 //  1. **回环来源永远免令牌**：127.0.0.1 / ::1 直接放行，本机浏览器、托盘
 //     「打开界面」、单实例探测的行为与历史版本完全一致（零摩擦）。
 //  2. **非回环来源必须带令牌**：覆盖包括静态资源与 SSE 在内的所有路径。
-//     token 为空时非回环一律拒绝（**fail-closed**）—— 这样即使外部误把监听
+//     token 为空时非回环一律拒绝（**fail-closed**）—— 这样即使外部把监听
 //     地址配成 0.0.0.0，也不会出现「无鉴权对外服务」的最坏情况。
 //  3. **少数端点仅限本机**：会弹主机原生对话框或直接关进程的端点（退出、
 //     选目录），远端即使令牌正确也拒绝，避免远端把主机 UI 顶出来或误关程序。
@@ -48,9 +57,17 @@ var localOnlyPaths = map[string]string{
 type guard struct {
 	token string // 访问令牌；空串 = 纯本机模式（非回环一律拒绝）
 	log   *slog.Logger
+	port  int  // 实际监听端口（端口顺延后可能与配置不同；Host/Origin 端口匹配基准）
+	lan   bool // 局域网档：Host 白名单额外纳入本机全部接口地址
 
 	mu    sync.Mutex
 	fails map[string]*failRecord // key = 客户端 IP
+
+	// 本机接口地址缓存（仅局域网档使用）：DHCP 续约/VPN 拨号会换地址，
+	// 启动时一次性快照会把用户锁在界面外，故短 TTL 动态刷新。
+	ifMu     sync.Mutex
+	ifAddrs  map[string]struct{}
+	ifCached time.Time
 }
 
 // failRecord 记录单个来源的连续失败次数与封禁截止时间。
@@ -72,16 +89,34 @@ const (
 )
 
 // newGuard 构造访问闸门。token 为空串时进入 fail-closed 的纯本机模式。
-func newGuard(token string, log *slog.Logger) *guard {
+// port 是实际监听端口（Host/Origin 白名单的端口基准）；lan 表示是否对
+// 局域网监听（决定 Host 白名单是否纳入本机接口地址）。须在监听成功后
+// 调用（端口此时才确定）。
+func newGuard(token string, port int, lan bool, log *slog.Logger) *guard {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &guard{token: token, log: log, fails: map[string]*failRecord{}}
+	return &guard{token: token, port: port, lan: lan, log: log, fails: map[string]*failRecord{}}
 }
 
 // wrap 把闸门套在业务 handler 外面。
 func (g *guard) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 规则 0a：Host 白名单。必须在来源判断之前 —— DNS rebinding 的
+		// 请求来源恰是回环（浏览器在本机），靠 RemoteAddr 区分不出来。
+		if !g.hostAllowed(r.Host) {
+			g.log.Warn("拒绝 Host 非白名单的请求（疑似 DNS rebinding）",
+				"host", r.Host, "path", r.URL.Path)
+			http.Error(w, "请求目标不在本服务允许列表", http.StatusForbidden)
+			return
+		}
+		// 规则 0b：状态变更方法的 Origin 校验（CSRF 防线）。
+		if !g.originAllowed(r) {
+			g.log.Warn("拒绝跨源状态变更请求（疑似 CSRF）",
+				"origin", r.Header.Get("Origin"), "path", r.URL.Path)
+			http.Error(w, "跨源请求被拒绝", http.StatusForbidden)
+			return
+		}
 		if isLoopback(r) {
 			next.ServeHTTP(w, r) // 规则 1：本机无摩擦
 			return
@@ -207,6 +242,91 @@ func (g *guard) pruneLocked() {
 			delete(g.fails, k)
 		}
 	}
+}
+
+/* ----------------------------------------------------------- Host/Origin 白名单 */
+
+// ifaceCacheTTL 是本机接口地址缓存的刷新周期。
+const ifaceCacheTTL = 30 * time.Second
+
+// hostAllowed 判断 Host 头（形如 host:port）是否指向本服务自身。
+//
+// 威胁模型（DNS rebinding）：攻击者域名 evil.com 先解析到自己的服务器，
+// 页面加载后再把域名重新解析到 127.0.0.1 —— 浏览器认为仍在访问 evil.com
+// （同源策略按域名判定），页面 JS 于是能任意读写本服务响应（含解密下载）。
+// rebinding 后的请求 Host 头仍是 evil.com:<port>，白名单只认本机地址，
+// 不匹配直接拒绝。
+//
+// 端口必须与实际监听端口一致：浏览器对非 80/443 端口必显式携带端口，
+// 无端口的 Host（HTTP/1.0 客户端）按 fail-closed 拒绝。域名不区分大小写。
+func (g *guard) hostAllowed(hostport string) bool {
+	host, port, err := net.SplitHostPort(hostport)
+	if err != nil || port != strconv.Itoa(g.port) {
+		return false
+	}
+	host = strings.ToLower(strings.Trim(host, "[]"))
+	switch host {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	}
+	if !g.lan {
+		return false // 纯本机档只认回环与 localhost
+	}
+	// 局域网档：远端浏览器用本机任一接口地址访问，全部纳入白名单
+	// （宁多勿漏 —— 漏了会把用户锁在界面外；回环已在静态名单里排除）。
+	_, ok := g.interfaceAddrs()[host]
+	return ok
+}
+
+// originAllowed 判断状态变更请求（非 GET/HEAD/OPTIONS）的 Origin 是否可信。
+//
+// 威胁模型（CSRF）：本机浏览器里打开的恶意网页可向 http://127.0.0.1:<port>
+// 发起跨源 POST —— 响应虽读不回，但开库/删文件/改设置等状态变更端点在
+// 「盲打」下同样危险。跨源请求按规范必带 Origin 且值是攻击者自己的源；
+// Origin 缺失则放行（curl/托盘/单实例探测等非浏览器客户端不发 Origin）。
+//
+// Origin 为 "null"（file:// 页面或沙盒 iframe）解析不出 host，同样拒绝 —
+// file:// 里的脚本也是威胁。GET/HEAD/OPTIONS 不改状态，一律不校验（媒体
+// 预览的跨源标签加载不受影响）。
+func (g *guard) originAllowed(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // 非浏览器客户端兼容：无 Origin 视为非跨站发起
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false // "null" 或畸形 Origin 一律拒绝（fail-closed）
+	}
+	// Origin 与 Host 同口径校验：主机在白名单且端口等于监听端口
+	return g.hostAllowed(u.Host)
+}
+
+// interfaceAddrs 返回本机全部非回环接口地址（仅局域网档使用）。
+//
+// 30 秒缓存：net.InterfaceAddrs 是 syscall，逐请求调用开销不可接受；
+// DHCP 续约/VPN 拨号换地址后最多迟一个周期放行，可接受。
+func (g *guard) interfaceAddrs() map[string]struct{} {
+	g.ifMu.Lock()
+	defer g.ifMu.Unlock()
+	now := time.Now()
+	if g.ifAddrs != nil && now.Sub(g.ifCached) < ifaceCacheTTL {
+		return g.ifAddrs
+	}
+	set := make(map[string]struct{})
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, a := range addrs {
+			if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+				set[ipnet.IP.String()] = struct{}{}
+			}
+		}
+	}
+	g.ifAddrs = set
+	g.ifCached = now
+	return set
 }
 
 /* ----------------------------------------------------------- 辅助函数 */

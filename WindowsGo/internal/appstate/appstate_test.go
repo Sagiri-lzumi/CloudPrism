@@ -154,7 +154,7 @@ func TestOpenCreateOpenLock(t *testing.T) {
 	}
 
 	// 锁库：连接态清空，未连接操作报 ErrLocked
-	e.st.Lock()
+	e.st.LockVault()
 	if e.st.Connected() {
 		t.Error("锁库后不应再处于连接态")
 	}
@@ -177,11 +177,11 @@ func TestOpenCreateOpenLock(t *testing.T) {
 		t.Error("凭恢复码开库后应处于连接态")
 	}
 	// 恢复码错误 → ErrBadRecovery
-	e.st.Lock()
+	e.st.LockVault()
 	if _, err := e.openVault(false, "", "AAAA-BBBB-CCCC-DDDD"); !errors.Is(err, vault.ErrBadRecovery) {
 		t.Errorf("错误恢复码应报 ErrBadRecovery，实得 %v", err)
 	}
-	e.st.Lock() // 收尾（幂等）
+	e.st.LockVault() // 收尾（幂等）
 }
 
 // TestVaultOpsRenameAndRegenerate 重命名密库 + 重新生成恢复码（新旧码互斥）。
@@ -218,14 +218,14 @@ func TestVaultOpsRenameAndRegenerate(t *testing.T) {
 	}
 
 	// 新码生效即旧码失效：凭旧码开库失败，凭新码成功
-	e.st.Lock()
+	e.st.LockVault()
 	if _, err := e.openVault(false, "", oldCode); !errors.Is(err, vault.ErrBadRecovery) {
 		t.Errorf("旧恢复码应已失效，实得 %v", err)
 	}
 	if _, err := e.openVault(false, "", newCode); err != nil {
 		t.Fatalf("凭新恢复码开库失败: %v", err)
 	}
-	e.st.Lock()
+	e.st.LockVault()
 }
 
 // TestResumeBannerLockAndResume 传输中锁库 → 补拍续传记录 → 重连横幅 →
@@ -240,7 +240,7 @@ func TestResumeBannerLockAndResume(t *testing.T) {
 	fB := writeLocalFile(t, dir, "note-b.txt", "hello-b")
 
 	// 拦截任务执行（模拟「排队等待中即锁库」：任务滞留 waiting 不启动）
-	e.queue.Runner = nil
+	e.queue.SetRunner(nil)
 	if err := e.st.UploadPaths(context.Background(), []string{fA, fB}, ""); err != nil {
 		t.Fatalf("UploadPaths: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestResumeBannerLockAndResume(t *testing.T) {
 	}
 
 	// 锁库：先补拍未完成任务再清空队列（记录保留供重连恢复）
-	e.st.Lock()
+	e.st.LockVault()
 	if got := len(e.st.pendingRecords()); got != 2 {
 		t.Errorf("锁库应保留 2 条续传记录，实得 %d", got)
 	}
@@ -314,7 +314,7 @@ func TestResumeBannerLockAndResume(t *testing.T) {
 			t.Errorf("文件 %s 元信息异常: %+v", name, en)
 		}
 	}
-	e.st.Lock()
+	e.st.LockVault()
 }
 
 // TestStatsLockInvalidates 云端统计完成回填 + 锁库作废（seq 竞态丢弃）。
@@ -341,7 +341,7 @@ func TestStatsLockInvalidates(t *testing.T) {
 	// 竞态作废：在飞统计期间锁库 → 结果序号过期被丢弃 / 状态复位，
 	// 两种交错最终都不得残留旧统计数字
 	e.st.RequestStats(context.Background())
-	e.st.Lock()
+	e.st.LockVault()
 	time.Sleep(300 * time.Millisecond) // 留出在飞 goroutine 的收尾窗口
 	s := e.st.Snapshot()
 	if s.StatsDone || s.StatsTotal != 0 || s.StatsFiles != 0 {
@@ -355,7 +355,7 @@ func TestStatsLockInvalidates(t *testing.T) {
 		s := e.st.Snapshot()
 		return s.StatsDone && s.StatsTotal > 0
 	})
-	e.st.Lock()
+	e.st.LockVault()
 }
 
 // TestAutoLockBehavior 自动锁判定：到期锁定 + 传输中豁免 + 活动刷新。
@@ -391,7 +391,7 @@ func TestAutoLockBehavior(t *testing.T) {
 	e.st.ApplyAutoLockIndex(1)
 	e.st.stopAutoLock()
 	f := writeLocalFile(t, t.TempDir(), "busy.bin", "busy")
-	e.queue.Runner = nil // 任务滞留 waiting（队列仍有活任务）
+	e.queue.SetRunner(nil) // 任务滞留 waiting（队列仍有活任务）
 	e.queue.Enqueue([]*transfer.Task{transfer.NewTask(f, "busy.bin.cpenc", transfer.DirUpload)})
 	if !e.queue.HasActive() {
 		t.Fatal("入队任务应处于活动状态")
@@ -413,7 +413,7 @@ func TestAutoLockBehavior(t *testing.T) {
 	if !e.st.Connected() {
 		t.Error("Activity 刷新后不应锁定")
 	}
-	e.st.Lock()
+	e.st.LockVault()
 }
 
 // TestConcurrentTaskFinishClearsPending 并发任务同时收尾的续传记录竞态回归。
@@ -451,5 +451,5 @@ func TestConcurrentTaskFinishClearsPending(t *testing.T) {
 	if rec := e.st.pendingRecords(); len(rec) != 0 {
 		t.Fatalf("并发完成后续传记录应清空，实得 %d 条: %+v", len(rec), rec)
 	}
-	e.st.Lock()
+	e.st.LockVault()
 }

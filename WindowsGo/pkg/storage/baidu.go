@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -443,32 +444,65 @@ type baiduEntry struct {
 	Dlink string // 仅 filemetas 响应携带
 }
 
-// listByDir 调 file?method=list 列目录（limit=1000，百度单页上限）。
+// 百度 list 接口的分页常量。
+//
+// 百度单页条目上限 1000（接口限制）；翻页靠 start 起始序号递增 ——
+// XPAN file?method=list 的响应**不带 has_more/marker 字段**，只能按
+// 「本页返回条目数 < 请求页大小」判尾页。
+const (
+	baiduListPageSize = 1000
+	// baiduListMaxEntries 单次列目录的条目总量上限：连续满页不收敛时
+	// （后端异常/接口行为变更）防死循环的硬顶，正常密库远达不到。
+	baiduListMaxEntries = 100000
+)
+
+// listByDir 调 file?method=list 列目录，按 start 分页循环取全。
 // 对照 baidu_backend.py:287-300 与 266-273。
+//
+// 旧实现单次 limit=1000：超过 1000 条的目录被静默截断，且上层
+// deleteRemoteRecursive「先列后删」会漏删第 1001 条以后的条目。
+// 终止条件双保险：响应带 has_more（部分接口/版本返回）以它为准，否则
+// 按「本页不满」判尾页；空页必然终止（防 has_more 恒真的异常响应）。
 func (b *Baidu) listByDir(ctx context.Context, dir string) ([]baiduEntry, error) {
-	q := url.Values{}
-	q.Set("method", "list")
-	q.Set("dir", dir)
-	q.Set("limit", "1000")
-	out, err := b.api(ctx, apiParams{endpoint: "file", query: q})
-	if err != nil {
-		return nil, err
-	}
-	items, _ := out["list"].([]any)
-	entries := make([]baiduEntry, 0, len(items))
-	for _, it := range items {
-		m, ok := it.(map[string]any)
-		if !ok {
-			continue
+	var entries []baiduEntry
+	for start := 0; ; start += baiduListPageSize {
+		if start >= baiduListMaxEntries {
+			return nil, fmt.Errorf("%w: 目录 %s 条目超过 %d 上限（疑似接口异常）",
+				ErrBackend, dir, baiduListMaxEntries)
 		}
-		entries = append(entries, baiduEntry{
-			Name:  jsonStr(m, "server_filename"),
-			IsDir: jsonIsDir(m),
-			Size:  jsonInt(m, "size"),
-			FsID:  jsonInt(m, "fs_id"),
-		})
+		q := url.Values{}
+		q.Set("method", "list")
+		q.Set("dir", dir)
+		q.Set("start", strconv.Itoa(start))
+		q.Set("limit", strconv.Itoa(baiduListPageSize))
+		out, err := b.api(ctx, apiParams{endpoint: "file", query: q})
+		if err != nil {
+			return nil, err
+		}
+		items, _ := out["list"].([]any)
+		for _, it := range items {
+			m, ok := it.(map[string]any)
+			if !ok {
+				continue
+			}
+			entries = append(entries, baiduEntry{
+				Name:  jsonStr(m, "server_filename"),
+				IsDir: jsonIsDir(m),
+				Size:  jsonInt(m, "size"),
+				FsID:  jsonInt(m, "fs_id"),
+			})
+		}
+		if len(items) == 0 {
+			return entries, nil // 空页必然终止（防 has_more 恒真的异常响应）
+		}
+		if more, ok := out["has_more"].(bool); ok {
+			if !more {
+				return entries, nil // 带分页标记的接口：以它为准
+			}
+		} else if len(items) < baiduListPageSize {
+			return entries, nil // 尾页：本页返回不满页
+		}
 	}
-	return entries, nil
 }
 
 // listParent 列父目录并索引 {名: 条目}。

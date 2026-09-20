@@ -38,7 +38,7 @@ const iconOf = {info: 'info', success: 'completed', warning: 'feedback', error: 
   position: fixed;
   top: 12px;
   right: 12px;
-  z-index: 2000;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -57,7 +57,7 @@ const iconOf = {info: 'info', success: 'completed', warning: 'feedback', error: 
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--stroke-card);
-  border-radius: 6px;
+  border-radius: var(--radius-ctrl);
   box-shadow: var(--shadow-pop);
   pointer-events: auto;
 }

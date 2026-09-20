@@ -12,7 +12,6 @@ import {
   ui,
   selectEntry,
   enterDir,
-  goUp,
   reloadDir,
   crumbTo,
   setViewMode,
@@ -32,13 +31,14 @@ import {
 import {fmtSize} from '../lib/format'
 import {kindOf, KIND_ICON} from '../lib/media'
 import Button from '../components/fluent/Button.vue'
+import PrimaryButton from '../components/fluent/PrimaryButton.vue'
 import Icon from '../components/fluent/Icon.vue'
 import RoundMenu from '../components/fluent/RoundMenu.vue'
 import MessageBox from '../components/fluent/MessageBox.vue'
 import ProgressBar from '../components/fluent/ProgressBar.vue'
+import PageHeader from '../components/layout/PageHeader.vue'
 import GridCard from './GridCard.vue'
 import PreviewPanel from './PreviewPanel.vue'
-import DirTree from '../components/DirTree.vue'
 
 /* ------------------------------------------------------------- 派生 */
 
@@ -95,39 +95,31 @@ function onCardCtx(p: {ev: MouseEvent; entry: appstate.FileEntry}) {
   openCtx(p.ev, p.entry)
 }
 
-/* -------------------------------------------------------- Splitter（三栏两个拖柄） */
+/* ------------------------------------------------- 检查器（预览栏）开关与拖柄 */
 
-const SPLIT_KEY = 'cp-split-l'
-const TREE_KEY = 'cp-tree-w'
+// 「可收起检查器」：默认收起，选中条目时自动滑出（让未选中时的列表吃满整宽，
+// 不再有一条 900px 宽、只显示空态提示的常驻预览栏）。
+// 用户一旦手动收起，就记为关闭偏好，之后不再自动弹出——直到再点开关。
+const INSP_KEY = 'cp-inspector'
+const INSP_W_KEY = 'cp-insp-w'
+
+/** 用户偏好：检查器是否可用（false = 用户显式收起了） */
+const inspectorOn = ref(localStorage.getItem(INSP_KEY) !== '0')
+/** 检查器宽度（px），拖动左缘调整 */
+const inspW = ref(Number(localStorage.getItem(INSP_W_KEY)) || 380)
+
 const viewEl = ref<HTMLElement>()
-// 文件列表宽度（中栏，窄默认 280px，用户要列表窄 + 预览大头）
-const splitL = ref(Number(localStorage.getItem(SPLIT_KEY)) || 280)
-// 目录树宽度（左栏，默认 200px）
-const treeW = ref(Number(localStorage.getItem(TREE_KEY)) || 200)
 const dragging = ref(false)
-const draggingTree = ref(false)
 
-// 拖柄1：目录树/文件列表
-function splitTreeDown(e: PointerEvent) {
-  e.preventDefault()
-  draggingTree.value = true
-  window.addEventListener('pointermove', splitTreeMove)
-  window.addEventListener('pointerup', splitTreeEnd, {once: true})
+/** 检查器是否真的占位：偏好开启 + 当前有选中条目 */
+const showInspector = computed(() => inspectorOn.value && !!ui.sel)
+
+function toggleInspector() {
+  inspectorOn.value = !inspectorOn.value
+  localStorage.setItem(INSP_KEY, inspectorOn.value ? '1' : '0')
 }
 
-function splitTreeMove(e: PointerEvent) {
-  const left = viewEl.value!.getBoundingClientRect().left
-  // 目录树宽度钳制：140px ~ 320px
-  treeW.value = Math.min(Math.max(e.clientX - left, 140), 320)
-}
-
-function splitTreeEnd() {
-  draggingTree.value = false
-  window.removeEventListener('pointermove', splitTreeMove)
-  localStorage.setItem(TREE_KEY, String(treeW.value))
-}
-
-// 拖柄2：文件列表/预览（拖动调的是中栏文件列表宽度）
+// 拖柄：拖动调的是「检查器宽度」（列表恒占剩余宽度）
 function splitDown(e: PointerEvent) {
   e.preventDefault()
   dragging.value = true
@@ -136,17 +128,57 @@ function splitDown(e: PointerEvent) {
 }
 
 function splitMove(e: PointerEvent) {
-  // 中栏左缘 = 目录树宽 + 拖柄1宽(4px) + 左栏内边距偏移
-  const left = viewEl.value!.getBoundingClientRect().left + treeW.value + 4
-  // 中栏宽度钳制：180px（文件名可见）~ 窗口宽 50%（预览至少占一半）
-  const max = Math.max(180, window.innerWidth * 0.5 - left)
-  splitL.value = Math.min(Math.max(e.clientX - left, 180), max)
+  const right = viewEl.value!.getBoundingClientRect().right
+  // 钳制 300px（预览可用下限）~ 640px（再宽就把列表挤到无法浏览）
+  inspW.value = Math.min(Math.max(right - e.clientX, 300), 640)
 }
 
 function splitEnd() {
   dragging.value = false
   window.removeEventListener('pointermove', splitMove)
-  localStorage.setItem(SPLIT_KEY, String(splitL.value))
+  localStorage.setItem(INSP_W_KEY, String(inspW.value))
+}
+
+/* --------------------------------------------------- 顶栏下拉菜单（上传/更多） */
+
+// 与右键菜单共用 RoundMenu 与 CtxItem 结构，但内容不同：
+// 这两个是**页面级**动作，与「针对某个条目的动作」分开，避免语义混用。
+type BarMenu = 'none' | 'upload' | 'more'
+
+const barMenu = ref<BarMenu>('none')
+const barAnchor = ref<HTMLElement | null>(null)
+
+const barItems = computed<CtxItem[]>(() => {
+  if (barMenu.value === 'upload') {
+    return [
+      {id: 'uploadFiles', label: '上传文件…', icon: 'send'},
+      {id: 'uploadFolder', label: '上传文件夹…', icon: 'folder-up'},
+    ]
+  }
+  if (barMenu.value === 'more') {
+    return [
+      {id: 'refresh', label: '刷新', icon: 'update'},
+      {divider: true},
+      {id: 'export', label: `导出 (${multiSel.value.length})`, icon: 'share', disabled: !multiSel.value.length},
+      {divider: true},
+      {id: 'clearMulti', label: '取消选择', icon: 'cancel', disabled: !multiSel.value.length},
+    ]
+  }
+  return []
+})
+
+/** 打开顶栏菜单：用触发按钮自身作锚点（按钮在顶栏里，位置天然正确）。 */
+function openBar(which: Exclude<BarMenu, 'none'>, ev: MouseEvent) {
+  barAnchor.value = (ev.currentTarget ?? ev.target) as HTMLElement | null
+  barMenu.value = 'none'
+  barMenu.value = which
+}
+
+function onBarIndex(i: number) {
+  const id = barItems.value[i]?.id
+  if (!id) return
+  barMenu.value = 'none'
+  void onCtx(id)
 }
 
 /* --------------------------------------------------------- 右键/更多菜单 */
@@ -427,128 +459,118 @@ function confirmDlg(payload: string | boolean) {
     </div>
 
     <template v-else>
-      <!-- 工具行：导航/动作/视图模式 -->
-      <div class="cp-toolbar">
-        <Button
-          iconOnly
-          icon="up"
-          title="返回上级"
-          :disabled="!crumbs.length || ui.loading"
-          @click="goUp"
-        />
-        <Button iconOnly icon="update" title="刷新（F5）" @click="reloadDir" />
-        <span class="sep" />
-        <Button iconOnly icon="folder_add" title="新建文件夹" @click="openMsg('newFolder')" />
-        <Button iconOnly icon="send" title="上传文件到当前目录" @click="pickUpload()" />
-        <Button
-          iconOnly
-          icon="folder-up"
-          title="上传文件夹到当前目录（保留目录结构）"
-          @click="pickUpload(ui.remote, true)"
-        />
-        <Button
-          iconOnly
-          icon="download"
-          :title="hasMulti ? `下载所选 ${multiSel.length} 项` : '下载选中项'"
-          :disabled="!multiSel.length"
-          @click="downloadSel"
-        />
-        <Button
-          iconOnly
-          icon="share"
-          :title="hasMulti ? `导出所选 ${multiSel.length} 项` : '导出选中文件'"
-          :disabled="!multiSel.length"
-          @click="exportSel"
-        />
-        <span class="spacer" />
-        <Button
-          v-if="multiSel.length > 1"
-          iconOnly
-          icon="cancel"
-          title="取消多选"
-          @click="clearMulti"
-        />
-        <span class="mode">
-          <Button
-            iconOnly
-            icon="list"
-            class="toolbar-mode"
-            :class="{on: ui.viewMode === 'list'}"
-            title="列表视图"
-            @click="setViewMode('list')"
-          />
-          <Button
-            iconOnly
-            icon="tiles"
-            class="toolbar-mode"
-            :class="{on: ui.viewMode === 'grid'}"
-            title="网格视图"
-            @click="setViewMode('grid')"
-          />
-        </span>
-      </div>
+      <!-- 统一页头（56px）：左区「我在哪」（面包屑；选中时换成批量摘要），
+           右区「能做什么」。此前这里是 9 个无文字图标钮一字排开、动作全靠
+           记忆，现收敛为 2 个带文字主操作 + 1 个分段控件 + 2 个次级图标钮；
+           下载/导出/删除只在**有选中**时出现，不再常驻占位。 -->
+      <PageHeader>
+        <nav v-if="!multiSel.length" class="crumbs" aria-label="路径">
+          <button
+            type="button"
+            class="crumb root"
+            :class="{on: !crumbs.length}"
+            title="密库根目录"
+            @click="crumbTo(-1)"
+          >
+            <Icon name="home" :size="13" />
+          </button>
+          <template v-for="(c, i) in crumbs" :key="c.remote">
+            <Icon name="chevron_right_med" :size="12" class="arrow" />
+            <button
+              type="button"
+              class="crumb"
+              :class="{on: i === crumbs.length - 1}"
+              :title="c.label"
+              @click="crumbTo(i)"
+            >
+              {{ c.label }}
+            </button>
+          </template>
+        </nav>
 
-      <!-- 多选批量条：>1 项时展示，一键下载/导出/删除/取消 -->
-      <Transition name="fade">
-        <div v-if="hasMulti" class="multi-bar">
-          <Icon name="check" :size="15" class="mb-check" />
-          <span class="mb-text">已选 {{ multiSel.length }} 项</span>
-          <span class="mb-actions">
+        <!-- 选中态：左区让位给批量摘要（Finder 语义——工具栏整体进入批量模式），
+             「我在哪」由侧栏目录树的选中项继续承担，信息不丢失 -->
+        <div v-else class="sel-summary">
+          <span class="sel-count">已选 {{ multiSel.length }} 项</span>
+          <button type="button" class="sel-clear" title="取消选择" @click="clearMulti">
+            <Icon name="cancel" :size="12" />
+          </button>
+        </div>
+
+        <template #actions>
+          <!-- 常态：两个主操作 -->
+          <template v-if="!multiSel.length">
+            <PrimaryButton
+              icon="send"
+              title="上传文件或文件夹到当前目录"
+              @click="openBar('upload', $event)"
+            >
+              上传<Icon name="care_down_solid" :size="9" class="caret" />
+            </PrimaryButton>
+            <Button icon="folder_add" @click="openMsg('newFolder')">新建文件夹</Button>
+          </template>
+
+          <!-- 选中态：动作随选择出现（单选与多选共用同一处，不再让单选只能右键） -->
+          <template v-else>
             <Button icon="download" :disabled="!connected" @click="downloadSel">下载</Button>
             <Button icon="share" :disabled="!connected" @click="exportSel">导出</Button>
             <Button icon="delete" danger @click="openMsg('delete')">删除</Button>
-            <Button icon="cancel" @click="clearMulti">取消</Button>
-          </span>
-        </div>
-      </Transition>
+          </template>
 
-      <!-- 三栏：目录树抽屉 | 文件列表 | 预览（大头，E 方案双栏抽屉）。
-           preview-open 供 ≤640px 下把预览切成全屏浮层（选中即浮出，
-           清空选择或进入目录时 listDir 清 ui.sel 自动收起）。 -->
-      <div
-        class="files-shell"
-        :class="{'preview-open': !!ui.sel}"
-        :style="{'--tree-w': treeW + 'px', '--split-l': splitL + 'px'}"
-      >
-        <!-- 左栏：目录树（懒加载，展开时拉子目录） -->
-        <aside class="dirtree-col">
-          <DirTree />
-        </aside>
+          <span class="sep" />
 
-        <!-- 拖柄1：目录树/文件列表 -->
-        <div
-          class="split-handle tree-split"
-          :class="{dragging: draggingTree}"
-          role="separator"
-          aria-orientation="vertical"
-          @pointerdown="splitTreeDown"
-        ></div>
-
-        <!-- 中栏：面包屑 + 文件列表（窄） -->
-        <section class="browse">
-          <nav class="crumbs" aria-label="路径">
+          <!-- 视图模式分段控件（macOS segmented control）：灰底容器 +
+               白色选中浮块滑动过渡 -->
+          <div
+            class="seg"
+            :class="{'at-grid': ui.viewMode === 'grid'}"
+            role="group"
+            aria-label="视图模式"
+          >
+            <span class="seg-thumb" aria-hidden="true"></span>
             <button
               type="button"
-              class="crumb root"
-              :class="{on: !crumbs.length}"
-              title="密库根目录"
-              @click="crumbTo(-1)"
+              class="seg-btn"
+              :class="{on: ui.viewMode === 'list'}"
+              :aria-pressed="ui.viewMode === 'list'"
+              title="列表视图"
+              @click="setViewMode('list')"
             >
-              <Icon name="home" :size="13" />
+              <Icon name="list" :size="16" />
             </button>
-            <template v-for="(c, i) in crumbs" :key="c.remote">
-              <Icon name="chevron_right_med" :size="12" class="arrow" />
-              <button
-                type="button"
-                class="crumb"
-                :class="{on: i === crumbs.length - 1}"
-                :title="c.label"
-                @click="crumbTo(i)"
-              >
-                {{ c.label }}
-              </button>
-            </template>
-          </nav>
+            <button
+              type="button"
+              class="seg-btn"
+              :class="{on: ui.viewMode === 'grid'}"
+              :aria-pressed="ui.viewMode === 'grid'"
+              title="网格视图"
+              @click="setViewMode('grid')"
+            >
+              <Icon name="tiles" :size="16" />
+            </button>
+          </div>
+
+          <Button
+            iconOnly
+            :icon="inspectorOn ? 'hide' : 'view'"
+            :title="inspectorOn ? '收起预览检查器' : '展开预览检查器（选中文件时自动展开）'"
+            @click="toggleInspector"
+          />
+          <Button iconOnly icon="more" title="更多操作" @click="openBar('more', $event)" />
+        </template>
+      </PageHeader>
+
+      <!-- 双栏：文件列表 | 预览检查器（目录树已并入外壳侧栏，见 App.vue）。
+           检查器收起时列表吃满整宽——此前它常驻占约 900px 却只显示空态提示。
+           preview-open 供 ≤640px 下把检查器切成全屏浮层（清空选择或进目录时
+           listDir 清 ui.sel 会自动收起）。 -->
+      <div
+        class="files-shell"
+        :class="{insp: showInspector, 'preview-open': showInspector}"
+        :style="{'--insp-w': inspW + 'px'}"
+      >
+        <!-- 左栏：文件列表（面包屑已在页头，列表独占纵向空间） -->
+        <section class="browse">
 
           <!-- 条目区：右键空白=上下文菜单；加载/错误/空态分流 -->
           <div
@@ -569,11 +591,12 @@ function confirmDlg(payload: string | boolean) {
               <Button icon="update" @click="reloadDir">重试</Button>
             </div>
 
-            <!-- 空目录 -->
-            <div v-else-if="showEmpty" class="center">
-              <Icon name="folder" :size="40" class="dim" />
-              <p class="lead2">此目录为空</p>
-              <p class="hint">点上方「上传」或直接拖入文件以开始</p>
+            <!-- 空目录：复用全局空态骨架（layout.css 的 .empty-state + .plate），
+                 与「未连接」「无任务」等空态同一套视觉语言 -->
+            <div v-else-if="showEmpty" class="empty-state empty-dir">
+              <span class="plate"><Icon name="folder" :size="32" /></span>
+              <p class="lead">此目录为空</p>
+              <p class="sub">点上方「上传」或直接拖入文件以开始</p>
             </div>
 
             <!-- 网格：96px 缩略图卡 -->
@@ -626,19 +649,19 @@ function confirmDlg(payload: string | boolean) {
           </div>
         </section>
 
-        <!-- 拖柄2：文件列表/预览（独立类 files-split，避免与 tree-split 共用
-             split-handle 类导致 grid-column 权重冲突） -->
+        <!-- 拖柄：仅在检查器占位时存在（列表恒占剩余宽度） -->
         <div
+          v-if="showInspector"
           class="split-handle files-split"
           :class="{dragging}"
           role="separator"
           aria-orientation="vertical"
           @pointerdown="splitDown"
         ></div>
-        <div v-if="dragging || draggingTree" class="split-mask"></div>
+        <div v-if="dragging" class="split-mask"></div>
 
-        <!-- 右栏：预览面板（占大头） -->
-        <PreviewPanel class="preview" />
+        <!-- 右栏：预览检查器（可收起，选中条目时自动滑出） -->
+        <PreviewPanel v-if="showInspector" class="preview" />
       </div>
     </template>
 
@@ -650,6 +673,15 @@ function confirmDlg(payload: string | boolean) {
       :items="ctxItems"
       @select="onCtxIndex"
       @close="ctxOpen = false"
+    />
+
+    <!-- 页头下拉菜单（上传 / 更多）：锚在触发按钮上，条目走同一套分发 -->
+    <RoundMenu
+      :open="barMenu !== 'none'"
+      :anchor="barAnchor"
+      :items="barItems"
+      @select="onBarIndex"
+      @close="barMenu = 'none'"
     />
 
     <!-- 新建/重命名/删除 模态 -->
@@ -674,73 +706,122 @@ function confirmDlg(payload: string | boolean) {
   height: 100%;
 }
 
-/* 三栏（E 方案双栏抽屉）：目录树 | 拖柄1 | 文件列表 | 拖柄2 | 预览（大头）
-   覆盖 layout.css 的全局双栏规则，显式设三栏 grid */
+/* 文件列表 + （可选）拖柄 + 预览检查器。
+   检查器收起时只有一列——列表吃满整宽，这是「可收起检查器」的核心收益：
+   此前预览栏常驻 1fr（实测 904px）却只显示一句空态提示。
+   .insp 由 showInspector 驱动（模板上绑定），列轨道随之切换。 */
 .files-shell {
   flex: 1;
   min-height: 0;
   min-width: 0;
   display: grid;
-  grid-template-columns: var(--tree-w, 200px) 4px var(--split-l, 280px) 4px 1fr;
+  grid-template-columns: 1fr;
 }
 
-/* 左栏：目录树抽屉 */
-.dirtree-col {
-  grid-column: 1;
-  min-height: 0;
-  overflow: hidden;
+.files-shell.insp {
+  grid-template-columns: 1fr 4px var(--insp-w, 380px);
 }
 
-.dim {
+/* 页头里的「已选 N 项」摘要：替代原面包屑的位置，右侧带取消钮 */
+.sel-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sel-count {
+  font-size: 0.929rem;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.sel-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
   color: var(--text2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-ctrl);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
-/* 行多选勾选（lucide square-check：描边勾选框，随 accent 着色） */
+.sel-clear:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+}
+
+/* 「上传」主按钮尾部的下拉指示：告诉用户点它出菜单而不是直接上传 */
+.caret {
+  margin-left: 3px;
+  opacity: 0.85;
+}
+
+/* 行多选勾选（描边勾选框，随 accent 着色） */
 .row-check {
   flex: none;
   color: var(--accent);
   margin-right: 2px;
 }
 
-/* ---------------- 多选批量条（>1 项时出现） ---------------- */
-.multi-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 40px;
-  padding: 0 14px;
-  margin: 0 12px 8px;
-  background: var(--surface);
-  border: 1px solid var(--stroke-card);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
-}
-
-.mb-check {
-  color: var(--accent);
-}
-
-.mb-text {
-  font-size: 0.857rem;
-  font-weight: 600;
-  color: var(--heading);
-}
-
-.mb-actions {
-  display: inline-flex;
-  gap: 8px;
-  margin-left: auto;
-}
-
-/* ---------------- 模式钮组（view/tiles 二选一） ---------------- */
-.mode {
+/* ---------------- 视图模式分段控件（macOS segmented control） ----------------
+   灰底胶囊容器 + 选中浮块（--surface 白浮块）滑动；浮块用 transform 位移
+   而非 left，脱离布局流才能有滑动过渡动画。 */
+.seg {
+  position: relative;
   display: inline-flex;
   gap: 2px;
+  height: 32px;
+  padding: 2px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border-radius: calc(var(--radius-ctrl) + 2px);
 }
 
-/* ---------------- 浏览区（三栏中栏：文件列表） ---------------- */
+.seg-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 28px;
+  height: 28px;
+  background: var(--surface);
+  border-radius: var(--radius-ctrl);
+  box-shadow: var(--shadow-1);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+/* 浮块滑到第二格：28px 按钮宽 + 2px gap */
+.seg.at-grid .seg-thumb {
+  transform: translateX(30px);
+}
+
+.seg-btn {
+  position: relative; /* 压在浮块之上可点 */
+  z-index: var(--z-raise);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--text2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-ctrl);
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.seg-btn.on {
+  color: var(--text);
+}
+
+/* ---------------- 浏览区（左栏：文件列表） ---------------- */
 .browse {
-  grid-column: 3;
+  grid-column: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -748,38 +829,43 @@ function confirmDlg(payload: string | boolean) {
   background: var(--bg-page);
 }
 
-/* 拖柄1（目录树/文件列表）：column 2 */
-.tree-split {
+/* 拖柄（文件列表/预览）：column 2 */
+.files-split {
   grid-column: 2;
 }
 
-/* 拖柄2（文件列表/预览）：column 4。
-   拖柄2 用独立类 files-split（不与 tree-split 共用 split-handle 做 grid 定位），
-   避免高权重选择器把 tree-split 从 column 2 误拉到 4 导致两行阶梯。 */
-.files-split {
-  grid-column: 4;
-}
-
-/* 预览面板（三栏右栏，占大头 1fr）：column 5。
+/* 预览检查器（右栏）：column 3。
    PreviewPanel 是子组件，根元素 .cp-preview 的 scope hash 属于 PreviewPanel，
    本组件 scoped 的 .preview 匹配不到 → 必须用 :deep 穿透，否则
-   grid-column:5 不生效、预览栏溢出到下一行造成三栏"阶梯"错位。 */
+   grid-column 不生效、检查器会落到隐式轨道上把栅格撑宽。 */
 :deep(.preview) {
-  grid-column: 5;
+  grid-column: 3;
   min-height: 0;
   min-width: 0;
+  /* v-if 挂载是瞬时的，给一个淡入避免"啪"一下出现。
+     不做宽度/位移过渡：grid 列宽过渡在本机会抖，横向位移还可能引出滚动条。 */
+  animation: insp-in var(--dur) var(--ease);
 }
 
-/* 面包屑：根图标 + 明文段（后端 remote 是密文，不可直接展示） */
+@keyframes insp-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 面包屑：根图标 + 明文段（后端 remote 是密文，不可直接展示）。
+   现在它住在 56px 页头里，所以不再自带高度与底边分隔线——
+   页头已经是那条分隔线，再加一条会出现「双横线」。 */
 .crumbs {
   display: flex;
   align-items: center;
   gap: 2px;
-  height: 36px;
-  padding: 0 8px;
+  min-width: 0;
   overflow-x: auto;
-  flex: none;
-  border-bottom: 1px solid var(--divider);
+  scrollbar-width: none;
+}
+
+.crumbs::-webkit-scrollbar {
+  display: none;
 }
 
 .crumb {
@@ -790,7 +876,8 @@ function confirmDlg(payload: string | boolean) {
   max-width: 180px;
   padding: 0 8px;
   font-family: inherit;
-  font-size: 0.786rem;
+  /* 比正文小一档：面包屑是导航控件而非内容，不该和文件名抢注意力 */
+  font-size: 0.857rem;
   color: var(--text2);
   background: transparent;
   border: none;
@@ -820,7 +907,8 @@ function confirmDlg(payload: string | boolean) {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 10px;
+  /* 与页头的左右内边距对齐（14px），内容左缘和面包屑/标题在同一条竖线上 */
+  padding: 12px 14px;
 }
 
 .center {
@@ -855,26 +943,26 @@ function confirmDlg(payload: string | boolean) {
   overflow-wrap: anywhere;
 }
 
-.lead2 {
-  margin: 4px 0 0;
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--heading);
+/* 空目录态用全局 .empty-state（无 min-height，会在矮列表栏里被压扁），
+   这里只补一个最小高度保证「圆盘 + 两行字」始终完整可见 */
+.empty-dir {
+  min-height: 180px;
 }
 
 /* 网格：固定列宽自动换行。列宽是缩略图承托面的唯一宽度来源
-   （GridCard 用 width:100% 填满列，不另写尺寸）。 */
+   （GridCard 用 width:100% 填满列，不另写尺寸）。
+   136px：列表占满整宽后 118px 会排出十几列、卡片小到认不出内容。 */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 118px);
-  justify-content: center;
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, 136px);
+  justify-content: start;
+  gap: 12px;
 }
 
-/* 手机：列宽放大到 156px（118px 在手机上过小，缩略图难辨认） */
+/* 手机：列宽放大到 168px（136px 在手机上过小，缩略图难辨认） */
 @media (max-width: 640px) {
   .grid {
-    grid-template-columns: repeat(auto-fill, 156px);
+    grid-template-columns: repeat(auto-fill, 168px);
     gap: 10px;
   }
 }
@@ -982,42 +1070,17 @@ function confirmDlg(payload: string | boolean) {
 }
 
 /* ============================================================ 响应式
- * ≤900px：目录树列收起，三栏 → 两栏（列表 | 预览）。
- *   依据：三栏可用下限 ≈ 树 140 + 柄 4 + 列表 180 + 柄 4 + 预览 300 = 628px，
- *   再叠加导航轨 48px 后低于 900px 预览已被挤到不可用。目录树的导航职能由
- *   面包屑（可逐级回退）与列表行尾「进入目录」钮承接。
- * ≤640px：预览改全屏浮层，选中才浮出；列表独占单栏。
+ * 桌面：双栏（列表 + 可收起检查器），没有中间断点——目录树已移入外壳侧栏，
+ *   侧栏自身的折叠（56px）承担了窄窗下的宽度收缩，本页不再需要三栏→两栏切换。
+ * ≤640px：检查器改全屏浮层，选中才浮出；列表独占单栏。
  * 触摸设备：补 hover 缺失导致的入口不可见问题。
  * ============================================================ */
 
-@media (max-width: 900px) {
-  /* 仍是三轨但去掉树列。必须重排 grid-column：原 column 3/5 的 .browse 与
-     .preview 若不动，会落到隐式轨道上把栅格撑宽。 */
-  .files-shell {
-    grid-template-columns: var(--split-l, 280px) 4px 1fr;
-  }
-
-  .dirtree-col,
-  .tree-split {
-    display: none;
-  }
-
-  .browse {
-    grid-column: 1;
-  }
-
-  .files-split {
-    grid-column: 2;
-  }
-
-  :deep(.preview) {
-    grid-column: 3;
-  }
-}
-
 @media (max-width: 640px) {
-  .files-shell {
-    position: relative; /* 预览浮层的定位上下文 */
+  .files-shell,
+  /* .insp 的选择器权重高于裸类，必须显式重置，否则手机上会残留三列轨道 */
+  .files-shell.insp {
+    position: relative; /* 浮层的定位上下文 */
     grid-template-columns: 1fr;
   }
 
@@ -1030,8 +1093,8 @@ function confirmDlg(payload: string | boolean) {
     display: none;
   }
 
-  /* 预览默认不占位；选中后浮出覆盖列表区。
-     只盖 .files-shell 而非整页，工具栏与面包屑仍可见可点，避免"进去出不来"。 */
+  /* 检查器默认不占位；选中后浮出覆盖列表区。
+     只盖 .files-shell 而非整页，页头仍可见可点，避免"进去出不来"。 */
   :deep(.preview) {
     display: none;
   }
@@ -1040,8 +1103,8 @@ function confirmDlg(payload: string | boolean) {
     display: flex;
     position: absolute;
     inset: 0;
-    z-index: 620;
-    background: var(--bg-page);
+    z-index: var(--z-sheet);
+    background: var(--surface);
   }
 
   /* 触摸目标放大：行 36→48px，行尾钮 24→40px */
@@ -1059,11 +1122,7 @@ function confirmDlg(payload: string | boolean) {
     min-width: 44px;
   }
 
-  /* 面包屑同步放大，便于手指点按逐级回退 */
-  .crumbs {
-    height: 44px;
-  }
-
+  /* 面包屑放大，便于手指点按逐级回退 */
   .crumb {
     height: 32px;
     max-width: 130px;

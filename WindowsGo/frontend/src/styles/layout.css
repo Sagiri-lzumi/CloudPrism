@@ -1,27 +1,37 @@
 /*
- * layout.css —— 应用级布局骨架：三栏网格、底栏、工具栏通用样式。
+ * layout.css —— 应用级布局骨架：外壳网格、底栏、页面级工具栏通用样式。
  *
- * 对照 main_window.py 的动态布局：文件页 = 文件视图 + 预览面板
- * （Splitter 分隔，初始 400:800 由 JS 记忆在 localStorage）；其余页
- * 中栏全宽。根网格 = 48px 导航轨 | 内容区；底部分别是传输条（仅活动
- * 时占位）与状态条。
+ * 外壳（v1.3 重构）：
+ *   ┌──────────┬──────────────────────────┐
+ *   │ 侧栏      │ 页面区                    │
+ *   │ 192/56px │                          │
+ *   ├──────────┼──────────────────────────┤
+ *   │          │ 底栏（传输条 + 状态条）    │
+ *   └──────────┴──────────────────────────┘
+ *
+ * 侧栏宽度由 --nav-w 单一变量驱动（折叠态在 .app-shell.collapsed 换成 56px）；
+ * 侧栏贯通到底，底栏只铺内容列——「底栏并一条」靠 .app-foot 独占一个背景与
+ * 一条顶边实现，子组件（TransferBar/StatusBar）不再各自带边框与底色。
  */
 
 .app-shell {
+  /* 侧栏宽度单一真源：牌子头/导航项/页脚都按它排版 */
+  --nav-w: 192px;
+
   display: grid;
-  grid-template-columns: 48px 1fr; /* NavRail | 内容 */
-  grid-template-rows: 1fr auto auto; /* 内容 | TransferBar(可无) | StatusBar */
+  grid-template-columns: auto 1fr; /* 侧栏 | 内容 */
+  grid-template-rows: 1fr auto; /* 内容 | 底栏 */
   height: 100%;
-  /* 底色 + 环境光渐层（Mica 近似的极淡纵深；渐层不覆盖到子面板，
-     卡片仍是实色面，保证文字对比度不受影响） */
+  /* 苹果风干净底色：纵深全靠卡片与底色的明度差 */
   background-color: var(--bg-page);
-  background-image: var(--bg-ambient);
-  background-repeat: no-repeat;
-  background-attachment: fixed;
+}
+
+.app-shell.collapsed {
+  --nav-w: 56px;
 }
 
 .app-nav {
-  grid-row: 1 / 4; /* 导航轨贯通到底（qfw ActivityBar 语义） */
+  grid-row: 1 / 3; /* 侧栏贯通到底 */
   grid-column: 1;
 }
 
@@ -33,22 +43,19 @@
   overflow: hidden;
 }
 
-.app-transfer {
+/* 底栏：整窗唯一的底部区域。半透毛玻璃与侧栏同族，一层背景 + 一条顶边。 */
+.app-foot {
   grid-row: 2;
   grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  background: var(--nav-bg);
+  backdrop-filter: blur(12px) saturate(1.4);
+  border-top: 1px solid var(--divider);
 }
 
-.app-status {
-  grid-row: 3;
-  grid-column: 2;
-}
-
-/* ---- 文件页三栏（目录树 | 文件列表 | 预览），列宽由 FilesView scoped
-   的 .files-shell 显式 grid-template-columns 接管（v31 起三栏）---- */
-
-/* 分隔拖柄：hover/拖动时高亮 */
+/* ---- 分隔拖柄：hover/拖动时高亮 ---- */
 .split-handle {
-  grid-column: 2;
   background: transparent;
   transition: background var(--dur-fast) var(--ease);
 }
@@ -58,24 +65,22 @@
   background: var(--accent);
 }
 
-/* 拖动遮罩（覆盖全窗拦截指针，防拖出时选中文本/触发子元素） */
+/* 拖动遮罩（覆盖全窗拦截指针，防拖出时选中文本/触发子元素）
+   层级用 --z-veil：它就是「全窗遮罩」档，须低于菜单/模态（拖拽期间不会有菜单） */
 .split-mask {
   position: fixed;
   inset: 0;
-  z-index: 900;
+  z-index: var(--z-veil);
   cursor: col-resize;
 }
 
-/* ---- 页面级工具栏（文件视图顶部动作行共用） ---- */
+/* ---- 页面级工具栏（页面顶栏动作行共用） ---- */
 .cp-toolbar {
   display: flex;
   align-items: center;
   gap: 4px;
   min-height: 46px;
   padding: 0 10px;
-  /* 半透底 + 毛玻璃：内容滚动到其下方时能透出一点点，形成层次；
-     backdrop-filter 不可用时退化为实色底（@supports 在 theme.css 里兜了
-     --nav-bg，这里用 surface 半透即可，缺省也是可读的） */
   background: var(--nav-bg);
   backdrop-filter: blur(12px) saturate(1.4);
   border-bottom: 1px solid var(--divider);
@@ -142,49 +147,47 @@
   line-height: 1.6;
 }
 
-/* ---- 视图切换动画容器（base.css 的 .page-* 配合） ---- */
+/* ---- 视图切换动画容器 ---- */
 .view-wrap {
   height: 100%;
 }
 
 /* ============================================================ 响应式
- * 断点取值依据：三栏最小可用宽 ≈ 树 140（拖柄钳位下限）+ 柄 4 + 列表 180
- * （钳位下限）+ 柄 4 + 预览 ~300 = 628px，加导航轨 48px 与留白取 900px。
- * - ≤900px：文件页三栏收成两栏（见 FilesView scoped），目录树职能由面包屑
- *   与列表内「进入目录」钮承接；外壳不动。
- * - ≤640px：外壳改单列，48px 竖导航轨移到底部横排（ActivityBar → TabBar）。
+ * - ≤980px：文件页检查器（预览栏）默认收起（见 FilesView scoped），
+ *   把宽度让给列表；用户仍可手动展开。
+ * - ≤640px：外壳改单列，侧栏由左侧竖栏移到底部横排 TabBar（只留四个导航项）。
  * ============================================================ */
 
 @media (max-width: 640px) {
-  /* 列轨道由 48px|1fr 变单列；行轨道追加第 4 行给底部导航。
-     必须整组重排，否则残留的 48px 空列 + grid-row:1/4 的导航会错位。 */
+  /* 列轨道由 auto|1fr 变单列；行轨道追加第 3 行给底部导航。
+     必须整组重排，否则残留的侧栏列 + grid-row:1/3 的导航会错位。 */
   .app-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: 1fr auto auto auto; /* 内容 | TransferBar | StatusBar | NavBar */
+    grid-template-rows: 1fr auto auto; /* 内容 | 底栏 | 导航 */
   }
 
   .app-main {
-    grid-column: 1;
     grid-row: 1;
+    grid-column: 1;
   }
 
-  .app-transfer {
-    grid-column: 1;
+  .app-foot {
     grid-row: 2;
-  }
-
-  .app-status {
     grid-column: 1;
-    grid-row: 3;
   }
 
-  /* 手机下触发区扩大：分隔拖柄不再可用（列已收成单栏） */
+  .app-nav {
+    grid-row: 3;
+    grid-column: 1;
+  }
+
+  /* 手机下无法横向拖动列宽，拖柄隐去 */
   .split-handle {
     display: none;
   }
 
   /* 工具行：图标钮在 375px 视口下会顶到边界，允许横向滑动兜底
-     （FilesView 10 个钮、SettingsView/TransfersView 页题行共用此类）。 */
+     （FilesView 与其余页面的动作行共用此类）。 */
   .cp-toolbar {
     gap: 2px;
     min-height: 48px;
@@ -201,4 +204,3 @@
     margin: 0 3px;
   }
 }
-

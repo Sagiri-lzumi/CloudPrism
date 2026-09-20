@@ -45,12 +45,13 @@ const emit = defineEmits<{click: []}>()
 
 .clickable {
   cursor: default;
-  transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease);
 }
 
+/* 苹果风 hover：只提亮底色，不抬升阴影（分层靠明度差，
+   原硬编码悬停阴影已随 token 化移除） */
 .clickable:hover {
   background: var(--surface-hover);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .clickable:active {

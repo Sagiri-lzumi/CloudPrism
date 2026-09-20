@@ -116,7 +116,7 @@ const headIcon = computed(() => (props.danger ? 'cancel' : 'info'))
             <Button v-if="showCancel" class="btn-cancel" @click="emit('cancel')">
               {{ cancelText }}
             </Button>
-            <PrimaryButton :class="{danger}" @click="onConfirm">
+            <PrimaryButton :danger="danger" @click="onConfirm">
               {{ confirmText }}
             </PrimaryButton>
           </div>
@@ -130,11 +130,11 @@ const headIcon = computed(() => (props.danger ? 'cancel' : 'info'))
 .cp-mask {
   position: fixed;
   inset: 0;
-  z-index: 1500;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.4); /* qfw 遮罩同款 */
+  background: var(--veil);
 }
 
 .cp-mbox {

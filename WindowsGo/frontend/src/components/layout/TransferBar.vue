@@ -52,8 +52,9 @@ const label = computed(() => {
   padding: 0 16px;
   font-size: 0.857rem;
   color: var(--text2);
-  background: var(--bg-page);
-  border-top: 1px solid var(--divider);
+  /* 底栏外框（背景与顶边）由外壳 .app-foot 统一提供：
+     本组件只负责内容，切换活动态时不再有一整行「又出现一条底边」的观感 */
+  background: transparent;
 }
 
 .label {

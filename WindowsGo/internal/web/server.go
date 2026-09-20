@@ -123,10 +123,6 @@ func (s *Server) Listen(host string, port int, token string) (string, error) {
 	s.registerStatic(mux)
 	s.registerStream(mux)
 
-	// 访问闸门始终启用（token 为空即 fail-closed 的纯本机模式）：
-	// 即使外部把监听地址误配成 0.0.0.0，也不会出现无鉴权对外服务。
-	s.guard = newGuard(token, s.log)
-	s.srv = &http.Server{Handler: s.guard.wrap(mux), ReadHeaderTimeout: 10 * time.Second}
 	ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
 		return "", fmt.Errorf("监听 %s:%d 失败: %w", host, port, err)
@@ -134,6 +130,12 @@ func (s *Server) Listen(host string, port int, token string) (string, error) {
 	s.ln = ln
 	s.addr = ln.Addr().String()
 	s.lanActive = !isLoopbackAddr(s.addr)
+	// 访问闸门始终启用（token 为空即 fail-closed 的纯本机模式）：
+	// 即使外部把监听地址误配成 0.0.0.0，也不会出现无鉴权对外服务。
+	// Host/Origin 白名单需要实际端口（端口顺延后可能与配置不同）与是否
+	// 局域网档，故在监听成功后构造。
+	s.guard = newGuard(token, s.Port(), s.lanActive, s.log)
+	s.srv = &http.Server{Handler: s.guard.wrap(mux), ReadHeaderTimeout: 10 * time.Second}
 	s.log.Info("Web 服务启动", "addr", s.addr, "lan", s.lanActive)
 	// 监听成功后启动 10Hz 状态帧合帧循环（Serve 阻塞前就绪，首帧即可达 SSE）。
 	s.startFrameLoop()

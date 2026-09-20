@@ -156,8 +156,11 @@ type Queue struct {
 	OnTaskFinished func(*Task, bool) // success 表示成功与否
 	OnAggregate    func(done, total int64)
 
-	// Runner 实际执行传输；nil 时任务启动即失败。
-	Runner Runner
+	// runner 实际执行传输；nil 时任务启动即失败。私有化是有意设计：
+	// 调度循环（pumpOnce 锁内读、runOne 锁内取快照后锁外调用）与锁外
+	// 直接赋值构成数据竞争 —— 竞争窗口内 runOne 可能读到半初始化的函数
+	// 值。一律经 SetRunner 在锁内写入（连接时注入、测试替换）。
+	runner Runner
 
 	mu        sync.Mutex
 	rootCtx   context.Context
@@ -187,12 +190,24 @@ func New() *Queue {
 //
 // draining 随 Clear 置位、随新连接复位：draining 只服务于「当前连接内」的
 // 静默清场（锁库打断），下一次连接意味着新生命周期，终态回调必须恢复。
+// 注意 Bind 不动 runner：执行器由 SetRunner 单独注入（两者生命周期独立）。
 func (q *Queue) Bind(session *session.Session, backend storage.Backend, kdfSalt []byte) {
 	q.mu.Lock()
 	q.Session = session
 	q.Backend = backend
 	q.KDFSalt = kdfSalt
 	q.draining = false
+	q.mu.Unlock()
+	q.kick()
+}
+
+// SetRunner 注入或替换任务执行器（连接装配时调用，测试亦可替换）。
+// 锁内赋值消除与调度循环的数据竞争：pumpOnce 在锁内读判 bound，runOne
+// 在锁内取快照后锁外调用 —— 任何锁外直接写字段都会与两者竞争。
+// 替换后 kick 唤醒可能因未绑定而停摆的等待任务。
+func (q *Queue) SetRunner(r Runner) {
+	q.mu.Lock()
+	q.runner = r
 	q.mu.Unlock()
 	q.kick()
 }
@@ -457,7 +472,7 @@ func (q *Queue) pumpOnce() bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	bound := q.Session != nil && q.Backend != nil && q.Runner != nil
+	bound := q.Session != nil && q.Backend != nil && q.runner != nil
 	for _, t := range q.tasks {
 		if len(q.running) >= q.MaxConcurrent {
 			break
@@ -504,7 +519,18 @@ func (q *Queue) runOne(ctx context.Context, task *Task) {
 	}
 
 	report := func(p float64) { q.report(task, p) }
-	err := q.Runner(ctx, task, report)
+	// 锁内取执行器快照再锁外调用：SetRunner 可在连接切换时并发替换，
+	// 直接锁外读 q.runner 会与其构成数据竞争（-race 必报）。
+	q.mu.Lock()
+	runner := q.runner
+	q.mu.Unlock()
+	if runner == nil {
+		// 防御分支：pumpOnce 启动时已判 bound，此处 nil 只可能是启动后
+		// 被 Clear/SetRunner(nil) 介入 —— 按无法启动收尾，不重试。
+		q.finish(task, false, "队列未绑定执行器")
+		return
+	}
+	err := runner(ctx, task, report)
 
 	switch {
 	case err == nil:

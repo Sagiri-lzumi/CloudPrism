@@ -64,7 +64,8 @@ function toggle() {
   left: 2px;
   width: 16px;
   height: 16px;
-  background: #fff;
+  /* 白钮走 token：与 accent 上的前景色同一语义（明暗同值，但不再硬编码） */
+  background: var(--text-on-accent);
   border-radius: var(--radius-round);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
   transition: left var(--dur-fast) var(--ease), width var(--dur-fast) var(--ease);

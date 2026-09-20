@@ -63,10 +63,9 @@ const connecting = computed(() => ui.opBusy && !connected.value)
   padding: 0 12px;
   font-size: 0.786rem;
   color: var(--text2);
-  /* 与工具栏/导航轨同族的半透毛玻璃底，整窗层次统一 */
-  background: var(--nav-bg);
-  backdrop-filter: blur(12px) saturate(1.4);
-  border-top: 1px solid var(--divider);
+  /* 底栏外框（半透毛玻璃底 + 顶边）由外壳 .app-foot 统一提供，
+     免得传输条出现时整窗多出一层叠边 */
+  background: transparent;
   user-select: none;
 }
 

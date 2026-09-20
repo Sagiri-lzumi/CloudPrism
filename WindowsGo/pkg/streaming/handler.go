@@ -170,6 +170,44 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request, e *Entry) {
 	}
 }
 
+// cdAttrChars 是 RFC 5987 的 attr-char 集合（filename* 值里可直出的 ASCII），
+// 除此之外的字节（含空格、%、引号与所有非 ASCII）都必须百分号编码。
+const cdAttrChars = "!#$&+-.^_`|~"
+
+// hexUpper 用于百分号编码的大写十六进制（RFC 5987 示例风格）。
+const hexUpper = "0123456789ABCDEF"
+
+// contentDisposition 构造下载响应的 Content-Disposition 值。
+//
+// 威胁模型与编码依据：传统 filename="..." 是 ASCII/latin-1 字段，直接拼
+// 非 ASCII 展示名会乱码，且名中的引号/换行可注入或拆分响应头。因此：
+//   - filename 提供纯 ASCII 回退名：非 ASCII 与危险字节（引号、反斜杠、
+//     控制字符、DEL）一律替换为 '_'，老客户端拿到安全可显示的名字；
+//   - filename* 按 RFC 5987 以 UTF-8 百分号编码携带原名，现代浏览器
+//     优先解析它，中文原名得以完整保留。
+func contentDisposition(name string) string {
+	fallback := make([]byte, 0, len(name))
+	enc := make([]byte, 0, len(name)*3) // 上限：全量三字节百分号编码
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		// filename* 分支：attr-char 直出，其余 %XX
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9',
+			strings.IndexByte(cdAttrChars, c) >= 0:
+			enc = append(enc, c)
+		default:
+			enc = append(enc, '%', hexUpper[c>>4], hexUpper[c&0x0f])
+		}
+		// filename 回退分支：可打印 ASCII（去引号/反斜杠）直出，其余 '_'
+		if c >= 0x20 && c < 0x7f && c != '"' && c != '\\' {
+			fallback = append(fallback, c)
+		} else {
+			fallback = append(fallback, '_')
+		}
+	}
+	return `attachment; filename="` + string(fallback) + `"; filename*=UTF-8''` + string(enc)
+}
+
 // serveDownload 输出下载端点：全文件流式解密 + Content-Disposition:
 // attachment（浏览器触发保存而非播放）。GET 触发下载；HEAD 返回长度。
 //
@@ -181,7 +219,7 @@ func (s *Server) serveDownload(w http.ResponseWriter, r *http.Request, e *Entry)
 
 	h := w.Header()
 	h.Set("Content-Type", "application/octet-stream")
-	h.Set("Content-Disposition", `attachment; filename="`+e.DisplayName+`"`)
+	h.Set("Content-Disposition", contentDisposition(e.DisplayName))
 	h.Set("Cache-Control", "no-store")
 
 	if r.Method == http.MethodHead {

@@ -1,7 +1,9 @@
 <!--
   PrimaryButton.vue —— 主操作按钮。
-  视觉：品牌色渐变底 + 白字 + 品牌色投影（唯一"浮"起来的控件，用于每页主操作，
-  与次级按钮的扁平观感拉开层级）；按压轻微内缩。尺寸与 Button 同体系（32px）。
+  视觉：品牌色纯色底 + 白字（macOS HIG 主按钮：纯填充、无渐变无辉光，
+  靠色块本身的重量与次级按钮拉开层级）；hover 提亮、按压轻微内缩。
+  danger：纯语义红填充（删除确认等破坏性主操作，与 --err 同源）。
+  尺寸与 Button 同体系（32px）。
 -->
 <script setup lang="ts">
 import Icon from './Icon.vue'
@@ -12,8 +14,10 @@ withDefaults(
     disabled?: boolean
     iconOnly?: boolean
     title?: string
+    /** 危险主操作：确认键转纯红填充（缺陷修复：此前删除确认键是普通蓝主钮） */
+    danger?: boolean
   }>(),
-  {disabled: false, iconOnly: false},
+  {disabled: false, iconOnly: false, danger: false},
 )
 
 const emit = defineEmits<{click: [e: MouseEvent]}>()
@@ -23,7 +27,7 @@ const emit = defineEmits<{click: [e: MouseEvent]}>()
   <button
     type="button"
     class="cp-btn-primary"
-    :class="{'icon-only': iconOnly}"
+    :class="{'icon-only': iconOnly, danger}"
     :disabled="disabled"
     :title="title"
     @click="(e: MouseEvent) => emit('click', e)"
@@ -46,18 +50,15 @@ const emit = defineEmits<{click: [e: MouseEvent]}>()
   font-size: 0.857rem;
   font-weight: 600;
   color: var(--text-on-accent);
-  background: var(--accent-grad);
+  background: var(--accent);
   border: none;
   border-radius: var(--radius-ctrl);
   cursor: default;
-  /* 品牌色投影：主操作的"重量"来源 */
-  box-shadow: 0 1px 2px rgba(16, 24, 40, .12), 0 6px 16px -6px var(--accent-ring);
-  transition: filter var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease),
-    transform var(--dur-fast) var(--ease);
+  transition: filter var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 
-/* hover/active 用 filter 提亮/压暗：渐变底无法靠改 background 颜色实现，
-   覆盖 filter 才能让整套渐变一起变化 */
+/* hover/active 用 filter 提亮/压暗：纯色底沿用这套方案（渐变时代的遗产），
+   好处是与 background 色值解耦，主题换色无需同步改这里 */
 .cp-btn-primary:hover:not(:disabled) {
   filter: brightness(1.07);
 }
@@ -65,12 +66,16 @@ const emit = defineEmits<{click: [e: MouseEvent]}>()
 .cp-btn-primary:active:not(:disabled) {
   filter: brightness(.94);
   transform: scale(.96);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, .16);
 }
 
 .cp-btn-primary:disabled {
   opacity: .4;
-  box-shadow: none;
+}
+
+/* 危险主操作：纯语义红底（与普通主钮同视觉重量，仅色相区分）。
+   深浅两主题 --err 均可白字可读，无需变体。 */
+.cp-btn-primary.danger {
+  background: var(--err);
 }
 
 .icon-only {

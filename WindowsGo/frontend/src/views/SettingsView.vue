@@ -490,17 +490,16 @@ const version = ref('读取运行时信息…')
 
 <template>
   <div class="s-view">
-    <!-- 工具行：页题（轨道样式复用 layout.css .cp-toolbar） -->
-    <div class="cp-toolbar">
-      <span class="page-title">
-        <Icon name="setting" :size="16" />
-        设置
-        <span class="count">外观与偏好</span>
-      </span>
-    </div>
-
     <div class="s-scroll">
       <div class="s-inner">
+        <!-- 页头：大标题模式（与密库/传输两页统一，见 components.css .page-head）。
+             原先这里是一根只放页题的 .cp-toolbar —— 工具栏只承担动作，
+             页题下沉到内容区做大标题，本页没有页级动作故整根去掉。 -->
+        <div class="page-head">
+          <h1 class="page-h1">设置</h1>
+          <p class="page-sub">外观、缓存、传输与安全等偏好</p>
+        </div>
+
         <!-- ===================== 外观 ===================== -->
         <div class="group-title">外观</div>
         <ComboBoxCard
@@ -866,27 +865,10 @@ const version = ref('读取运行时信息…')
   box-sizing: border-box;
 }
 
-.cp-toolbar {
-  gap: 10px;
-}
-
-.page-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.929rem;
-  font-weight: 600;
-  color: var(--heading);
-}
-
-.count {
-  padding: 1px 8px;
-  font-size: 0.786rem;
-  font-weight: 400;
-  color: var(--text2);
-  background: color-mix(in srgb, var(--text) 7%, transparent);
-  border-radius: var(--radius-round);
-}
+/* 页头（.page-head/.page-h1/.page-sub）、计数徽章 .count、分组标题 .group-title、
+   设置卡的 ok 语义变体均已收敛到 styles/components.css，此处不再重复定义。
+   历史问题：.page-title/.count 与 TransfersView 各写一份且逐字节相同；
+   .group-title 两页间距还不一致（16/4/4 vs 14/4/2）。 */
 
 /* 滚动内容区：单列居中，分组标题分隔 */
 .s-scroll {
@@ -895,6 +877,8 @@ const version = ref('读取运行时信息…')
   padding: 4px 24px 28px;
 }
 
+/* 单列内容列宽：与密库页统一为 860px（设置页右侧有「数值框 + 单位 + 按钮」
+   这类组合控件，是两页里更宽的那个需求，取它做基准） */
 .s-inner {
   max-width: 860px;
   margin: 0 auto;
@@ -903,23 +887,7 @@ const version = ref('读取运行时信息…')
   gap: 8px;
 }
 
-.group-title {
-  margin: 16px 4px 4px;
-  font-size: 0.857rem;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-.group-title:first-child {
-  margin-top: 12px;
-}
-
-/* 状态卡 ok 时图标底色偏绿（对照语义色） */
-.set-card.ok .set-icon {
-  color: var(--ok);
-  background: color-mix(in srgb, var(--ok) 14%, transparent);
-}
-
+/* .set-card.ok .set-icon 的语义变体已上收 components.css */
 .set-content.err {
   color: var(--err);
 }
@@ -1066,7 +1034,7 @@ const version = ref('读取运行时信息…')
   font-size: 0.714rem;
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 12%, transparent);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   white-space: nowrap;
 }
 
@@ -1087,13 +1055,6 @@ const version = ref('读取运行时信息…')
   color: var(--muted);
 }
 
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity var(--dur) var(--ease);
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
+/* .fade-* 过渡基元已在 styles/base.css 全局定义（此前 6 个文件各抄一份，
+   内容逐字节相同），这里删除重复副本。 */
 </style>

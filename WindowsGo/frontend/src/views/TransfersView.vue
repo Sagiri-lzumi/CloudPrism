@@ -109,13 +109,8 @@ const dlg = reactive({open: false})
 
 <template>
   <div class="t-view">
-    <!-- 工具行：页题 + 批量动作 -->
+    <!-- 工具行：批量动作（页题已下沉到下方内容区的大标题，见 components.css .page-head） -->
     <div class="cp-toolbar">
-      <span class="page-title">
-        <Icon name="sync" :size="16" />
-        传输任务
-        <span v-if="tasks.length" class="count">{{ unfinished }} 个进行中</span>
-      </span>
       <span class="spacer" />
       <Button
         iconOnly
@@ -131,6 +126,17 @@ const dlg = reactive({open: false})
         :disabled="!tasks.length || !unfinished"
         @click="cancelAll"
       />
+    </div>
+
+    <!-- 页头：大标题模式（与设置/密库两页统一）；进行中计数从工具栏挪到副标题 -->
+    <div class="t-head">
+      <div class="page-head">
+        <h1 class="page-h1">传输任务</h1>
+        <p class="page-sub">
+          上传与下载的进度与历史
+          <span v-if="tasks.length" class="count">{{ unfinished }} 个进行中</span>
+        </p>
+      </div>
     </div>
 
     <!-- 续传横幅：锁库/退出遗留任务提示 -->
@@ -224,27 +230,14 @@ const dlg = reactive({open: false})
   min-height: 0;
 }
 
-/* 工具行（layout.css .cp-toolbar 提供轨道样式），页题文字化而非图标钮 */
-.cp-toolbar {
-  gap: 10px;
-}
+/* 工具行只剩批量动作图标钮（与 FilesView 的动作条同形），
+   故不再覆盖 layout.css .cp-toolbar 的 gap，让两页间距一致。
+   .page-title / .count 已收敛到 components.css。 */
 
-.page-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.929rem;
-  font-weight: 600;
-  color: var(--heading);
-}
-
-.count {
-  padding: 1px 8px;
-  font-size: 0.786rem;
-  font-weight: 400;
-  color: var(--text2);
-  background: color-mix(in srgb, var(--text) 7%, transparent);
-  border-radius: var(--radius-round);
+/* 页头外层：只负责与下方任务列表（margin 16px）对齐的横向内缩；
+   页头自身的排版（大标题/副标题）在 components.css .page-head */
+.t-head {
+  padding: 12px 12px 0;
 }
 
 /* 续传横幅 */
@@ -396,13 +389,5 @@ const dlg = reactive({open: false})
   background: color-mix(in srgb, var(--err) 12%, transparent);
 }
 
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity var(--dur) var(--ease);
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
+/* .fade-* 过渡基元已在 styles/base.css 全局定义，此处删除重复副本。 */
 </style>
