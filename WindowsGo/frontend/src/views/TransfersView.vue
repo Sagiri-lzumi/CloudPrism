@@ -25,8 +25,12 @@ const tasks = computed(() => ui.tasks)
 // 任务数摘要：终态之外的计数（供头部/清空按钮态）
 const unfinished = computed(() => tasks.value.filter((t) => !doneStates.has(t.state)).length)
 
-// 页头补充位：只在真有任务时显示进行中计数（空列表下页头保持干净）
-const subTitle = computed(() => (tasks.value.length ? `${unfinished.value} 个进行中` : ''))
+// 页头补充位：空列表不显示；否则优先报在飞数量，只剩终态任务（等重试/等清空）
+// 时退化为「N 个已结束」——不能写成「0 个进行中」那种自相矛盾的文案。
+const subTitle = computed(() => {
+  if (!tasks.value.length) return ''
+  return unfinished.value ? `${unfinished.value} 个进行中` : `${tasks.value.length} 个已结束`
+})
 
 const doneStates = new Set(['done', 'failed', 'cancelled'])
 
