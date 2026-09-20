@@ -74,7 +74,7 @@ type Server struct {
 }
 
 // frame 是每帧载荷：全局快照 + 传输任务明细（任务进度 10Hz 刷新）。
-// 无活动传输时 Tasks 为 nil，减帧体积。
+// 队列为空时 Tasks 为 nil，减帧体积。
 type frame struct {
 	Snap  appstate.Snapshot   `json:"snap"`
 	Tasks []appstate.TaskView `json:"tasks,omitempty"`
@@ -176,6 +176,23 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // QuitCh 返回前端退出信号通道（/api/app/quit 触发）。
 func (s *Server) QuitCh() <-chan struct{} { return s.quit }
 
+// buildFrame 组装一帧状态载荷（合帧循环与 SSE 首帧共用，避免两处判定漂移）。
+//
+// 任务明细的携带条件不能只看 TransferActive：终态任务（done/failed/cancelled）
+// 按设计保留在队列里供「传输」页重试与清空（见 appstate.ClearFinished），
+// 只在有在飞任务时才带上，前端 ui.tasks 就会被逐帧置空 —— 于是传输页在没有
+// 传输的每一刻都是空态，重试/清空两个动作永远点不到（实测：上传一完成，列表
+// 立刻空掉、两个按钮双双置灰，而队列里那两个任务还在）。
+// 故改为「在飞传输 或 队列非空」都带上；队列由用户主动清空，清空后自然停发，
+// 空转时不会长期背着任务明细（每任务约 200B × 10Hz）。
+func (s *Server) buildFrame() frame {
+	f := frame{Snap: s.st.Snapshot()}
+	if tasks := s.st.Tasks(); f.Snap.TransferActive || len(tasks) > 0 {
+		f.Tasks = tasks
+	}
+	return f
+}
+
 // startFrameLoop 启动 10Hz 状态帧合帧循环（幂等：重复调用以首次为准）。
 func (s *Server) startFrameLoop() {
 	s.frameMu.Lock()
@@ -191,11 +208,7 @@ func (s *Server) startFrameLoop() {
 		for {
 			select {
 			case <-t.C:
-				f := frame{Snap: s.st.Snapshot()}
-				if f.Snap.TransferActive {
-					f.Tasks = s.st.Tasks()
-				}
-				s.collect("st:frame", f)
+				s.collect("st:frame", s.buildFrame())
 			case <-stop:
 				return
 			}
@@ -504,11 +517,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 	// 立即发一帧真实快照（前端连上即有数据；不能发空帧——
 	// 前端对每帧 JSON.parse，空 data 会抛异常触发 boot-err）。
-	f := frame{Snap: s.st.Snapshot()}
-	if f.Snap.TransferActive {
-		f.Tasks = s.st.Tasks()
-	}
-	dataBytes, _ := json.Marshal(f)
+	dataBytes, _ := json.Marshal(s.buildFrame())
 	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", "st:frame", string(dataBytes))
 	flusher.Flush()
 

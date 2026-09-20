@@ -208,6 +208,14 @@ func mustJSON(t *testing.T, v any) string {
 // 与 lan_e2e_test.go 的差别：这里不需要局域网闸门，只要能打通 API。
 func newUploadTestServer(t *testing.T, dataDir string) string {
 	t.Helper()
+	addr, _ := newUploadTestServerWithSrv(t, dataDir)
+	return addr
+}
+
+// newUploadTestServerWithSrv 与 newUploadTestServer 同源，额外把 *Server 交出，
+// 供需要直接观察服务端内部状态（如组帧结果）的测试使用。
+func newUploadTestServerWithSrv(t *testing.T, dataDir string) (string, *Server) {
+	t.Helper()
 	store, err := settings.Open(filepath.Join(dataDir, "config.json"))
 	if err != nil {
 		t.Fatalf("打开设置存储失败: %v", err)
@@ -232,7 +240,7 @@ func newUploadTestServer(t *testing.T, dataDir string) string {
 		defer cancel()
 		_ = srv.Shutdown(ctx)
 	})
-	return addr
+	return addr, srv
 }
 
 // waitForFile 轮询等待文件出现（上传是异步的，不能立即断言）。
