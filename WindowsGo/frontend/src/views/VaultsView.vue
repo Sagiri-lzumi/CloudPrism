@@ -882,7 +882,7 @@ async function onOtherConfirm(payload: string | boolean) {
   gap: 8px;
 }
 
-/* 概览卡：图标 + 名称/后端 + 快捷操作 */
+/* 概览卡：图标 + 名称/后端（动作已按骨架约定上收页头，卡内不再放按钮） */
 .ov-card {
   display: flex;
   align-items: center;
@@ -1171,16 +1171,19 @@ async function onOtherConfirm(payload: string | boolean) {
  * 无效**，所以这里必须再写一份；将来改设置卡骨架，两处都要动。
  *
  * 挤压根因：.set-body / .ov-body 是 flex:1 + min-width:0，可以一路收缩到 0，
- * 而 .set-right / .ov-actions 是 flex:none 不参与收缩。右侧一旦是
- * 「数值 + 按钮」这类组合（自动锁定卡的"从不（不自动锁定）+ 去设置"），
- * 文本列就被压成一行一个字。解法：右侧整体换到第二行并右对齐。
+ * 而 .set-right 是 flex:none 不参与收缩。右侧一旦是「数值 + 按钮」这类组合
+ * （自动锁定卡的"从不（不自动锁定）+ 去设置"），文本列就被压成一行一个字。
+ * 解法：右侧整体换到第二行并右对齐。
+ *
+ * 概览卡的窄屏动作换行已随「动作上收页头」消失：重命名/锁定现在由
+ * PageHeader 的 .ph-actions 统一处理（≤640px 时横向滑动），本页不必再管。
  * ============================================================ */
 
 @media (max-width: 640px) {
   /* 设置卡的窄屏换行（.set-card/.set-body/.set-right）已在 styles/components.css
      统一处理，此处不再重复 —— 重复的 scoped 副本特异性更高，会让全局规则形同虚设。 */
 
-  /* 概览卡（本页独有结构）：库名/后端占第一行，重命名/锁定换第二行 */
+  /* 概览卡（本页独有结构）：图标列固定在左，文本列给一个下限，避免缩到零宽 */
   .ov-card {
     flex-wrap: wrap;
     align-items: flex-start;
@@ -1190,12 +1193,6 @@ async function onOtherConfirm(payload: string | boolean) {
 
   .ov-body {
     min-width: 120px;
-  }
-
-  .ov-actions {
-    flex: 1 1 100%;
-    flex-wrap: wrap;
-    justify-content: flex-end;
   }
 }
 
