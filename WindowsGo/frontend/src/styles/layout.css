@@ -1,5 +1,5 @@
 /*
- * layout.css —— 应用级布局骨架：外壳网格、底栏、页面级工具栏通用样式。
+ * layout.css —— 应用级布局骨架：外壳网格、底栏、页头动作区分隔线。
  *
  * 外壳（v1.3 重构）：
  *   ┌──────────┬──────────────────────────┐
@@ -74,37 +74,17 @@
   cursor: col-resize;
 }
 
-/* ---- 页面级工具栏（页面顶栏动作行共用） ---- */
-.cp-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 46px;
-  padding: 0 10px;
-  background: var(--nav-bg);
-  backdrop-filter: blur(12px) saturate(1.4);
-  border-bottom: 1px solid var(--divider);
-}
-
-.cp-toolbar .spacer {
-  flex: 1;
-}
-
-.cp-toolbar .sep {
+/* ---- 页头动作区的分组分隔线 ----
+   在 PageHeader 的 #actions 插槽里放 <span class="sep" /> 即可把动作分组
+   （FilesView 用它隔开「主操作」与「视图/更多」）。
+   这里锚定容器类 .ph-actions 而不是某个页面的 scoped 类：分隔线曾在
+   .cp-toolbar 被删除后静默失效 —— 类名选择器写错不会报错、只是不生效，
+   正是本仓库反复踩到的那类事故，故把规则挂在骨架自身的类上。 */
+.ph-actions .sep {
   width: 1px;
   height: 20px;
   margin: 0 6px;
   background: var(--divider);
-}
-
-/* 模式切换的选中态（视图图标钮组） */
-.toolbar-mode {
-  color: var(--text2);
-}
-
-.toolbar-mode.on {
-  color: var(--accent);
-  background: var(--accent-soft);
 }
 
 /* ---- 空态/引导占位（整页居中） ---- */
@@ -186,21 +166,9 @@
     display: none;
   }
 
-  /* 工具行：图标钮在 375px 视口下会顶到边界，允许横向滑动兜底
-     （FilesView 与其余页面的动作行共用此类）。 */
-  .cp-toolbar {
-    gap: 2px;
-    min-height: 48px;
-    padding: 0 6px;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .cp-toolbar::-webkit-scrollbar {
-    display: none;
-  }
-
-  .cp-toolbar .sep {
+  /* 页头动作区：图标钮在 375px 视口下会顶到边界，允许横向滑动兜底
+     （规则本体在 PageHeader.vue 的窄屏段，这里只收窄分隔线的两侧留白）。 */
+  .ph-actions .sep {
     margin: 0 3px;
   }
 }

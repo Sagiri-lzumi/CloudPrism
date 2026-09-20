@@ -17,12 +17,16 @@ import PrimaryButton from '../components/fluent/PrimaryButton.vue'
 import Icon from '../components/fluent/Icon.vue'
 import ProgressBar from '../components/fluent/ProgressBar.vue'
 import MessageBox from '../components/fluent/MessageBox.vue'
+import PageHeader from '../components/layout/PageHeader.vue'
 
 const connected = computed(() => !!ui.snap?.connected)
 const tasks = computed(() => ui.tasks)
 
 // 任务数摘要：终态之外的计数（供头部/清空按钮态）
 const unfinished = computed(() => tasks.value.filter((t) => !doneStates.has(t.state)).length)
+
+// 页头补充位：只在真有任务时显示进行中计数（空列表下页头保持干净）
+const subTitle = computed(() => (tasks.value.length ? `${unfinished.value} 个进行中` : ''))
 
 const doneStates = new Set(['done', 'failed', 'cancelled'])
 
@@ -109,35 +113,31 @@ const dlg = reactive({open: false})
 
 <template>
   <div class="t-view">
-    <!-- 工具行：批量动作（页题已下沉到下方内容区的大标题，见 components.css .page-head） -->
-    <div class="cp-toolbar">
-      <span class="spacer" />
-      <Button
-        iconOnly
-        icon="delete"
-        title="清空已结束任务"
-        :disabled="!tasks.length"
-        @click="dlg.open = true"
-      />
-      <Button
-        iconOnly
-        icon="cancel"
-        title="取消全部任务"
-        :disabled="!tasks.length || !unfinished"
-        @click="cancelAll"
-      />
-    </div>
-
-    <!-- 页头：大标题模式（与设置/密库两页统一）；进行中计数从工具栏挪到副标题 -->
-    <div class="t-head">
-      <div class="page-head">
-        <h1 class="page-h1">传输任务</h1>
-        <p class="page-sub">
-          上传与下载的进度与历史
-          <span v-if="tasks.length" class="count">{{ unfinished }} 个进行中</span>
-        </p>
-      </div>
-    </div>
+    <!-- 统一页头（56px）：左区「我在哪」+ 进行中计数，右区「能做什么」。
+         此前这里是「46px 工具行（2 个无文字图标钮，用途只能靠悬停提示猜）
+         + 内容区大标题」两层，动作与页题上下分居；现按 PageHeader 骨架收成
+         一行，页面级动作一律只出现在这里。 -->
+    <PageHeader title="传输任务" icon="sync" :sub="subTitle">
+      <template #actions>
+        <Button
+          icon="cancel"
+          :disabled="!tasks.length || !unfinished"
+          title="取消所有等待中与传输中的任务"
+          @click="cancelAll"
+        >
+          取消全部
+        </Button>
+        <Button
+          icon="delete"
+          danger
+          :disabled="!tasks.length"
+          title="从列表移除已结束的任务（不影响云端与本地文件）"
+          @click="dlg.open = true"
+        >
+          清空已结束
+        </Button>
+      </template>
+    </PageHeader>
 
     <!-- 续传横幅：锁库/退出遗留任务提示 -->
     <Transition name="fade">
@@ -230,14 +230,15 @@ const dlg = reactive({open: false})
   min-height: 0;
 }
 
-/* 工具行只剩批量动作图标钮（与 FilesView 的动作条同形），
-   故不再覆盖 layout.css .cp-toolbar 的 gap，让两页间距一致。
-   .page-title / .count 已收敛到 components.css。 */
+/* 工具行与内容区大标题已在 v1.3 收敛为顶部的统一页头（PageHeader 组件），
+   本页不再需要工具栏 / 页头的样式覆盖。 */
 
-/* 页头外层：只负责与下方任务列表（margin 16px）对齐的横向内缩；
-   页头自身的排版（大标题/副标题）在 components.css .page-head */
-.t-head {
-  padding: 12px 12px 0;
+/* 空态：铺满页头以下的剩余高度。.empty-state 是全局类，其 height:100% 在
+   flex 列里会按父容器全高计算含 56px 页头，从而顶出一根多余的滚动条。 */
+.t-view > .empty-state {
+  flex: 1;
+  height: auto;
+  min-height: 0;
 }
 
 /* 续传横幅 */
@@ -258,11 +259,11 @@ const dlg = reactive({open: false})
   font-size: 0.857rem;
 }
 
-/* 任务列表滚动区 */
+/* 任务列表滚动区（顶部留白与续传横幅一致，页头分隔线下不贴边） */
 .list {
   flex: 1;
   min-height: 0;
-  margin: 8px 16px 16px;
+  margin: 12px 16px 16px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;

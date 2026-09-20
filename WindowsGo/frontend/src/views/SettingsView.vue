@@ -27,6 +27,7 @@ import Icon from '../components/fluent/Icon.vue'
 import LineEdit from '../components/fluent/LineEdit.vue'
 import SpinBox from '../components/fluent/SpinBox.vue'
 import SwitchCard from '../components/fluent/SwitchCard.vue'
+import PageHeader from '../components/layout/PageHeader.vue'
 
 /* -------------------------------------------------------- 选项常量 */
 
@@ -490,17 +491,12 @@ const version = ref('读取运行时信息…')
 
 <template>
   <div class="s-view">
-    <div class="s-scroll">
-      <div class="s-inner">
-        <!-- 页头：大标题模式（与密库/传输两页统一，见 components.css .page-head）。
-             原先这里是一根只放页题的 .cp-toolbar —— 工具栏只承担动作，
-             页题下沉到内容区做大标题，本页没有页级动作故整根去掉。 -->
-        <div class="page-head">
-          <h1 class="page-h1">设置</h1>
-          <p class="page-sub">外观、缓存、传输与安全等偏好</p>
-        </div>
+    <!-- 统一页头（56px）：本页无页面级动作，故只用标题区。
+         此前这里是「只放页题的 46px 工具行 + 内容区大标题」两层，现已合并。 -->
+    <PageHeader title="设置" icon="palette" />
 
-        <!-- ===================== 外观 ===================== -->
+    <div class="s-scroll">
+      <div class="s-inner">        <!-- ===================== 外观 ===================== -->
         <div class="group-title">外观</div>
         <ComboBoxCard
           icon="palette"
@@ -865,16 +861,18 @@ const version = ref('读取运行时信息…')
   box-sizing: border-box;
 }
 
-/* 页头（.page-head/.page-h1/.page-sub）、计数徽章 .count、分组标题 .group-title、
-   设置卡的 ok 语义变体均已收敛到 styles/components.css，此处不再重复定义。
-   历史问题：.page-title/.count 与 TransfersView 各写一份且逐字节相同；
-   .group-title 两页间距还不一致（16/4/4 vs 14/4/2）。 */
+/* 页头已由 components/layout/PageHeader.vue 承担（v1.3 起三页共用同一根
+   56px 顶栏），原 components.css 的 .page-head/.page-h1/.page-sub/.count
+   大标题模式随之废弃；分组标题 .group-title、设置卡的 ok 语义变体仍在
+   styles/components.css。历史问题：.page-title/.count 曾与 TransfersView
+   各写一份且逐字节相同；.group-title 两页间距还不一致（16/4/4 vs 14/4/2）。 */
 
-/* 滚动内容区：单列居中，分组标题分隔 */
+/* 滚动内容区：单列居中，分组标题分隔。
+   顶部留白 18px —— 页头自带一条分隔线，内容再贴边会显局促。 */
 .s-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 24px 28px;
+  padding: 18px 24px 28px;
 }
 
 /* 单列内容列宽：与密库页统一为 860px（设置页右侧有「数值框 + 单位 + 按钮」

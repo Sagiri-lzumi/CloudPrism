@@ -4,8 +4,9 @@
   骨架约定（v1.3 起各页共用，替代此前「只有设置页有标题、动作散落在
   工具行/右上角/多选条三处」的混乱）：
   · 高 56px，底色 = 页面底色，底边一条分隔线；
-  · 左区回答「我在哪」——文字标题（`title`）或更丰富的内容（默认插槽，
-    如文件页的可点面包屑），二者取其一；
+  · 左区回答「我在哪」——文字标题（`title`，可跟一枚轻量补充 `sub`，
+    如「3 个进行中」）或更丰富的内容（默认插槽，如文件页的可点面包屑），
+    二者取其一；
   · 右区回答「能做什么」——页面级动作一律走 #actions 插槽，
     不再允许动作出现在页面其它角落；
   · 页面级动作超过 3 个时，收敛为「主操作 + 一个「⋯」溢出菜单」，
@@ -23,8 +24,10 @@ withDefaults(
     title?: string
     /** 标题前置图标（可选；icons.ts 注册表 key） */
     icon?: string
+    /** 标题后的轻量补充（计数/状态等；留空则不渲染） */
+    sub?: string
   }>(),
-  {title: '', icon: ''},
+  {title: '', icon: '', sub: ''},
 )
 </script>
 
@@ -35,6 +38,7 @@ withDefaults(
       <slot>
         <span v-if="icon" class="ph-icon"><Icon :name="icon" :size="17" /></span>
         <h1 class="ph-title">{{ title }}</h1>
+        <span v-if="sub" class="ph-sub">{{ sub }}</span>
       </slot>
     </div>
     <div class="ph-actions">
@@ -84,6 +88,19 @@ withDefaults(
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 标题后的补充信息（计数等）：灰底胶囊、小一号，不参与标题的省略号收缩。
+   原先是 components.css 里的全局 .count，随大标题模式一并收进这里。 */
+.ph-sub {
+  flex: none;
+  padding: 1px 8px;
+  font-size: 0.786rem;
+  color: var(--text2);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  border-radius: var(--radius-round);
+  vertical-align: 1px;
+  white-space: nowrap;
 }
 
 .ph-actions {

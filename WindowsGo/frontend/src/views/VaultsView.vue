@@ -22,6 +22,7 @@ import Card from '../components/fluent/Card.vue'
 import LineEdit from '../components/fluent/LineEdit.vue'
 import MessageBox from '../components/fluent/MessageBox.vue'
 import ProgressBar from '../components/fluent/ProgressBar.vue'
+import PageHeader from '../components/layout/PageHeader.vue'
 import InitWizard from './wizard/InitWizard.vue'
 import RecoveryCodeDlg from './wizard/RecoveryCodeDlg.vue'
 
@@ -408,24 +409,25 @@ async function onOtherConfirm(payload: string | boolean) {
 
     <!-- ======================= 已连接：密库信息（设置页同款单列卡） ======================= -->
     <template v-else>
+      <!-- 统一页头（56px）：页面级动作（重命名 / 锁定）只出现在这里。
+           未连接态刻意不带页头 —— 那是一个整屏引导页，身份由 hero 自己承担，
+           与文件页未连接时只给一个居中空态是同一条处理。 -->
+      <PageHeader title="密库" icon="cloud">
+        <template #actions>
+          <Button icon="edit" title="重命名当前密库" @click="renameDlg.open = true">重命名</Button>
+          <PrimaryButton icon="lock" title="锁定密库（Ctrl+L）" @click="lockVault">锁定</PrimaryButton>
+        </template>
+      </PageHeader>
+
       <div class="v-conn">
         <div class="v-inner">
-          <!-- 页头：与设置/传输两页统一的大标题模式（见 components.css .page-head） -->
-          <div class="page-head">
-            <h1 class="page-h1">密库</h1>
-            <p class="page-sub">当前密库的连接信息与存储配置</p>
-          </div>
-
-          <!-- 概览卡：图标 + 库名/后端 + 快捷操作（锁定/重命名） -->
+          <!-- 概览卡：图标 + 库名/后端。库名全页只此一处，故卡片保留；
+               动作已按骨架约定上收页头，这里回归纯身份展示。 -->
           <section class="ov-card">
             <span class="ov-icon"><Icon name="cloud" :size="22" /></span>
             <div class="ov-body">
               <div class="ov-name">{{ snap().vaultName }}</div>
               <div class="ov-meta">{{ snap().backend }} · {{ snap().backendId }}</div>
-            </div>
-            <div class="ov-actions">
-              <Button icon="edit" @click="renameDlg.open = true">重命名</Button>
-              <PrimaryButton icon="lock" title="锁定密库（Ctrl+L）" @click="lockVault">锁定</PrimaryButton>
             </div>
           </section>
 
@@ -694,8 +696,12 @@ async function onOtherConfirm(payload: string | boolean) {
 
 <style scoped>
 .v-view {
+  /* 列布局：统一页头（56px）固定在顶，未连接/已连接两种状态各自滚动——
+     此前本容器自己 overflow-y:auto，页头会跟着内容一起滚走。 */
+  display: flex;
+  flex-direction: column;
   height: 100%;
-  overflow-y: auto;
+  min-height: 0;
 }
 
 /* ---------- 未连接：欢迎区 ---------- */
@@ -703,6 +709,10 @@ async function onOtherConfirm(payload: string | boolean) {
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* 未连接态没有页头，本容器即滚动区 */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   gap: 28px;
   padding: 48px 24px 32px;
 }
@@ -855,7 +865,9 @@ async function onOtherConfirm(payload: string | boolean) {
 
 /* ---------- 已连接：设置页同款单列卡片 ---------- */
 .v-conn {
-  height: 100%;
+  /* 页头以下的滚动区：占满剩余高度（不再 height:100%，否则会被页头顶出滚动条） */
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 18px 24px 28px;
 }
@@ -918,11 +930,7 @@ async function onOtherConfirm(payload: string | boolean) {
   white-space: nowrap;
 }
 
-.ov-actions {
-  display: flex;
-  gap: 8px;
-  flex: none;
-}
+/* .ov-actions 已随「动作上收页头」移除（重命名/锁定现居 PageHeader #actions） */
 
 /* 分组标题、设置卡骨架（.group-title / .set-card / .set-icon / .set-body /
    .set-title / .set-content / .set-right）**已全部收敛到 styles/components.css**，
