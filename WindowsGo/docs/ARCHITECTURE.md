@@ -57,7 +57,8 @@ WindowsGo/
 │   ├── web/                    HTTP server：/api/* JSON + /api/events SSE + 静态前端 + 10Hz 合帧循环
 │   │                           + 同源媒体路由 /s/ /t/ /d/ + 访问闸门 auth.go（局域网档）
 │   │                           + 静态资源 gzip 中间件 compress.go（§8.3）
-│   ├── tray/                   系统托盘（getlantern/systray，纯 syscall）
+│   ├── tray/                   系统托盘（getlantern/systray，纯 syscall）；「退出」项自己
+│   │                           调 systray.Quit()（= systray.Run 的唯一返回条件，漏了即挂死）
 │   ├── platform/win/           dpapi / shell / localfs(本机目录浏览) / procstats / FatalMessage —— 唯一 syscall 出口
 │   └── loggingx/               slog + 脱敏 handler + 2MB×3 轮转
 ├── interop/                    冻结黄金向量夹具（testdata/ 入库，参考实现移除前生成，不可再生）

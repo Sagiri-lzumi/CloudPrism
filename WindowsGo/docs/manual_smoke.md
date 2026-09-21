@@ -8,13 +8,16 @@
 ```powershell
 cd C:\Codes\CloudPrism\WindowsGo
 $env:CGO_ENABLED = "0"
-wails build -platform windows/amd64
-# 产物：build\bin\CloudPrismGo.exe
+go build -ldflags "-s -w -H windowsgui" -o build\bin\CloudPrismGo.exe .
+# 或直接出发布产物：build\release.ps1 -Tag vN -SkipFrontend（落仓库根 Release\ 双产物）
 ```
 
-> ⚠️ 以下所有需要窗口的项，**必须在 IDE 之外的普通 PowerShell 里启动 exe**。
-> IDE 的沙箱会禁止 Chromium 建立 Mojo IPC 通道，窗口起不来（详见
-> `docs/ARCHITECTURE.md` 第 4 节）。
+> ⚠️ 改了前端源码**必须先重建 `frontend/dist`**（`npm --prefix frontend run build`）
+> 再 `go build` —— `//go:embed all:frontend/dist` 吃的是入库的那份 dist，
+> 忘了重建就会「改了前端但界面没变」（`release.ps1` 的 S1 自检抓这个）。
+
+> ⚠️ 托盘相关项需要**有通知区的真实桌面会话**；远程/沙箱会话里图标可能不出现，
+> 但不影响其它项（服务照常起、系统浏览器照常打开）。
 
 ---
 
@@ -84,6 +87,24 @@ wails build -platform windows/amd64
 - [ ] 连接过程**窗口顶部无横幅残留**（旧版顶部 op-banner 已删除）；连接
       成功变「已连接」，失败（输错主密码）后回「未连接」，均无悬挂文案
 - [ ] 深色主题下启动无白闪；125% / 150% DPI 下各页文字不错位（复查）
+
+## 阶段 6b：系统托盘与退出（系统交互，自动化测不到）
+
+> 这一组是 **v1.9 才补进清单**的：此前从没有人验过它，于是「点托盘『退出』毫无
+> 反应、进程退不掉」从 v32 一路活到 v1.8 —— `systray.Run` 只在 `systray.Quit()`
+> 被调用时返回，而托盘的 onQuit 从来没调它，主 goroutine 永久卡在消息循环里
+> （见 `internal/tray/tray.go` 包注释与 `tray_test.go` 的守卫）。别再漏。
+> 回归判据只有一条：**点完「退出」，进程必须真的没了。**
+
+- [ ] 托盘图标出现在通知区；悬停提示为「CloudPrism 端到端加密云盘」
+- [ ] 右键菜单四行：打开界面 / 锁定密库 / ─────── / 退出（顺序与分隔线正确）
+- [ ] 点「打开界面」→ 系统默认浏览器打开（或聚焦）`http://127.0.0.1:7840`
+- [ ] 点「锁定密库」→ 界面回锁定态（状态栏「未连接」），重连需主密码
+- [ ] **点「退出」→ 进程真的结束**：任务管理器无 `CloudPrismGo.exe`、托盘图标消失、
+      再访问 `http://127.0.0.1:7840` 连接被拒
+- [ ] 界面侧栏「退出」等效：进程结束、端口释放（托盘的替代路径，必须一直可用）
+- [ ] 单实例：进程还在时双击 exe → 不新开，转而打开已有实例的界面
+      （日志出现「检测到已在运行的实例，打开其界面」）
 
 ## 阶段 7：发布产物
 
