@@ -9,7 +9,7 @@
   失败在面板内红字展示（后端阶段文案经全局忙碌态在底部状态栏透出）。
 -->
 <script setup lang="ts">
-import {computed, reactive, ref, watch} from 'vue'
+import {computed, nextTick, reactive, ref, watch} from 'vue'
 import {ui, openVault, navigate, endOp} from '../../lib/store'
 import {Vault, unwrap} from '../../lib/api'
 import {showInfo, showWarning} from '../../lib/toast'
@@ -19,6 +19,7 @@ import Checkbox from '../../components/fluent/Checkbox.vue'
 import Icon from '../../components/fluent/Icon.vue'
 import LineEdit from '../../components/fluent/LineEdit.vue'
 import ProgressBar from '../../components/fluent/ProgressBar.vue'
+import ModalShell from '../../components/layout/ModalShell.vue'
 
 const emit = defineEmits<{close: []}>()
 
@@ -270,10 +271,6 @@ async function pickLocalDir() {
   }
 }
 
-function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') cancel()
-}
-
 /* 未连接时整个向导页可见；向导内回车在凭据步直接提交 */
 function enterAt(e: KeyboardEvent) {
   if (e.key === 'Enter') {
@@ -282,351 +279,293 @@ function enterAt(e: KeyboardEvent) {
     else next()
   }
 }
+
+const bodyEl = ref<HTMLElement>()
+
+/**
+ * 换步后把焦点收回面板内。
+ *
+ * 各步是 v-if 分支，换步会整棵重建、被聚焦的节点随之销毁，焦点掉回 body。
+ * 而 ModalShell 的 Tab 循环挂在面板上 —— 焦点在 body 时收不到 keydown，
+ * Tab 会直接跑到面板外的页面区（模态还开着，键盘却已经出去了）。
+ * 所以换步后主动聚焦新分支里的第一个可聚焦项，键盘流不中断。
+ */
+watch(step, async () => {
+  await nextTick()
+  const sel = 'button:not([disabled]),input:not([disabled]),[tabindex]:not([tabindex="-1"])'
+  bodyEl.value?.querySelector<HTMLElement>(sel)?.focus()
+})
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="fade">
-      <div v-if="true" class="wiz-mask" @keydown="onKey">
-        <div class="wiz-panel" role="dialog" aria-label="初始化向导">
-          <!-- 头部：标题 + 步骤点 -->
-          <div class="wiz-head">
-            <span class="wiz-icon"><Icon name="connect" :size="18" /></span>
-            <div class="wiz-titles">
-              <div class="wiz-title">初始化 CloudPrism</div>
-              <div class="wiz-sub">{{ stepTitles[step].title }}</div>
-            </div>
-            <button type="button" class="wiz-x" title="关闭向导" @click="cancel">
-              <Icon name="cancel" :size="14" />
-            </button>
-          </div>
+  <!-- 浮层结构（遮罩/面板/页头/焦点/Esc）走 ModalShell：
+       Esc 由它挂 window 处理，因此「刚打开」和「回车翻步后」都能关掉
+       （此前挂在遮罩上的 @keydown 只在焦点恰好在面板内时才生效，实测两条
+       真实路径都关不掉）。执行中交出 esc 与关闭钮，避免半途被 Esc 打断。 -->
+  <ModalShell
+    :open="true"
+    title="初始化 CloudPrism"
+    :sub="stepTitles[step].title"
+    icon="connect"
+    :width="600"
+    :closable="!busy"
+    :esc="!busy"
+    @close="cancel"
+  >
+    <!-- 步骤指示：放条带槽（页头之下、滚动体之上），滚动时不会跟着内容滚走 -->
+    <template #bar>
+      <div class="wiz-steps" aria-hidden="true">
+        <span
+          v-for="(s, i) in stepTitles"
+          :key="s.n"
+          class="ws-dot"
+          :class="{on: step === i, done: step > i}"
+        />
+      </div>
+    </template>
 
-          <!-- 步骤指示 -->
-          <div class="wiz-steps" aria-hidden="true">
-            <span
-              v-for="(s, i) in stepTitles"
-              :key="s.n"
-              class="ws-dot"
-              :class="{on: step === i, done: step > i}"
+    <!-- 面板体：Enter 步进仍绑在这一层（焦点在体内任何控件上都能冒泡到这里） -->
+    <div ref="bodyEl" class="wiz-body" @keydown="enterAt">
+      <!-- 步 0：模式 -->
+      <div v-if="step === 0" class="radio-col">
+        <button
+          type="button"
+          class="radio-card"
+          :class="{on: form.mode === 'new'}"
+          @click="form.mode = 'new'"
+        >
+          <Icon name="add" :size="18" class="rc-ic" />
+          <span class="rc-txt">
+            <b>新建密库</b>
+            <i>首次使用：创建全新加密库，含恢复码备份</i>
+          </span>
+          <span class="rc-dot" />
+        </button>
+        <button
+          type="button"
+          class="radio-card"
+          :class="{on: form.mode === 'connect'}"
+          @click="form.mode = 'connect'"
+        >
+          <Icon name="folder" :size="18" class="rc-ic" />
+          <span class="rc-txt">
+            <b>连接已有密库</b>
+            <i>从本地目录或云端恢复/继续使用</i>
+          </span>
+          <span class="rc-dot" />
+        </button>
+        <p class="wiz-hint">{{ MODE_DESC[form.mode] }}</p>
+      </div>
+
+      <!-- 步 1：后端类型 -->
+      <div v-else-if="step === 1" class="radio-col">
+        <button
+          v-for="b in BACKEND_META"
+          :key="b.kind"
+          type="button"
+          class="radio-card"
+          :class="{on: form.kind === b.kind}"
+          @click="form.kind = b.kind"
+        >
+          <Icon :name="b.icon" :size="18" class="rc-ic" />
+          <span class="rc-txt">
+            <b>{{ b.title }}</b>
+            <i>{{ b.desc }}</i>
+          </span>
+          <span class="rc-dot" />
+        </button>
+        <p class="wiz-hint">
+          连接参数（账号等）仅保存在本机设置；所有密码只驻内存、绝不落盘。
+        </p>
+      </div>
+
+      <!-- 步 2：配置 -->
+      <div v-else-if="step === 2" class="form-col">
+        <!-- 本地：目录选择 -->
+        <template v-if="form.kind === 'local'">
+          <div class="fld">
+            <label>密库存放目录</label>
+            <div class="dir-row">
+              <LineEdit
+                v-model="form.localDir"
+                clearable
+                placeholder="选择或输入本地文件夹路径"
+              />
+              <Button icon="folder" title="浏览选择目录" @click="pickLocalDir">
+                浏览…
+              </Button>
+            </div>
+            <p class="wiz-hint">
+              目录无需为空：多个密库可共存（同名目录内检测既有密库时会提示）。
+            </p>
+          </div>
+        </template>
+
+        <!-- WebDAV -->
+        <template v-else-if="form.kind === 'webdav'">
+          <div class="fld">
+            <label>服务器地址</label>
+            <LineEdit
+              v-model="form.url"
+              clearable
+              placeholder="https://dav.example.com/remote.php/dav/files/me"
             />
           </div>
+          <div class="fld">
+            <label>用户名</label>
+            <LineEdit v-model="form.user" clearable placeholder="WebDAV 账号" />
+          </div>
+          <div class="fld">
+            <label>密码（不落盘）</label>
+            <LineEdit v-model="form.pass" password placeholder="服务器密码（应用专用密码）" />
+          </div>
+        </template>
 
-          <!-- 面板体 -->
-          <div class="wiz-body" @keydown="enterAt">
-            <!-- 步 0：模式 -->
-            <div v-if="step === 0" class="radio-col">
-              <button
-                type="button"
-                class="radio-card"
-                :class="{on: form.mode === 'new'}"
-                @click="form.mode = 'new'"
-              >
-                <Icon name="add" :size="18" class="rc-ic" />
-                <span class="rc-txt">
-                  <b>新建密库</b>
-                  <i>首次使用：创建全新加密库，含恢复码备份</i>
-                </span>
-                <span class="rc-dot" />
-              </button>
-              <button
-                type="button"
-                class="radio-card"
-                :class="{on: form.mode === 'connect'}"
-                @click="form.mode = 'connect'"
-              >
-                <Icon name="folder" :size="18" class="rc-ic" />
-                <span class="rc-txt">
-                  <b>连接已有密库</b>
-                  <i>从本地目录或云端恢复/继续使用</i>
-                </span>
-                <span class="rc-dot" />
-              </button>
-              <p class="wiz-hint">{{ MODE_DESC[form.mode] }}</p>
-            </div>
-
-            <!-- 步 1：后端类型 -->
-            <div v-else-if="step === 1" class="radio-col">
-              <button
-                v-for="b in BACKEND_META"
-                :key="b.kind"
-                type="button"
-                class="radio-card"
-                :class="{on: form.kind === b.kind}"
-                @click="form.kind = b.kind"
-              >
-                <Icon :name="b.icon" :size="18" class="rc-ic" />
-                <span class="rc-txt">
-                  <b>{{ b.title }}</b>
-                  <i>{{ b.desc }}</i>
-                </span>
-                <span class="rc-dot" />
-              </button>
-              <p class="wiz-hint">
-                连接参数（账号等）仅保存在本机设置；所有密码只驻内存、绝不落盘。
-              </p>
-            </div>
-
-            <!-- 步 2：配置 -->
-            <div v-else-if="step === 2" class="form-col">
-              <!-- 本地：目录选择 -->
-              <template v-if="form.kind === 'local'">
-                <div class="fld">
-                  <label>密库存放目录</label>
-                  <div class="dir-row">
-                    <LineEdit
-                      v-model="form.localDir"
-                      clearable
-                      placeholder="选择或输入本地文件夹路径"
-                    />
-                    <Button icon="folder" title="浏览选择目录" @click="pickLocalDir">
-                      浏览…
-                    </Button>
-                  </div>
-                  <p class="wiz-hint">
-                    目录无需为空：多个密库可共存（同名目录内检测既有密库时会提示）。
-                  </p>
-                </div>
-              </template>
-
-              <!-- WebDAV -->
-              <template v-else-if="form.kind === 'webdav'">
-                <div class="fld">
-                  <label>服务器地址</label>
-                  <LineEdit
-                    v-model="form.url"
-                    clearable
-                    placeholder="https://dav.example.com/remote.php/dav/files/me"
-                  />
-                </div>
-                <div class="fld">
-                  <label>用户名</label>
-                  <LineEdit v-model="form.user" clearable placeholder="WebDAV 账号" />
-                </div>
-                <div class="fld">
-                  <label>密码（不落盘）</label>
-                  <LineEdit v-model="form.pass" password placeholder="服务器密码（应用专用密码）" />
-                </div>
-              </template>
-
-              <!-- 百度：授权状态 + 内嵌授权 -->
-              <template v-else>
-                <div v-if="form.baidu.authorized" class="ok-box">
-                  <Icon name="completed" :size="16" />
-                  <span>已授权（AppKey：{{ form.baidu.appKey || '未知' }}），凭证已加密保存</span>
-                  <Button iconOnly icon="cancel" title="清除本机授权" @click="clearBaiduAuth" />
-                </div>
-                <template v-else>
-                  <div class="fld">
-                    <label>开放平台凭证（申请见《Plan/百度网盘开放平台申请指南》）</label>
-                    <div class="cred-grid">
-                      <LineEdit v-model="baiduForm.appID" placeholder="Appid（可选）" />
-                      <LineEdit v-model="baiduForm.appKey" placeholder="AppKey（必填）" />
-                      <LineEdit v-model="baiduForm.secret" password placeholder="SecretKey（必填）" />
-                      <LineEdit v-model="baiduForm.signKey" password placeholder="SignKey（可选）" />
-                    </div>
-                  </div>
-                  <div class="fld">
-                    <label>第一步：打开授权页</label>
-                    <Button icon="globe" :disabled="baiduBusy" @click="openBaiduPage">
-                      打开授权页面
-                    </Button>
-                    <p v-if="baiduUrl" class="url-line" :title="baiduUrl">{{ baiduUrl }}</p>
-                  </div>
-                  <div class="fld">
-                    <label>第二步：粘贴 code 并完成授权</label>
-                    <div class="dir-row">
-                      <LineEdit v-model="baiduForm.code" placeholder="授权页展示的一次性 code" />
-                      <PrimaryButton
-                        icon="completed"
-                        :disabled="baiduBusy"
-                        @click="finishBaiduAuth"
-                      >
-                        完成授权
-                      </PrimaryButton>
-                    </div>
-                  </div>
-                </template>
-              </template>
-            </div>
-
-            <!-- 步 3：凭据 -->
-            <div v-else class="form-col">
-              <!-- 新建：库名 + 文件名加密 + 主密码两遍 -->
-              <template v-if="form.mode === 'new'">
-                <div class="fld">
-                  <label>密库名称（可选）</label>
-                  <LineEdit
-                    v-model="form.vaultName"
-                    clearable
-                    placeholder="给密库起个名字，默认自动编号"
-                  />
-                </div>
-                <div class="fld">
-                  <label>文件名加密</label>
-                  <div class="two-radios">
-                    <button
-                      type="button"
-                      class="mini-radio"
-                      :class="{on: !form.filenameEnc}"
-                      @click="form.filenameEnc = false"
-                    >
-                      关闭（云端可见原始文件名）
-                    </button>
-                    <button
-                      type="button"
-                      class="mini-radio"
-                      :class="{on: form.filenameEnc}"
-                      @click="form.filenameEnc = true"
-                    >
-                      开启（文件名一并加密，更安全）
-                    </button>
-                  </div>
-                  <p class="wiz-hint">启动后不可中途修改（需重建密库迁移）。</p>
-                </div>
-                <div class="fld">
-                  <label>主密码（≥ 6 位，忘记后凭恢复码找回）</label>
-                  <LineEdit v-model="form.master" password placeholder="设置主密码" />
-                </div>
-                <div class="fld">
-                  <label>再次输入主密码</label>
-                  <LineEdit v-model="form.master2" password placeholder="重复主密码" />
-                  <p v-if="pwdHint" class="err-hint">{{ pwdHint }}</p>
-                </div>
-              </template>
-
-              <!-- 连接：主密码 / 恢复码 -->
-              <template v-else>
-                <Checkbox v-model="form.useRecovery">
-                  忘记主密码？改用恢复码开库
-                </Checkbox>
-                <div v-if="!form.useRecovery" class="fld">
-                  <label>主密码</label>
-                  <LineEdit v-model="form.master" password placeholder="输入主密码" />
-                </div>
-                <div v-else class="fld">
-                  <label>恢复码</label>
-                  <LineEdit
-                    v-model="form.recovery"
-                    clearable
-                    placeholder="XXXX-XXXX-XXXX-XXXX（一次性备份的恢复码）"
-                  />
-                </div>
-              </template>
-
-              <!-- 执行期状态（✓ 前缀 = 成功/提示，其余按错误红字） -->
-              <div v-if="status" class="status-line" :class="{err: !status.startsWith('✓')}">
-                {{ status }}
-              </div>
-              <div v-if="busy" class="busy-row">
-                <div class="busy-track"><ProgressBar indeterminate /></div>
+        <!-- 百度：授权状态 + 内嵌授权 -->
+        <template v-else>
+          <div v-if="form.baidu.authorized" class="ok-box">
+            <Icon name="completed" :size="16" />
+            <span>已授权（AppKey：{{ form.baidu.appKey || '未知' }}），凭证已加密保存</span>
+            <Button iconOnly icon="cancel" title="清除本机授权" @click="clearBaiduAuth" />
+          </div>
+          <template v-else>
+            <div class="fld">
+              <label>开放平台凭证（申请见《Plan/百度网盘开放平台申请指南》）</label>
+              <div class="cred-grid">
+                <LineEdit v-model="baiduForm.appID" placeholder="Appid（可选）" />
+                <LineEdit v-model="baiduForm.appKey" placeholder="AppKey（必填）" />
+                <LineEdit v-model="baiduForm.secret" password placeholder="SecretKey（必填）" />
+                <LineEdit v-model="baiduForm.signKey" password placeholder="SignKey（可选）" />
               </div>
             </div>
-          </div>
-
-          <!-- 底部导航 -->
-          <div class="wiz-foot">
-            <span class="wiz-mode">{{ form.mode === 'new' ? '新建密库' : '连接密库' }} · {{ BACKEND_META.find((b) => b.kind === form.kind)?.title }}</span>
-            <div class="wiz-btns">
-              <Button v-if="step > 0" :disabled="busy" @click="back">上一步</Button>
-              <PrimaryButton v-if="step < 3" :disabled="!canNext || busy" @click="next">
-                下一步
-              </PrimaryButton>
-              <PrimaryButton
-                v-else
-                icon="completed"
-                :disabled="!canNext || busy"
-                @click="finish"
-              >
-                {{ busy ? '执行中…' : (form.mode === 'new' ? '创建密库' : '连接') }}
-              </PrimaryButton>
+            <div class="fld">
+              <label>第一步：打开授权页</label>
+              <Button icon="globe" :disabled="baiduBusy" @click="openBaiduPage">
+                打开授权页面
+              </Button>
+              <p v-if="baiduUrl" class="url-line" :title="baiduUrl">{{ baiduUrl }}</p>
             </div>
-          </div>
-        </div>
-
+            <div class="fld">
+              <label>第二步：粘贴 code 并完成授权</label>
+              <div class="dir-row">
+                <LineEdit v-model="baiduForm.code" placeholder="授权页展示的一次性 code" />
+                <PrimaryButton
+                  icon="completed"
+                  :disabled="baiduBusy"
+                  @click="finishBaiduAuth"
+                >
+                  完成授权
+                </PrimaryButton>
+              </div>
+            </div>
+          </template>
+        </template>
       </div>
-    </Transition>
-  </Teleport>
+
+      <!-- 步 3：凭据 -->
+      <div v-else class="form-col">
+        <!-- 新建：库名 + 文件名加密 + 主密码两遍 -->
+        <template v-if="form.mode === 'new'">
+          <div class="fld">
+            <label>密库名称（可选）</label>
+            <LineEdit
+              v-model="form.vaultName"
+              clearable
+              placeholder="给密库起个名字，默认自动编号"
+            />
+          </div>
+          <div class="fld">
+            <label>文件名加密</label>
+            <div class="two-radios">
+              <button
+                type="button"
+                class="mini-radio"
+                :class="{on: !form.filenameEnc}"
+                @click="form.filenameEnc = false"
+              >
+                关闭（云端可见原始文件名）
+              </button>
+              <button
+                type="button"
+                class="mini-radio"
+                :class="{on: form.filenameEnc}"
+                @click="form.filenameEnc = true"
+              >
+                开启（文件名一并加密，更安全）
+              </button>
+            </div>
+            <p class="wiz-hint">启动后不可中途修改（需重建密库迁移）。</p>
+          </div>
+          <div class="fld">
+            <label>主密码（≥ 6 位，忘记后凭恢复码找回）</label>
+            <LineEdit v-model="form.master" password placeholder="设置主密码" />
+          </div>
+          <div class="fld">
+            <label>再次输入主密码</label>
+            <LineEdit v-model="form.master2" password placeholder="重复主密码" />
+            <p v-if="pwdHint" class="err-hint">{{ pwdHint }}</p>
+          </div>
+        </template>
+
+        <!-- 连接：主密码 / 恢复码 -->
+        <template v-else>
+          <Checkbox v-model="form.useRecovery">
+            忘记主密码？改用恢复码开库
+          </Checkbox>
+          <div v-if="!form.useRecovery" class="fld">
+            <label>主密码</label>
+            <LineEdit v-model="form.master" password placeholder="输入主密码" />
+          </div>
+          <div v-else class="fld">
+            <label>恢复码</label>
+            <LineEdit
+              v-model="form.recovery"
+              clearable
+              placeholder="XXXX-XXXX-XXXX-XXXX（一次性备份的恢复码）"
+            />
+          </div>
+        </template>
+
+        <!-- 执行期状态（✓ 前缀 = 成功/提示，其余按错误红字） -->
+        <div v-if="status" class="status-line" :class="{err: !status.startsWith('✓')}">
+          {{ status }}
+        </div>
+        <div v-if="busy" class="busy-row">
+          <div class="busy-track"><ProgressBar indeterminate /></div>
+        </div>
+      </div>
+    </div>
+
+    <template #foot-lead>
+      {{ form.mode === 'new' ? '新建密库' : '连接密库' }} ·
+      {{ BACKEND_META.find((b) => b.kind === form.kind)?.title }}
+    </template>
+
+    <template #actions>
+      <Button v-if="step > 0" :disabled="busy" @click="back">上一步</Button>
+      <PrimaryButton v-if="step < 3" :disabled="!canNext || busy" @click="next">
+        下一步
+      </PrimaryButton>
+      <PrimaryButton
+        v-else
+        icon="completed"
+        :disabled="!canNext || busy"
+        @click="finish"
+      >
+        {{ busy ? '执行中…' : (form.mode === 'new' ? '创建密库' : '连接') }}
+      </PrimaryButton>
+    </template>
+  </ModalShell>
 </template>
 
 <style scoped>
-.wiz-mask {
-  position: fixed;
-  inset: 0;
-  /* 叠加模态：基准 --z-modal 之上留偏移，确保盖住可能同时打开的 MessageBox */
-  z-index: calc(var(--z-modal) + 100);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--veil);
-}
+/* 遮罩 / 面板 / 页头 / 页脚已收进 components/layout/ModalShell.vue，
+   本组件只剩「向导特有」的内容样式：步骤条、单选卡列、表单列。 */
 
-.wiz-panel {
-  display: flex;
-  flex-direction: column;
-  width: min(600px, calc(100vw - 120px));
-  max-height: min(640px, calc(100vh - 120px));
-  background: var(--surface);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-pop);
-  outline: none;
-}
-
-.wiz-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 18px 22px 12px;
-}
-
-.wiz-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 36px;
-  height: 36px;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-radius: var(--radius-ctrl);
-}
-
-.wiz-titles {
-  flex: 1;
-  min-width: 0;
-}
-
-.wiz-title {
-  font-size: 1.071rem;
-  font-weight: 600;
-  color: var(--heading);
-}
-
-.wiz-sub {
-  margin-top: 1px;
-  font-size: 0.857rem;
-  color: var(--text2);
-}
-
-.wiz-x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  color: var(--muted);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-ctrl);
-}
-
-.wiz-x:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-}
-
+/* 步骤指示 */
 .wiz-steps {
   display: flex;
   gap: 6px;
-  padding: 0 22px 12px;
 }
 
 .ws-dot {
@@ -644,12 +583,9 @@ function enterAt(e: KeyboardEvent) {
   background: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
+/* 体内层：只负责 Enter 步进的冒泡边界 + 各步之间不跳动的最小高度 */
 .wiz-body {
-  flex: 1;
   min-height: 300px;
-  max-height: 380px;
-  overflow-y: auto;
-  padding: 4px 22px 16px;
 }
 
 /* 单选卡列 */
@@ -839,25 +775,4 @@ function enterAt(e: KeyboardEvent) {
 .busy-track {
   height: 4px;
 }
-
-.wiz-foot {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 22px 18px;
-  border-top: 1px solid var(--divider);
-}
-
-.wiz-mode {
-  flex: 1;
-  font-size: 0.786rem;
-  color: var(--muted);
-}
-
-.wiz-btns {
-  display: flex;
-  gap: 8px;
-}
-
-/* .fade-* 过渡基元已在 styles/base.css 全局定义，此处删除重复副本。 */
 </style>

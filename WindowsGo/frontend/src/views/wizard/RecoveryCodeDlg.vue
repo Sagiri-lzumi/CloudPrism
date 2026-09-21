@@ -2,12 +2,14 @@
   RecoveryCodeDlg.vue —— 恢复码一次性展示框（向导新建成功 / 密库页重新生成共用）。
   对照 Python RecoveryCodeDialog：Consolas 大字等宽分片展示 + 复制按钮 +
   「我已备份，进入」主钮。Esc/遮罩关闭 = 取消等待（不标记已备份）。
+
+  浮层结构（遮罩/面板/页头/焦点/Esc）一律走 ModalShell —— 本组件只管内容。
 -->
 <script setup lang="ts">
-import {watch} from 'vue'
+import {ref, watch} from 'vue'
 import Button from '../../components/fluent/Button.vue'
 import PrimaryButton from '../../components/fluent/PrimaryButton.vue'
-import Icon from '../../components/fluent/Icon.vue'
+import ModalShell from '../../components/layout/ModalShell.vue'
 
 const props = defineProps<{
   open: boolean
@@ -23,115 +25,66 @@ const segments = () => {
   return c.includes('-') ? c.split('-') : (c.match(/.{1,4}/g) ?? [])
 }
 
-let copied = false
+// 必须是 ref：原先写成普通 let，模板读的是非响应式绑定，
+// 于是「已复制」这个反馈永远不变 —— 点了复制却像没反应。
+const copied = ref(false)
 watch(
   () => props.open,
   (v) => {
-    if (v) copied = false
+    if (v) copied.value = false
   },
 )
 
 function onCopy() {
-  try {
-    void navigator.clipboard.writeText(props.code.trim())
-  } catch {
-    /* 剪贴板不可用时退化为选中文本（用户手动 Ctrl+C） */
+  // 剪贴板不可用时退化为「选中文本」，用户手动 Ctrl+C。
+  // writeText 是异步的：同步 try/catch 兜不住它的 reject，
+  // 不接 catch 会变成 unhandled rejection（实测会在控制台留下 pageerror）。
+  const selectFallback = () => {
     const el = document.querySelector<HTMLElement>('.rc-code')
+    if (!el) return
     const range = document.createRange()
-    if (el) {
-      range.selectNodeContents(el)
-      const sel = window.getSelection()
-      sel?.removeAllRanges()
-      sel?.addRange(range)
-    }
+    range.selectNodeContents(el)
+    const sel = window.getSelection()
+    sel?.removeAllRanges()
+    sel?.addRange(range)
   }
-  copied = true
-}
-
-function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') emit('close')
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(props.code.trim()).catch(selectFallback)
+  } else {
+    selectFallback()
+  }
+  copied.value = true
 }
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="fade">
-      <div v-if="open" class="rc-mask" @keydown="onKey">
-        <div class="rc-panel" role="dialog" aria-label="恢复码">
-          <div class="rc-head">
-            <span class="rc-head-icon">
-              <Icon name="save" :size="18" />
-            </span>
-            <div class="rc-title">保存恢复码</div>
-          </div>
+  <ModalShell
+    :open="open"
+    title="保存恢复码"
+    icon="save"
+    tone="ok"
+    :width="480"
+    @close="emit('close')"
+  >
+    <p class="rc-tip">
+      请复制并妥善备份此恢复码（建议离线保存）。忘记主密码时可凭它开库；
+      恢复码一旦丢失将无法找回。此码只显示这一次，不会写入云端。
+    </p>
 
-          <p class="rc-tip">
-            请复制并妥善备份此恢复码（建议离线保存）。忘记主密码时可凭它开库；
-            恢复码一旦丢失将无法找回。此码只显示这一次，不会写入云端。
-          </p>
+    <div class="rc-code" dir="ltr" aria-label="恢复码内容">
+      <span v-for="(s, i) in segments()" :key="i" class="rc-seg">{{ s }}</span>
+    </div>
 
-          <div class="rc-code" dir="ltr" aria-label="恢复码内容">
-            <span v-for="(s, i) in segments()" :key="i" class="rc-seg">{{ s }}</span>
-          </div>
+    <p class="rc-note">重新生成后旧恢复码立即失效；恢复码不会上传到云端。</p>
 
-          <p class="rc-note">重新生成后旧恢复码立即失效；恢复码不会上传到云端。</p>
-
-          <div class="rc-actions">
-            <Button icon="copy" @click="onCopy">{{ copied ? '已复制' : '复制恢复码' }}</Button>
-            <PrimaryButton icon="completed" @click="emit('close')">我已备份，进入密库</PrimaryButton>
-          </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+    <template #actions>
+      <Button icon="copy" @click="onCopy">{{ copied ? '已复制' : '复制恢复码' }}</Button>
+      <PrimaryButton icon="completed" @click="emit('close')">我已备份，进入密库</PrimaryButton>
+    </template>
+  </ModalShell>
 </template>
 
 <style scoped>
-.rc-mask {
-  position: fixed;
-  inset: 0;
-  /* 最高一档叠加模态：须盖住向导（+100）与快速连接（+150） */
-  z-index: calc(var(--z-modal) + 200);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--veil);
-}
-
-.rc-panel {
-  width: min(480px, calc(100vw - 96px));
-  padding: 20px;
-  background: var(--surface);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-pop);
-  outline: none;
-}
-
-.rc-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.rc-head-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 36px;
-  height: 36px;
-  color: var(--ok);
-  background: color-mix(in srgb, var(--ok) 14%, transparent);
-  border-radius: var(--radius-ctrl);
-}
-
-.rc-title {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--heading);
-}
-
 .rc-tip {
   margin: 0 0 12px;
   font-size: 0.857rem;
@@ -160,17 +113,9 @@ function onKey(e: KeyboardEvent) {
 }
 
 .rc-note {
-  margin: 0 0 16px;
+  margin: 0;
   font-size: 0.786rem;
   line-height: 1.4;
   color: var(--muted);
 }
-
-.rc-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-/* .fade-* 过渡基元已在 styles/base.css 全局定义，此处删除重复副本。 */
 </style>

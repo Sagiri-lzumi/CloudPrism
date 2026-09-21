@@ -9,7 +9,7 @@
   快照由 10Hz 帧驱动（ui.snap），无需本地定时器。
 -->
 <script setup lang="ts">
-import {computed, onMounted, onUnmounted, reactive, ref} from 'vue'
+import {computed, onMounted, reactive, ref} from 'vue'
 import {ui, openVault, navigate, lockVault, endOp} from '../lib/store'
 import {Settings, Vault, unwrap} from '../lib/api'
 import {fmtSize, fmtConnectSec} from '../lib/format'
@@ -23,6 +23,7 @@ import LineEdit from '../components/fluent/LineEdit.vue'
 import MessageBox from '../components/fluent/MessageBox.vue'
 import ProgressBar from '../components/fluent/ProgressBar.vue'
 import PageHeader from '../components/layout/PageHeader.vue'
+import ModalShell from '../components/layout/ModalShell.vue'
 import InitWizard from './wizard/InitWizard.vue'
 import RecoveryCodeDlg from './wizard/RecoveryCodeDlg.vue'
 
@@ -46,11 +47,6 @@ async function refreshRecents() {
 onMounted(() => {
   // 未连接时拉取最近列表；已连接态由连接流程负责跳页，此页不展示 recents
   void refreshRecents()
-  window.addEventListener('keydown', onKeydown)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown)
 })
 
 function openWizard() {
@@ -167,20 +163,15 @@ async function doQuickConnect() {
 
 /* ----------------------------------------------------- 已连接功能区 */
 
-/** 快速连接面板的 Esc 关闭。
- *  .qc-mask 上没有可聚焦元素、也没绑键盘事件，不注册全局监听就没法用键盘退出
- *  （本页其余浮层——MessageBox / RoundMenu / 向导 / 恢复码——都已各自支持 Esc，
- *  这里补齐最后一块）。
- *  守卫三点：面板没开不响应；连接进行中不响应（此时关闭会让用户误以为已取消，
- *  而实际上请求仍在飞）；上层还压着向导或重命名对话框时不响应，
- *  避免一次 Esc 顺着关掉两层。 */
-function onKeydown(e: KeyboardEvent) {
-  if (e.key !== 'Escape') return
-  if (!qc.open || qc.busy) return
-  if (showWiz.value || renameDlg.open) return
-  e.preventDefault()
-  qc.open = false
-}
+/** 快速连接面板的副标题：库名 · 位置。
+ *  原先这段表达式内联在模板里（且 Esc 是本页手写全局 keydown 兜的），
+ *  现在浮层结构与键盘处理都归 ModalShell，这里只留纯展示。 */
+const qcSub = computed(() => {
+  const r = qc.record
+  const name = String(r?.vault_name ?? r?.label ?? '密库')
+  const where = String(r?.vault_path ?? '') || '根目录'
+  return `${name} · ${where}`
+})
 
 // 自动锁文案（索引语义：0=从不 1/2/3=5/15/30 分钟）
 const AUTOLOCK_LABELS = ['从不（不自动锁定）', '5 分钟', '15 分钟', '30 分钟']
@@ -597,66 +588,58 @@ async function onOtherConfirm(payload: string | boolean) {
     <!-- ======================= 模态区 ======================= -->
     <InitWizard v-if="showWiz" @close="onWizClose" />
 
-    <!-- 快速连接对话框（未连接态） -->
-    <Teleport to="body">
-      <Transition name="fade">
-        <div v-if="qc.open" class="qc-mask">
-          <div class="qc-panel" role="dialog" aria-label="快速连接">
-            <div class="qc-head">
-              <Icon name="connect" :size="18" class="qc-ic" />
-              <div>
-                <div class="qc-title">快速连接</div>
-                <div class="qc-sub">
-                  {{ qc.record?.vault_name || qc.record?.label || '密库' }} ·{{
-                    String(qc.record?.vault_path ?? '') || '根目录'
-                  }}
-                </div>
-              </div>
-              <button type="button" class="qc-x" title="取消" @click="qc.open = false">
-                <Icon name="cancel" :size="14" />
-              </button>
-            </div>
+    <!-- 快速连接对话框（未连接态）：浮层结构走 ModalShell，
+         Esc 由它按栈处理 —— 原先本页手写的全局 keydown 已删（含「忙碌中不响应」
+         与「上层压着向导/重命名时不响应」两条守卫：前者由 :esc 承担，
+         后者由模态栈的「只有最上层响应」天然满足）。 -->
+    <ModalShell
+      :open="qc.open"
+      title="快速连接"
+      :sub="qcSub"
+      icon="connect"
+      :width="440"
+      closable
+      :esc="!qc.busy"
+      autofocus=".cp-line-edit input"
+      @close="qc.open = false"
+    >
+      <div v-if="String(qc.record?.backend_type ?? '') === 'webdav'" class="qc-fld">
+        <label>WebDAV 服务器密码（{{ qc.record?.webdav_user || '账号' }}，不落盘）</label>
+        <LineEdit v-model="qc.webdavPass" password placeholder="服务器密码（应用专用密码）" />
+      </div>
 
-            <div v-if="String(qc.record?.backend_type ?? '') === 'webdav'" class="qc-fld">
-              <label>WebDAV 服务器密码（{{ qc.record?.webdav_user || '账号' }}，不落盘）</label>
-              <LineEdit v-model="qc.webdavPass" password placeholder="服务器密码（应用专用密码）" />
-            </div>
+      <Checkbox v-model="qc.useRecovery" class="chk">
+        忘记主密码？改用恢复码开库
+      </Checkbox>
 
-            <Checkbox v-model="qc.useRecovery" class="chk">
-              忘记主密码？改用恢复码开库
-            </Checkbox>
+      <div v-if="!qc.useRecovery" class="qc-fld">
+        <label>主密码</label>
+        <LineEdit
+          v-model="qc.master"
+          password
+          placeholder="主密码（仅本次驻内存使用）"
+          @enter="doQuickConnect"
+        />
+      </div>
+      <div v-else class="qc-fld">
+        <label>恢复码</label>
+        <LineEdit
+          v-model="qc.recovery"
+          clearable
+          placeholder="XXXX-XXXX-XXXX-XXXX"
+          @enter="doQuickConnect"
+        />
+      </div>
 
-            <div v-if="!qc.useRecovery" class="qc-fld">
-              <label>主密码</label>
-              <LineEdit
-                v-model="qc.master"
-                password
-                placeholder="主密码（仅本次驻内存使用）"
-                @enter="doQuickConnect"
-              />
-            </div>
-            <div v-else class="qc-fld">
-              <label>恢复码</label>
-              <LineEdit
-                v-model="qc.recovery"
-                clearable
-                placeholder="XXXX-XXXX-XXXX-XXXX"
-                @enter="doQuickConnect"
-              />
-            </div>
+      <div v-if="qc.status" class="qc-status">{{ qc.status }}</div>
 
-            <div v-if="qc.status" class="qc-status">{{ qc.status }}</div>
-
-            <div class="qc-actions">
-              <Button :disabled="qc.busy" @click="qc.open = false">取消</Button>
-              <PrimaryButton icon="connect" :disabled="qc.busy" @click="doQuickConnect">
-                {{ qc.busy ? '连接中…' : '连接' }}
-              </PrimaryButton>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+      <template #actions>
+        <Button :disabled="qc.busy" @click="qc.open = false">取消</Button>
+        <PrimaryButton icon="connect" :disabled="qc.busy" @click="doQuickConnect">
+          {{ qc.busy ? '连接中…' : '连接' }}
+        </PrimaryButton>
+      </template>
+    </ModalShell>
 
     <!-- 重命名 / 重新生成恢复码 / 其它密库密码 -->
     <MessageBox
@@ -1058,74 +1041,8 @@ async function onOtherConfirm(payload: string | boolean) {
 }
 
 /* ---------- 快速连接对话框 ---------- */
-.qc-mask {
-  position: fixed;
-  inset: 0;
-  /* 叠加模态：高于基准 --z-modal，低于恢复码对话框（+200）与通知条 */
-  z-index: calc(var(--z-modal) + 150);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--veil);
-}
-
-.qc-panel {
-  width: min(440px, calc(100vw - 96px));
-  padding: 20px;
-  background: var(--surface);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-pop);
-}
-
-.qc-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.qc-ic {
-  flex: none;
-  margin-top: 2px;
-  color: var(--accent);
-}
-
-.qc-head > div {
-  flex: 1;
-  min-width: 0;
-}
-
-.qc-title {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--heading);
-}
-
-.qc-sub {
-  overflow: hidden;
-  font-size: 0.786rem;
-  color: var(--muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.qc-x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 26px;
-  height: 26px;
-  color: var(--muted);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-ctrl);
-}
-
-.qc-x:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-}
-
+/* 快速连接的遮罩 / 面板 / 页头 / 动作行已收进 ModalShell（原先 mask/panel/head/
+   title/sub/x/actions 七条规则只服务这一个浮层）。本页只剩表单自身的节奏。 */
 .qc-fld {
   margin: 10px 0;
 }
@@ -1151,13 +1068,6 @@ async function onOtherConfirm(payload: string | boolean) {
   color: var(--err);
   background: color-mix(in srgb, var(--err) 8%, transparent);
   border-radius: var(--radius-ctrl);
-}
-
-.qc-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
 }
 
 /* .fade-* 过渡基元已在 styles/base.css 全局定义，此处删除重复副本。 */

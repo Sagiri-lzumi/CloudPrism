@@ -6,14 +6,21 @@
     输入  —— 带输入框（input.label），密码场景用 LineEdit 掩码 +
             内置「显示/隐藏」钮（对应计划第 8 条：浏览器原生 prompt 无样式且不可控，
             输入类交互全部由前端模态完成）。
-  键盘：Esc=取消、Enter=确认；遮罩点击不关闭（防误触，qfw 同款语义）。
+  键盘：Esc=取消（由 ModalShell 统一处理）；Enter=激活当前聚焦的按钮。
+  遮罩点击不关闭（防误触，四处浮层同款语义）。
+
+  关于 Enter 的落点：打开时把焦点放在「哪个按钮」上，Enter 就等于按哪个 ——
+  所以这里刻意区分：危险操作聚焦「取消」（避免顺手一个回车就删了），
+  普通确认聚焦「确定」（顺键盘流），输入框场景聚焦输入框、回车即提交。
+  此前是「遮罩上拦 Enter 一律确认」+「焦点在取消钮上」，于是回车会同时触发
+  确认与取消两个回调 —— 靠调用方顺序掩盖，这里改成唯一落点。
 -->
 <script setup lang="ts">
 import {computed, nextTick, ref, watch} from 'vue'
-import Icon from './Icon.vue'
 import LineEdit from './LineEdit.vue'
 import PrimaryButton from './PrimaryButton.vue'
 import Button from './Button.vue'
+import ModalShell from '../layout/ModalShell.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -54,20 +61,16 @@ const emit = defineEmits<{
 
 const inputVal = ref(props.initial)
 const inputRef = ref<InstanceType<typeof LineEdit>>()
-const panel = ref<HTMLElement>()
 
-// 打开时重置输入并聚焦（密码场景聚焦输入框；无输入聚焦取消钮）
+// 打开时重置输入并选中（密码场景便于直接覆写）
 watch(
   () => props.open,
   async (open) => {
     if (!open) return
     inputVal.value = props.initial
+    if (!props.inputLabel) return
     await nextTick()
-    if (props.inputLabel) {
-      inputRef.value?.select()
-    } else {
-      panel.value?.querySelector<HTMLElement>('.btn-cancel')?.focus()
-    }
+    inputRef.value?.select()
   },
 )
 
@@ -75,107 +78,56 @@ function onConfirm() {
   emit('confirm', props.inputLabel ? inputVal.value : true)
 }
 
-function onKey(e: KeyboardEvent) {
-  if (e.key === 'Enter') onConfirm()
-  else if (e.key === 'Escape') emit('cancel')
-}
-
 const headIcon = computed(() => (props.danger ? 'cancel' : 'info'))
+const headTone = computed(() => (props.danger ? ('danger' as const) : ('accent' as const)))
+
+/** 打开时的焦点落点（ModalShell 负责聚焦，此处只决定落在哪个控件上）。 */
+const autofocusSel = computed(() => {
+  if (props.inputLabel) return '.cp-line-edit input'
+  if (props.danger && props.showCancel) return '.btn-cancel'
+  return '.btn-confirm'
+})
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="fade">
-      <div v-if="open" class="cp-mask" @keydown="onKey">
-        <div ref="panel" class="cp-mbox" role="dialog" :aria-label="title" tabindex="-1">
-          <div class="head">
-            <span v-if="title" class="head-icon" :class="{danger}">
-              <Icon :name="headIcon" :size="18" />
-            </span>
-            <div class="head-title">{{ title }}</div>
-          </div>
+  <ModalShell
+    :open="open"
+    :title="title"
+    :icon="title ? headIcon : ''"
+    :tone="headTone"
+    :width="420"
+    :autofocus="autofocusSel"
+    @close="emit('cancel')"
+  >
+    <div v-if="content" class="body-text">{{ content }}</div>
+    <slot v-else />
 
-          <div v-if="content" class="body-text">{{ content }}</div>
-          <slot v-else />
-
-          <div v-if="inputLabel" class="body-input">
-            <div class="input-label">
-              {{ inputLabel }}
-              <span v-if="password" class="hint">（可点右侧眼睛显示/隐藏）</span>
-            </div>
-            <LineEdit
-              ref="inputRef"
-              v-model="inputVal"
-              :password="password"
-              autofocus
-              @enter="onConfirm"
-            />
-          </div>
-
-          <div class="actions">
-            <Button v-if="showCancel" class="btn-cancel" @click="emit('cancel')">
-              {{ cancelText }}
-            </Button>
-            <PrimaryButton :danger="danger" @click="onConfirm">
-              {{ confirmText }}
-            </PrimaryButton>
-          </div>
-        </div>
+    <div v-if="inputLabel" class="body-input">
+      <div class="input-label">
+        {{ inputLabel }}
+        <span v-if="password" class="hint">（可点右侧眼睛显示/隐藏）</span>
       </div>
-    </Transition>
-  </Teleport>
+      <LineEdit
+        ref="inputRef"
+        v-model="inputVal"
+        :password="password"
+        autofocus
+        @enter="onConfirm"
+      />
+    </div>
+
+    <template #actions>
+      <Button v-if="showCancel" class="btn-cancel" @click="emit('cancel')">
+        {{ cancelText }}
+      </Button>
+      <PrimaryButton class="btn-confirm" :danger="danger" @click="onConfirm">
+        {{ confirmText }}
+      </PrimaryButton>
+    </template>
+  </ModalShell>
 </template>
 
 <style scoped>
-.cp-mask {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-modal);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--veil);
-}
-
-.cp-mbox {
-  width: min(420px, calc(100vw - 96px));
-  padding: 20px;
-  background: var(--surface);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-pop);
-  outline: none;
-}
-
-.head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.head-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 36px;
-  height: 36px;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-radius: var(--radius-ctrl);
-}
-
-.head-icon.danger {
-  color: var(--err);
-  background: color-mix(in srgb, var(--err) 12%, transparent);
-}
-
-.head-title {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--heading);
-}
-
 .body-text {
   font-size: 0.857rem;
   line-height: 1.5;
@@ -198,12 +150,5 @@ const headIcon = computed(() => (props.danger ? 'cancel' : 'info'))
   margin-left: 6px;
   font-size: 0.786rem;
   color: var(--text2);
-}
-
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 20px;
 }
 </style>
