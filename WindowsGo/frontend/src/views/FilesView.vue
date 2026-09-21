@@ -105,7 +105,10 @@ const INSP_W_KEY = 'cp-insp-w'
 
 /** 用户偏好：检查器是否可用（false = 用户显式收起了） */
 const inspectorOn = ref(localStorage.getItem(INSP_KEY) !== '0')
-/** 检查器宽度（px），拖动左缘调整 */
+/** 检查器宽度（px），拖动左缘调整。
+ *  注意它**不是**最终宽度：CSS 的 minmax(60%, …) 会给它一个 60% 硬下限、
+ *  并以「容器宽 −244px」封顶（预览是主区，见 .files-shell.insp 注释）。
+ *  缺省 380 只是「没拖过」时的占位值 —— 会被下限顶到 60%。 */
 const inspW = ref(Number(localStorage.getItem(INSP_W_KEY)) || 380)
 
 const viewEl = ref<HTMLElement>()
@@ -128,9 +131,14 @@ function splitDown(e: PointerEvent) {
 }
 
 function splitMove(e: PointerEvent) {
-  const right = viewEl.value!.getBoundingClientRect().right
-  // 钳制 300px（预览可用下限）~ 640px（再宽就把列表挤到无法浏览）
-  inspW.value = Math.min(Math.max(right - e.clientX, 300), 640)
+  const box = viewEl.value!.getBoundingClientRect()
+  // 钳制跟 CSS 同一套约束（两侧都写是有原因的，见 .files-shell.insp 注释）：
+  //   下限 = 容器宽 60%（预览是重点，用户 2026-09-21 明确要求）
+  //   上限 = 容器宽 − 244px（列表保底 240px + 4px 拖柄）
+  // CSS 里那份保证缩放窗口后下限仍成立，这份保证拖动时手柄不越界。
+  const minW = Math.round(box.width * 0.6)
+  const maxW = Math.max(minW, Math.round(box.width - 244))
+  inspW.value = Math.min(Math.max(box.right - e.clientX, minW), maxW)
 }
 
 function splitEnd() {
@@ -561,7 +569,9 @@ function confirmDlg(payload: string | boolean) {
       </PageHeader>
 
       <!-- 双栏：文件列表 | 预览检查器（目录树已并入外壳侧栏，见 App.vue）。
-           检查器收起时列表吃满整宽——此前它常驻占约 900px 却只显示空态提示。
+           展开时**预览是主区**：至少占横向 60%（用户 2026-09-21 明确要求），
+           列表让位到 40% 以内；检查器收起时列表吃满整宽——此前它常驻占约
+           900px 却只显示空态提示。
            preview-open 供 ≤640px 下把检查器切成全屏浮层（清空选择或进目录时
            listDir 清 ui.sel 会自动收起）。 -->
       <div
@@ -720,8 +730,19 @@ function confirmDlg(payload: string | boolean) {
   grid-template-columns: 1fr;
 }
 
+/* 展开态：预览是**主区**，列表让位。
+   用户明确要求（2026-09-21）：文件/视频预览至少占横向 60%。所以轨道分配反过来
+   —— 列表拿 1fr 的**余量**（上限 40%），预览拿其余全部，并带 60% 硬下限：
+     · `minmax(60%, …)` 保证下限：即使 localStorage 里存着旧版钳制的 380px
+       （旧实现的 300~640 区间已在 60% 之下），轨道也不会窄于 60%；
+     · 上限 min(--insp-w, 容器宽−244px)：244 = 列表保底 240px + 4px 拖柄，
+       避免把列表挤成不可浏览。minmax 的 max < min 时按 min 处理，窄窗下仍保 60%。
+   · 60% 的下限刻意放在 CSS 而不是只写进 JS：窗口缩放（不触发拖动）时 JS 不会
+     重算，只有 CSS 能持续保证「任何时刻都 ≥60%」；JS 那份负责让拖动跟手不越界。 */
 .files-shell.insp {
-  grid-template-columns: 1fr 4px var(--insp-w, 380px);
+  grid-template-columns:
+    minmax(0, 1fr) 4px
+    minmax(60%, min(var(--insp-w, 900px), calc(100% - 244px)));
 }
 
 /* 页头里的「已选 N 项」摘要：替代原面包屑的位置，右侧带取消钮 */

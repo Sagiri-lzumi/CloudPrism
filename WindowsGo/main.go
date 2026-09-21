@@ -55,7 +55,7 @@ func main() {
 
 	// Web server：API + SSE + 静态前端 + 代理流。Emit 收集器在 web.New 内注入。
 	srv := web.New(app.log, app.st, app.holder, app.vault, app.files,
-		app.transfer, app.settings, app.preview, app.lan, dist)
+		app.transfer, app.settings, app.preview, app.localfs, app.lan, dist)
 
 	// 单实例：若 basePort..basePort+maxPortOffset-1 已有 CloudPrism 实例
 	// （ping 应答），直接打开其界面并退出，避免多开。

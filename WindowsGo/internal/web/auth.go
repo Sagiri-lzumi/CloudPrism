@@ -3,6 +3,7 @@ package web
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/json"
 	"html/template"
 	"log/slog"
 	"net"
@@ -33,8 +34,9 @@ import (
 //  2. **非回环来源必须带令牌**：覆盖包括静态资源与 SSE 在内的所有路径。
 //     token 为空时非回环一律拒绝（**fail-closed**）—— 这样即使外部把监听
 //     地址配成 0.0.0.0，也不会出现「无鉴权对外服务」的最坏情况。
-//  3. **少数端点仅限本机**：会弹主机原生对话框或直接关进程的端点（退出、
-//     选目录），远端即使令牌正确也拒绝，避免远端把主机 UI 顶出来或误关程序。
+//  3. **少数端点仅限本机**：会在主机上产生副作用的端点（读主机本地文件系统
+//     的目录浏览、退出进程），远端即使令牌正确也拒绝，避免远端把主机目录
+//     结构摸出来或误关程序。
 //
 // 已知局限（必须在 UI 中如实告知用户，不做粉饰）：
 //   - 局域网是明文 HTTP，令牌与数据在链路上可被同一网段的嗅探者截获。
@@ -44,13 +46,17 @@ const tokenCookieName = "cp_lan_token"
 
 // localOnlyPaths 是仅允许回环来源访问的端点集合。
 //
-// 这些端点在主机侧有副作用（弹原生选择框）或是自杀式操作（关进程），
-// 远端触发没有意义，只会造成困扰或被当作拒绝服务手段。
+// 这些端点在主机侧有副作用（读主机本地文件系统 / 关进程），远端触发没有
+// 意义，只会造成困扰或被当作拒绝服务手段。
+//
+// /api/fs/* 是本机目录浏览（网页版目录选择器的数据源）：它能读出主机任意
+// 目录的名字。登记在这里，与「只有本机能弹原生选择框」的原能力边界一致 ——
+// 远端即使令牌正确也只能手输路径，不能让界面去枚举主机目录。
 var localOnlyPaths = map[string]string{
-	"/api/app/quit":                "退出程序",
-	"/api/vault/chooselocaldir":    "本机目录选择",
-	"/api/settings/choosesyncdir":  "本机目录选择",
-	"/api/settings/choosecachedir": "本机目录选择",
+	"/api/app/quit":  "退出程序",
+	"/api/fs/drives": "本机目录浏览",
+	"/api/fs/dirs":   "本机目录浏览",
+	"/api/fs/mkdir":  "本机目录浏览",
 }
 
 // guard 实现访问闸门。
@@ -170,7 +176,7 @@ func (g *guard) wrap(next http.Handler) http.Handler {
 		// 规则 3：本机专属端点，远端即使令牌正确也不放行。
 		if why, only := localOnlyPaths[r.URL.Path]; only {
 			g.log.Warn("拒绝远端调用本机专属端点", "ip", ip, "path", r.URL.Path)
-			http.Error(w, "该操作仅允许在本机执行（"+why+"）", http.StatusForbidden)
+			writeLocalOnlyErr(w, r, why)
 			return
 		}
 
@@ -431,4 +437,21 @@ func writeNeedTokenPage(w http.ResponseWriter, reason string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusUnauthorized)
 	_ = needTokenPage.Execute(w, struct{ Reason string }{Reason: reason})
+}
+
+// writeLocalOnlyErr 输出「仅本机可执行」的拒绝响应。
+//
+// /api/ 路径必须回 JSON：前端的统一解包层只认 {code,message}，若扔一段纯文本，
+// 界面只能显示「HTTP 403」——正是要杜绝的「展示缺口」（用户看到报错却不知道
+// 发生了什么）。非 API 路径保持纯文本，与历史行为一致。
+func writeLocalOnlyErr(w http.ResponseWriter, r *http.Request, why string) {
+	msg := "该操作仅允许在本机执行（" + why + "）"
+	if !strings.HasPrefix(r.URL.Path, "/api/") {
+		http.Error(w, msg, http.StatusForbidden)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(map[string]string{"code": "internal", "message": msg})
 }

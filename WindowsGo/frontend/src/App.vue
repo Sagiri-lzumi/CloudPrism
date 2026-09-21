@@ -28,6 +28,8 @@ import {
   onDropFiles,
   downloadSel,
   clearRecovery,
+  localDirPick,
+  settleLocalDir,
   type PageId,
 } from './lib/store'
 import FilesView from './views/FilesView.vue'
@@ -37,6 +39,7 @@ import SettingsView from './views/SettingsView.vue'
 import RecoveryCodeDlg from './views/wizard/RecoveryCodeDlg.vue'
 import TransferBar from './components/layout/TransferBar.vue'
 import StatusBar from './components/layout/StatusBar.vue'
+import FolderPicker from './components/layout/FolderPicker.vue'
 import DirTree from './components/DirTree.vue'
 import InfoBar from './components/fluent/InfoBar.vue'
 import Icon from './components/fluent/Icon.vue'
@@ -292,6 +295,17 @@ async function onDrop(e: DragEvent) {
       :open="ui.pendingRecovery !== ''"
       :code="ui.pendingRecovery"
       @close="clearRecovery"
+    />
+
+    <!-- 全局目录选择器：向导/设置页/密库页/导出共用的本机目录选择（网页版，
+         取代原先会跑到浏览器窗口后面的原生 IFileOpenDialog）。挂在全局是为了
+         同一时刻只有一个实例，天然复用 ModalShell 的模态栈（Esc 只关最上层）。 -->
+    <FolderPicker
+      :open="localDirPick.open"
+      :title="localDirPick.title"
+      :start="localDirPick.start"
+      @confirm="settleLocalDir"
+      @cancel="settleLocalDir(null)"
     />
 
     <!-- 全窗口拖放遮罩：拖入文件时铺满视口，明确告知「松开即加密上传」。

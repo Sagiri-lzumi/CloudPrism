@@ -52,12 +52,13 @@ WindowsGo/
 │   └── streaming/              令牌化流式解密代理（/s/ 播放 /t/ 缩略图 /d/ 下载）
 ├── internal/
 │   ├── appstate/               唯一有状态对象，取代参考实现的 AppController
-│   ├── bind/                   6 个域 struct（Vault/Files/Transfer/Settings/Preview/Lan）+ ContextHolder
+│   ├── bind/                   7 个域 struct（Vault/Files/Transfer/Settings/Preview/LocalFS/Lan）
+│   │                           + ContextHolder（LocalFS 无状态，不持 holder）
 │   ├── web/                    HTTP server：/api/* JSON + /api/events SSE + 静态前端 + 10Hz 合帧循环
 │   │                           + 同源媒体路由 /s/ /t/ /d/ + 访问闸门 auth.go（局域网档）
 │   │                           + 静态资源 gzip 中间件 compress.go（§8.3）
 │   ├── tray/                   系统托盘（getlantern/systray，纯 syscall）
-│   ├── platform/win/           dpapi / shell / dialogs(IFileOpenDialog) / FatalMessage —— 唯一 syscall 出口
+│   ├── platform/win/           dpapi / shell / localfs(本机目录浏览) / procstats / FatalMessage —— 唯一 syscall 出口
 │   └── loggingx/               slog + 脱敏 handler + 2MB×3 轮转
 ├── interop/                    冻结黄金向量夹具（testdata/ 入库，参考实现移除前生成，不可再生）
 └── docs/                       本文件 + manual_smoke.md
@@ -121,7 +122,7 @@ go build -ldflags "-s -w -H windowsgui" -o build/bin/CloudPrismGo.exe .
 | S4 KDF | 标准库 `crypto/pbkdf2`（Go 1.24+）命中黄金向量 `188492f1…b2615257`，**无需引入 `x/crypto`** |
 | S3 DPAPI | `x/sys/windows` 的 `CryptProtectData/CryptUnprotectData/LocalFree` 纯 syscall 往返成功；与 Python `baidu_backend._dpapi_*` **双向互读**，明文逐字节一致，两端密文长度同为 326 字节 |
 | JSON 兼容 | Go 的紧凑 JSON（无分隔符空格）可被 Python `json.loads` 正常读取 → `baidu.json` 无需复刻 `json.dumps` 的空格风格 |
-| S5 IFileOpenDialog | `dialogs.go` 用 ole32 `CoCreateInstance` + 手动 vtable 调用（纯 syscall），SDK 头核对过 CLSID/IID 与 vtable 索引；COM 失败仅返回 error 给前端提示，不崩进程 |
+| S5 目录选择 | 原为 `dialogs.go` 裸 COM `IFileOpenDialog`（纯 syscall），**已移除** —— `Show(owner=0)` 没有属主窗口，对话框会跑到浏览器窗口后面，用户看到的是「后台莫名跳出个框」。现改为**网页版选择器**：后端只列目录（`localfs.go`），前端 `FolderPicker.vue` 渲染并回传绝对路径（浏览器原生 `<input webkitdirectory>` 只能给相对路径，故必须由后端列） |
 
 v33 前 S1b/S2b 的 Wails/WebView2 限制已随架构移除而不复存在：前端经
 HTTP/SSE 与后端交互，不再依赖 Chromium Mojo IPC。
@@ -163,9 +164,10 @@ HTTP/SSE 与后端交互，不再依赖 Chromium Mojo IPC。
 | 18 | 检查更新 UI | 设置页「关于」组提供「检查更新」按钮（对比 GitHub Release） | `pkg/update` checker 零生产引用，整包已于 v1.1 移除；「关于」组只展示 App.Version() 运行时诊断串 | Go 版暂无产品版本号载体；后续如需更新检查应基于发布包元数据重新设计 |
 | 19 | 大文件读取 | 无本地读缓存，每次 Range 请求都回源（单次响应受 `MAX_RESPONSE_BYTES` 截断） | `pkg/cache` 密文分块读缓存：读穿命中零下载、未命中按原区间回源并落盘分块 | 重看/回拖不再重复下载；分块大小可配且同时是「是否分块」的阈值 |
 | 20 | 缓存目录默认位置 | 未配置时落 `%TEMP%/cloudprism_cache`，会持续吃满系统盘 | 程序目录旁 `data/cache`，**代码层面不提供 `%TEMP%`/`%AppData%` 兜底**；用户配置进系统目录直接拒绝 | 缓存红线：绝不写系统盘位置；`pkg/paths.ForbiddenCacheDir` 是唯一闸门 |
-| 21 | 跨设备访问 | 无此概念：Qt 窗口只在运行它的那台机器上 | 可选「局域网访问档」：绑 `0.0.0.0` + 访问令牌闸门（回环免令牌，非回环必须带令牌，退出/选目录端点仅本机）；令牌 DPAPI 落盘 `data/lan_token`，**默认关闭** | Web 模式天然可被同网段访问，必须显式开关 + 访问控制，否则等于把密库界面开放给整层楼 |
+| 21 | 跨设备访问 | 无此概念：Qt 窗口只在运行它的那台机器上 | 可选「局域网访问档」：绑 `0.0.0.0` + 访问令牌闸门（回环免令牌，非回环必须带令牌，退出/本机目录浏览端点仅本机）；令牌 DPAPI 落盘 `data/lan_token`，**默认关闭** | Web 模式天然可被同网段访问，必须显式开关 + 访问控制，否则等于把密库界面开放给整层楼 |
 | 22 | 媒体/下载 URL 形态 | Qt 播放器直连本机代理端口，无 URL 概念 | 相对路径（`/s/ /t/ /d/`），与其余 API 共用同一监听端口与同一道鉴权闸门；**不再另起 127.0.0.1 动态代理端口** | 绝对地址 `http://127.0.0.1:<port>` 在远端浏览器上会指向**远端自己**，局域网档下预览/缩略图/下载会全部失效（详见 §7.3） |
 | 23 | 前端产物体积与传输 | 无此概念：Qt 资源编译进二进制，不存在独立前端产物与传输环节 | 图标注册表改**生成式显式 import**（起 176 + 59 个 SVG 共 437KB 全量内联 → 只打包源码引用到的 62 个）；静态资源加 **gzip 中间件**。入口 JS 637KB → 229KB（gzip 76KB），首屏 690KB → 283KB（gzip 87KB） | 局域网档把浏览器变成真正的客户端，首屏要过网线/无线；690KB 未压缩明文在手机弱网下打开明显偏慢（详见 §8） |
+| 24 | 本机目录选择 | Qt `QFileDialog.getExistingDirectory` 原生框 | **网页版选择器**：后端 `/api/fs/*` 只列盘符/子目录/新建目录（`localfs.go`），前端 `FolderPicker.vue`（走 ModalShell）渲染，确认后把**绝对路径**回传；原生 `IFileOpenDialog` 实现（原 `dialogs.go`）已删除 | ①原生框 `Show(owner=0)` 没有属主窗口 ⇒ 会跑到浏览器窗口后面，用户看到的是「后台莫名跳出个框」；②浏览器原生 `<input webkitdirectory>` 只给 `webkitRelativePath`（相对路径），选不出「密库存放目录/同步目录/缓存目录/导出位置」这类绝对路径 ⇒ 只能由后端列目录、网页做选择器 |
 
 ### 明确不移植的 Python 历史包袱
 
@@ -264,7 +266,7 @@ Web 模式意味着「凡是能连上这个端口的人，都能操作这个密�
 | 回环免令牌 | 来源 `127.0.0.1`/`::1` 直接放行 → 本机浏览器、托盘「打开界面」、单实例探测全零改动 |
 | 非回环必须带令牌 | 覆盖静态资源、`/api/*`、SSE、媒体 `/s/ /t/ /d/` 全路径 |
 | fail-closed | 令牌为空时非回环一律拒绝。即使外部把监听地址误配成 `0.0.0.0`，也不会出现无鉴权对外服务 |
-| 本机专属端点 | `/api/app/quit` 与三个原生目录选择端点仅回环可用，远端即使令牌正确也 403 |
+| 本机专属端点 | `/api/app/quit` 与本机目录浏览端点 `/api/fs/drives|dirs|mkdir` 仅回环可用，远端即使令牌正确也 403（拒绝响应对 `/api/` 路径回 `{code,message}` JSON，否则界面只能显示「HTTP 403」） |
 | 令牌呈现 | 首次 `?token=xxx` → 种 `HttpOnly; SameSite=Lax` Cookie → 302 跳到去令牌的干净 URL；同时接受 `Authorization: Bearer` |
 | 常量时间比较 | 两侧先取 SHA-256 再 `subtle.ConstantTimeCompare`，避免长度差泄露令牌长度 |
 | 失败节流 | 同 IP 连续失败 6 次进入 30 秒封禁窗口；回环永不受影响（否则用户会把自己锁在界面外） |

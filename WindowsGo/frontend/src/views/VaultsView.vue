@@ -10,7 +10,7 @@
 -->
 <script setup lang="ts">
 import {computed, onMounted, reactive, ref} from 'vue'
-import {ui, openVault, navigate, lockVault, endOp} from '../lib/store'
+import {ui, openVault, navigate, lockVault, endOp, pickLocalDir} from '../lib/store'
 import {Settings, Vault, unwrap} from '../lib/api'
 import {fmtSize, fmtConnectSec} from '../lib/format'
 import {showError, showInfo, showSuccess, showWarning} from '../lib/toast'
@@ -242,12 +242,15 @@ async function onRegenConfirm(payload: string | boolean) {
 const syncBusy = ref(false)
 const syncDirBusy = ref(false)
 
-/** 选择/更改本地同步目录（弹目录框，选完即落盘）。 */
+/** 选择/更改本地同步目录（网页版选择器，选完即落盘）。 */
 async function chooseSyncDir() {
   if (syncDirBusy.value) return
   syncDirBusy.value = true
   try {
-    const dir = await Settings.ChooseSyncDir()
+    const dir = await pickLocalDir({
+      title: '选择要同步的本地目录',
+      start: String(ui.settings.syncDir ?? ''),
+    })
     if (!dir) return // 用户取消
     ui.settings.syncDir = dir
     await Settings.SetSyncDir(dir)

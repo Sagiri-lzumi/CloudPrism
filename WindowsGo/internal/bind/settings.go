@@ -4,7 +4,6 @@ import (
 	"errors"
 
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/appstate"
-	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/platform/win"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/cache"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/paths"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/settings"
@@ -147,25 +146,6 @@ func (s *Settings) SyncNow() (int, error) {
 		return 0, Wrap(err)
 	}
 	return n, nil
-}
-
-// ChooseSyncDir 弹目录选择框返回同步目录；取消返回空串（非错误）。
-func (s *Settings) ChooseSyncDir() (string, error) {
-	dir, err := win.PickFolder("选择要同步的本地目录")
-	if err != nil {
-		return "", Wrap(err)
-	}
-	return dir, nil
-}
-
-// ChooseCacheDir 弹目录选择框返回缓存根目录；取消返回空串（非错误）。
-// 与 ChooseSyncDir 的「同步目录」语义区分，避免设置页误用。
-func (s *Settings) ChooseCacheDir() (string, error) {
-	dir, err := win.PickFolder("选择缓存目录（请勿选择系统盘的用户目录）")
-	if err != nil {
-		return "", Wrap(err)
-	}
-	return dir, nil
 }
 
 // putInt 写整数值并落盘。

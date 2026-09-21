@@ -591,17 +591,87 @@ export async function deleteSel() {
   }
 }
 
-/** 导出（解密到本地）：单条走 Files.Export（Go 弹原生目录框后落盘）；
+/* ------------------------------------------------------- 全局目录选择器 */
+
+/**
+ * 网页版本机目录选择器的全局单例状态（App.vue 挂载 FolderPicker，其余页面只调
+ * pickLocalDir）。
+ *
+ * 为什么做成全局单例：调用点分散在向导 / 设置页（同步目录 + 缓存目录）/ 密库页 /
+ * 文件页（导出）四处，其中向导自身就在模态里。全局一份既省掉四份重复浮层，
+ * 又天然复用 ModalShell 的模态栈（Esc 只关最上层那个，不会连关两层）。
+ *
+ * 为什么不用主机原生对话框：IFileOpenDialog 以 owner=0 弹出、没有属主窗口，
+ * 会跑到浏览器窗口后面 —— 用户看到的是「后台莫名跳出个框」。
+ */
+export interface LocalDirPick {
+  open: boolean
+  title: string
+  /** 起始目录；空串 = 从「此电脑」开始 */
+  start: string
+}
+
+export const localDirPick = reactive<LocalDirPick>({open: false, title: '', start: ''})
+
+/** 在途选择的兑现函数；null = 当前没有请求。 */
+let pickSettle: ((dir: string | null) => void) | null = null
+
+/**
+ * 打开目录选择器并等待用户选择。
+ * @param opts.title 选择器标题（说清「在选什么目录」，四处语义各不相同）
+ * @param opts.start 起始目录（一般为当前已配置的值）
+ * @returns 选中的绝对路径；用户取消返回 null。
+ */
+export function pickLocalDir(opts: {title: string; start?: string}): Promise<string | null> {
+  // 极端情况下（前一次选择器未结清）先兑现旧的，避免 Promise 悬空。
+  pickSettle?.(null)
+  pickSettle = null
+  localDirPick.title = opts.title
+  localDirPick.start = opts.start ?? ''
+  localDirPick.open = true
+  return new Promise<string | null>((resolve) => {
+    pickSettle = resolve
+  })
+}
+
+/** 结清一次选择（由 FolderPicker 调用）：dir 为 null 表示取消。 */
+export function settleLocalDir(dir: string | null) {
+  localDirPick.open = false
+  const done = pickSettle
+  pickSettle = null
+  done?.(dir)
+}
+
+/** 最近一次导出位置的记忆键（同一会话内连续导出多半落在同一处）。 */
+const LAST_EXPORT_KEY = 'cp-export-dir'
+
+/** 读取上次导出位置；无记录或读取失败（隐私模式）时返回空串。 */
+function lastExportDir(): string {
+  try {
+    return localStorage.getItem(LAST_EXPORT_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/** 导出（解密到本地）：单条先选目录再落盘（网页版选择器）；
  *  多选复用浏览器下载（逐条 triggerDownload，与 downloadSel 同路径）。 */
 export async function exportSel() {
   const list = opEntries()
   if (!list.length) return
   if (list.length === 1) {
     const e = list[0]
+    // 先选目录：取消即静默返回（与「取消原生框不算错误」的既有语义一致）
+    const dir = await pickLocalDir({title: '选择导出位置', start: lastExportDir()})
+    if (!dir) return
     try {
-      const dir = await Files.Export(e.remote)
-      if (!dir) return
-      showSuccess(`已导出到 ${dir}`)
+      const saved = await Files.Export(e.remote, dir)
+      try {
+        localStorage.setItem(LAST_EXPORT_KEY, dir)
+      } catch {
+        /* 记不住不影响本次导出 */
+      }
+      showSuccess(`已导出到 ${saved || dir}`)
     } catch (err) {
       showError('导出失败：' + unwrap(err).message)
     }

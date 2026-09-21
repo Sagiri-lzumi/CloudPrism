@@ -1,5 +1,5 @@
-// Package bind 是 API 绑定层：5 个域的薄适配 struct（Vault / Files /
-// Transfer / Settings / Preview）把 internal/appstate 的错误映射为带 Code
+// Package bind 是 API 绑定层：域的薄适配 struct（Vault / Files / Transfer /
+// Settings / Preview / LocalFS / Lan）把 internal/appstate 的错误映射为带 Code
 // 的 ApiError 后抛出，**不写任何业务逻辑**。分层约束见 docs/ARCHITECTURE.md。
 package bind
 

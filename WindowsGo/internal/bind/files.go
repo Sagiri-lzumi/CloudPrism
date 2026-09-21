@@ -1,8 +1,9 @@
 package bind
 
 import (
+	"strings"
+
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/appstate"
-	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/platform/win"
 )
 
 // Files 是文件浏览域的 Wails 绑定：目录列表/新建/重命名/删除/导出。
@@ -58,16 +59,16 @@ func (f *Files) Delete(remotes []string) error {
 	return nil
 }
 
-// Export 解密导出单个远端条目到用户选择的目录，返回落盘路径。
-// 用户取消对话框时返回空路径与 nil（前端静默，不视为错误）。
-func (f *Files) Export(remote string) (string, error) {
+// Export 解密导出单个远端条目到 dir，返回落盘路径。
+//
+// dir 由前端选定（网页版目录选择器 → /api/fs/dirs 列目录），本层不再弹原生
+// 对话框：IFileOpenDialog 以 owner=0 弹出、没有属主窗口，会跑到浏览器窗口
+// 后面，用户看到的是「后台莫名跳出个框」。
+func (f *Files) Export(remote, dir string) (string, error) {
 	f.st.Activity()
-	dir, err := win.PickFolder("选择导出位置")
-	if err != nil {
-		return "", Wrap(err)
-	}
+	dir = strings.TrimSpace(dir)
 	if dir == "" {
-		return "", nil // 用户取消
+		return "", &ApiError{Code: CodeInternal, Message: "未指定导出位置"}
 	}
 	path, err := f.st.ExportRemote(f.ctx.Context(), remote, dir)
 	if err != nil {

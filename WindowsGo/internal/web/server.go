@@ -2,7 +2,7 @@
 //
 // 架构（v32 起，替代 Wails 桌面 app）：
 //   - HTTP server 监听本机（默认）/ 局域网（可选档，须带访问令牌）+ 端口顺延
-//   - /api/* JSON API 封装 internal/bind 5 域方法
+//   - /api/* JSON API 封装 internal/bind 各域方法（含本机目录浏览 LocalFS）
 //   - /api/events SSE 推送状态帧 + 瞬时事件（替代 Wails EventsEmit）
 //   - / 静态前端（内嵌 frontend/dist）
 //   - /s/* /t/* /d/* 媒体、缩略图、下载——直接复用 appstate 的流式解密代理，
@@ -44,8 +44,9 @@ type Server struct {
 	transfer *bind.Transfer
 	settings *bind.Settings
 	preview  *bind.Preview
-	lan      *bind.Lan // 局域网访问档（开关/令牌/可分享地址）
-	distFS   fs.FS     // 内嵌前端 dist（main.go 注入）
+	localfs  *bind.LocalFS // 本机目录浏览（网页版目录选择器的数据源）
+	lan      *bind.Lan     // 局域网访问档（开关/令牌/可分享地址）
+	distFS   fs.FS         // 内嵌前端 dist（main.go 注入）
 
 	// guard 是访问闸门：回环来源放行，非回环来源要求访问令牌（局域网档）；
 	// token 为空时为 fail-closed 的纯本机模式。Listen 时构造。
@@ -92,7 +93,8 @@ type event struct {
 // New 构造 Web server（未启动；Listen 才监听）。distFS 是内嵌的前端 dist（main.go 注入）。
 func New(log *slog.Logger, st *appstate.State, holder *bind.ContextHolder,
 	vault *bind.Vault, files *bind.Files, transfer *bind.Transfer,
-	settings *bind.Settings, preview *bind.Preview, lan *bind.Lan, distFS fs.FS) *Server {
+	settings *bind.Settings, preview *bind.Preview, localfs *bind.LocalFS,
+	lan *bind.Lan, distFS fs.FS) *Server {
 	s := &Server{
 		log:      log,
 		st:       st,
@@ -102,6 +104,7 @@ func New(log *slog.Logger, st *appstate.State, holder *bind.ContextHolder,
 		transfer: transfer,
 		settings: settings,
 		preview:  preview,
+		localfs:  localfs,
 		lan:      lan,
 		distFS:   distFS,
 		clients:  make(map[chan event]struct{}),
@@ -313,8 +316,28 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/vault/baiduclearauth", s.wrapErr(func(r *http.Request) (any, error) {
 		return nil, s.vault.BaiduClearAuth()
 	}))
-	mux.HandleFunc("/api/vault/chooselocaldir", s.wrapErr(func(r *http.Request) (any, error) {
-		return s.vault.ChooseLocalDir()
+
+	// LocalFS 域（网页版目录选择器）。
+	//
+	// 这三条取代了原先的 /api/{vault,settings}/choose*dir —— 旧实现由本进程弹
+	// IFileOpenDialog，而 Show(owner=0) 没有属主窗口，对话框会跑到浏览器窗口
+	// 后面（用户看到的是「后台莫名跳出个框」）。现在改为：后端只负责列目录，
+	// 选择器整个跑在网页里，选完把**绝对路径**回传。
+	//
+	// 三个端点都登记在 auth.go 的 localOnlyPaths：它们能读出主机任意目录名，
+	// 与「只有本机能弹原生框」的原能力边界必须一致。见 platform/win/localfs.go。
+	mux.HandleFunc("/api/fs/drives", s.wrapErr(func(r *http.Request) (any, error) {
+		return s.localfs.Drives()
+	}))
+	mux.HandleFunc("/api/fs/dirs", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
+		var req struct{ Path string }
+		json.Unmarshal(body, &req)
+		return s.localfs.ListDir(req.Path)
+	}))
+	mux.HandleFunc("/api/fs/mkdir", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
+		var req struct{ Parent, Name string }
+		json.Unmarshal(body, &req)
+		return s.localfs.MakeDir(req.Parent, req.Name)
 	}))
 
 	// Files 域
@@ -339,9 +362,10 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 		return nil, s.files.Delete(req.Remotes)
 	}))
 	mux.HandleFunc("/api/files/export", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
-		var req struct{ Remote string }
+		// Dir 由前端选定（网页版目录选择器），后端不再弹原生对话框。
+		var req struct{ Remote, Dir string }
 		json.Unmarshal(body, &req)
-		return s.files.Export(req.Remote)
+		return s.files.Export(req.Remote, req.Dir)
 	}))
 
 	// Settings 域
@@ -392,8 +416,6 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 		return nil, s.settings.SetSyncDir(req.Dir)
 	}))
 	mux.HandleFunc("/api/settings/syncnow", s.wrapErr(func(r *http.Request) (any, error) { return s.settings.SyncNow() }))
-	mux.HandleFunc("/api/settings/choosesyncdir", s.wrapErr(func(r *http.Request) (any, error) { return s.settings.ChooseSyncDir() }))
-	mux.HandleFunc("/api/settings/choosecachedir", s.wrapErr(func(r *http.Request) (any, error) { return s.settings.ChooseCacheDir() }))
 
 	// Lan 域（局域网访问档）
 	//

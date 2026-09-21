@@ -1,7 +1,7 @@
 // api.ts —— 前端唯一封装层（v32 起 Web 服务模式）。
 //
 // 职责：
-//  1. re-export 5 域的 fetch 调用（视图层一律从这里 import，不直接碰 fetch）；
+//  1. re-export 各域的 fetch 调用（视图层一律从这里 import，不直接碰 fetch）；
 //  2. 统一解包后端 ApiError —— HTTP 错误响应带 {code, message}，还原为
 //     带 code 的 ApiError 供 UI 按类别分流。
 //
@@ -90,7 +90,7 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
   }
 }
 
-/* ------------------------------------------------------------- 5 域绑定 */
+/* ------------------------------------------------------------- 域绑定 */
 
 /** Vault 域：密库连接/锁定/状态/最近记录/恢复码/百度凭证。 */
 export const Vault = {
@@ -113,7 +113,43 @@ export const Vault = {
   BaiduSaveAuth: (appID: string, appKey: string, secretKey: string, signKey: string, code: string) =>
     call<void>('/vault/baidusaveauth', {appID, appKey, secretKey, signKey, code}),
   BaiduClearAuth: () => call<void>('/vault/baiduclearauth'),
-  ChooseLocalDir: () => call<string>('/vault/chooselocaldir'),
+}
+
+/**
+ * LocalFS 域：本机目录浏览（网页版目录选择器的数据源）。
+ *
+ * 为什么要有这一域：浏览器原生选择器**给不出绝对路径** ——
+ * `<input type="file" webkitdirectory>` 只有 `webkitRelativePath`（所选根目录
+ * 之下的相对路径），File 对象没有任何路径属性。而密库存放目录 / 同步目录 /
+ * 缓存目录 / 导出位置需要的正是绝对路径，于是改由本机后端列目录、网页自己
+ * 渲染选择器（见 components/layout/FolderPicker.vue）。
+ *
+ * 这三个端点仅限本机（远端即使有令牌也会被 403 挡下，理由：能枚举主机目录名）。
+ */
+export interface LocalDrive {
+  path: string // `C:\`
+  label: string // 卷标；可能为空
+  kind: string // fixed/removable/remote/cdrom/ramdisk/other
+}
+
+export interface LocalDirEntry {
+  name: string
+  path: string
+  hidden: boolean // 隐藏或系统属性，选择器默认折叠
+}
+
+export interface LocalListing {
+  path: string // 当前目录；空串 = 「此电脑」视图（只列盘符）
+  parent: string // 上一级；空串 = 已在最上层
+  drives?: LocalDrive[]
+  dirs: LocalDirEntry[]
+  truncated?: boolean
+}
+
+export const LocalFS = {
+  Drives: () => call<LocalListing>('/fs/drives'),
+  ListDir: (path: string) => call<LocalListing>('/fs/dirs', {path}),
+  MakeDir: (parent: string, name: string) => call<string>('/fs/mkdir', {parent, name}),
 }
 
 /** Files 域：目录列表/新建/重命名/删除/导出。 */
@@ -122,7 +158,8 @@ export const Files = {
   NewFolder: (parent: string, name: string) => call<void>('/files/newfolder', {parent, name}),
   Rename: (remote: string, name: string) => call<void>('/files/rename', {remote, name}),
   Delete: (remotes: string[]) => call<void>('/files/delete', {remotes}),
-  Export: (remote: string) => call<string>('/files/export', {remote}),
+  // dir 由网页版目录选择器给出（后端不再弹原生框）；返回落盘路径。
+  Export: (remote: string, dir: string) => call<string>('/files/export', {remote, dir}),
 }
 
 /** CacheInfo：缓存目录与占用（镜像 appstate.CacheInfo）。 */
@@ -136,7 +173,7 @@ export interface CacheInfo {
   enabled: boolean // 分块缓存是否可用
 }
 
-/** Settings 域：偏好读写（Web 模式下目录选择用 stub，后续阶段补）。 */
+/** Settings 域：偏好读写。 */
 export const Settings = {
   Get: () => call<Record<string, unknown>>('/settings/get'),
   SetTheme: (index: number) => call<void>('/settings/settheme', {index}),
@@ -152,8 +189,6 @@ export const Settings = {
   SetMaxCores: (n: number) => call<void>('/settings/setmaxcores', {n}),
   SetSyncDir: (dir: string) => call<void>('/settings/setsyncdir', {dir}),
   SyncNow: () => call<number>('/settings/syncnow'),
-  ChooseSyncDir: () => call<string>('/settings/choosesyncdir'),
-  ChooseCacheDir: () => call<string>('/settings/choosecachedir'),
 }
 
 /** Transfer 域：上传/下载/任务管理。 */

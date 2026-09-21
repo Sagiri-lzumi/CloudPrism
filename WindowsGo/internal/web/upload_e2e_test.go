@@ -228,7 +228,7 @@ func newUploadTestServerWithSrv(t *testing.T, dataDir string) (string, *Server) 
 	dist := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<html>cp</html>")}}
 	srv := New(logger, st, holder,
 		bind.NewVault(st, holder), bind.NewFiles(st, holder), bind.NewTransfer(st, holder),
-		bind.NewSettings(st, holder), bind.NewPreview(st, holder), lan, dist)
+		bind.NewSettings(st, holder), bind.NewPreview(st, holder), bind.NewLocalFS(), lan, dist)
 
 	addr, err := srv.Listen("127.0.0.1", 0, "")
 	if err != nil {

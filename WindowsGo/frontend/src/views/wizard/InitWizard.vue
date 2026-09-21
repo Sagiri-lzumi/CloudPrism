@@ -10,7 +10,7 @@
 -->
 <script setup lang="ts">
 import {computed, nextTick, reactive, ref, watch} from 'vue'
-import {ui, openVault, navigate, endOp} from '../../lib/store'
+import {ui, openVault, navigate, endOp, pickLocalDir} from '../../lib/store'
 import {Vault, unwrap} from '../../lib/api'
 import {showInfo, showWarning} from '../../lib/toast'
 import Button from '../../components/fluent/Button.vue'
@@ -261,14 +261,12 @@ function cancel() {
   emit('close')
 }
 
-/** 目录浏览选择（本地卡「浏览…」钮；原生对话框由后端弹出）。 */
-async function pickLocalDir() {
-  try {
-    const dir = await Vault.ChooseLocalDir()
-    if (dir) form.localDir = dir
-  } catch (e) {
-    status.value = '选择目录失败：' + unwrap(e).message
-  }
+/** 目录浏览选择（本地卡「浏览…」钮）：网页版选择器，选完即回填路径。
+ *  不再走主机原生对话框 —— 它 owner=0、没有属主窗口，会弹到浏览器窗口后面，
+ *  看起来像「后台莫名跳出个框」。取消返回 null，静默即可。 */
+async function browseLocalDir() {
+  const dir = await pickLocalDir({title: '选择密库存放的本地文件夹', start: form.localDir})
+  if (dir) form.localDir = dir
 }
 
 /* 未连接时整个向导页可见；向导内回车在凭据步直接提交 */
@@ -391,7 +389,7 @@ watch(step, async () => {
                 clearable
                 placeholder="选择或输入本地文件夹路径"
               />
-              <Button icon="folder" title="浏览选择目录" @click="pickLocalDir">
+              <Button icon="folder" title="浏览选择目录" @click="browseLocalDir">
                 浏览…
               </Button>
             </div>

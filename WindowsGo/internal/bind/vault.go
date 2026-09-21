@@ -214,13 +214,3 @@ func maskBaiduKey(s string) string {
 	}
 	return s[:4] + "…"
 }
-
-// ChooseLocalDir 弹目录选择框返回密库存放目录；取消返回空串（非错误）。
-// 向导本地卡「浏览」按钮用；标题与 Settings.ChooseSyncDir 区分语义。
-func (v *Vault) ChooseLocalDir() (string, error) {
-	dir, err := win.PickFolder("选择密库存放的本地文件夹")
-	if err != nil {
-		return "", Wrap(err)
-	}
-	return dir, nil
-}

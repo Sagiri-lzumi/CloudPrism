@@ -15,7 +15,7 @@
 <script setup lang="ts">
 import {computed, onMounted, reactive, ref} from 'vue'
 import {ui} from '../lib/store'
-import {applyFontSize} from '../lib/store'
+import {applyFontSize, pickLocalDir} from '../lib/store'
 import {App, Lan, Settings, Vault, unwrap} from '../lib/api'
 import type {CacheInfo, LanStatus} from '../lib/api'
 import {MODE_LABELS, applyThemeIndex} from '../lib/theme'
@@ -136,11 +136,14 @@ async function onCacheLimit(mb: number) {
   }
 }
 
-/** 浏览选择新缓存目录（保持上限不变）。 */
+/** 浏览选择新缓存目录（保持上限不变）。选在网页里完成，不再弹主机原生框。 */
 async function browseCacheDir() {
+  const dir = await pickLocalDir({
+    title: '选择缓存目录（建议避开系统盘的用户目录）',
+    start: cachePath.value,
+  })
+  if (!dir) return // 用户取消
   try {
-    const dir = await Settings.ChooseCacheDir()
-    if (!dir) return // 用户取消
     ui.settings.cachePath = dir
     await Settings.SetCache(cacheLimit.value, dir)
     showSuccess('缓存目录已更新')
@@ -232,12 +235,15 @@ async function onAutoLock(i: number) {
 // 同步目录操作的防重入（快速双击防重复弹目录框/重复请求）
 const syncBusy = ref(false)
 
-/** 浏览选择本地同步目录并立即落盘（与密库页同步卡共用同一 Go 绑定）。 */
+/** 浏览选择本地同步目录并立即落盘（与密库页同步卡共用同一选择器）。 */
 async function chooseSyncDir() {
   if (syncBusy.value) return
   syncBusy.value = true
   try {
-    const dir = await Settings.ChooseSyncDir()
+    const dir = await pickLocalDir({
+      title: '选择要同步的本地目录',
+      start: String(ui.settings.syncDir ?? ''),
+    })
     if (!dir) return // 用户取消
     ui.settings.syncDir = dir
     await Settings.SetSyncDir(dir)

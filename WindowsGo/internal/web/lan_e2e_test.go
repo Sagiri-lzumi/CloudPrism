@@ -81,7 +81,7 @@ func newE2EServer(t *testing.T) (addr, token string) {
 	dist := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<html>cp</html>")}}
 	srv := web.New(logger, st, holder,
 		bind.NewVault(st, holder), bind.NewFiles(st, holder), bind.NewTransfer(st, holder),
-		bind.NewSettings(st, holder), bind.NewPreview(st, holder), lan, dist)
+		bind.NewSettings(st, holder), bind.NewPreview(st, holder), bind.NewLocalFS(), lan, dist)
 
 	const tok = "e2e-test-token-0123456789"
 	// 端口 0 = 由内核挑一个空闲端口，避开正在运行的正式实例（7840 起）。

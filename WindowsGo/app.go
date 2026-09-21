@@ -22,8 +22,9 @@ import (
 )
 
 // App 是依赖图装配宿主：承担数据目录→日志→设置→传输队列→应用状态→
-// 5 个绑定域的构造顺序。业务编排都在 internal/appstate（唯一有状态
-// 对象）与 internal/bind（5 个域 struct），本层不写逻辑。
+// 各绑定域的构造顺序。业务编排都在 internal/appstate（唯一有状态
+// 对象）与 internal/bind（Vault/Files/Transfer/Settings/Preview/
+// LocalFS/Lan 七个域 struct），本层不写逻辑。
 //
 // v33 起 Web 模式为唯一形态：事件管线与生命周期由 internal/web Server
 // 接管，不再有 Wails OnStartup/OnShutdown 钩子；退出路径由 main.go 的
@@ -34,13 +35,15 @@ type App struct {
 	closeLog func()
 
 	st *appstate.State
-	// 5 个绑定域：域间互不依赖，共享同一 State 与 ContextHolder
+	// 绑定域：域间互不依赖，共享同一 State 与 ContextHolder
 	vault    *bind.Vault
 	files    *bind.Files
 	transfer *bind.Transfer
 	settings *bind.Settings
 	preview  *bind.Preview
-	lan      *bind.Lan
+	// localfs 无状态（只读主机本地文件系统），不持 State/ContextHolder
+	localfs *bind.LocalFS
+	lan     *bind.Lan
 
 	// lanToken 是局域网访问令牌的加密存储（data/lan_token）。
 	// 令牌属秘密，按 pkg/settings 顶部约定不入设置存储，故单独落盘。
@@ -93,6 +96,7 @@ func NewApp() *App {
 		transfer: bind.NewTransfer(st, holder),
 		settings: bind.NewSettings(st, holder),
 		preview:  bind.NewPreview(st, holder),
+		localfs:  bind.NewLocalFS(),
 		lan:      bind.NewLan(st, lanToken),
 		lanToken: lanToken,
 	}
