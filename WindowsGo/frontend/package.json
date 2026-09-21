@@ -6,9 +6,10 @@
   "scripts": {
     "gen:icons": "node scripts/gen-icons.mjs",
     "audit:css": "node scripts/audit-css-tokens.mjs",
+    "audit:modal": "node scripts/audit-modal-stack.mjs",
     "prebuild": "node scripts/gen-icons.mjs",
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "node scripts/audit-modal-stack.mjs && vue-tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
