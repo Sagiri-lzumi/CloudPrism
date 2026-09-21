@@ -315,6 +315,7 @@ onMounted(() => {
   void refreshBaidu()
   void refreshCacheInfo()
   void App.Version().then((v) => (version.value = v)).catch(() => {})
+  readBuild()
 })
 
 /** 打开百度授权页（oob：页面直接展示 code；下方 URL 可复制兜底）。 */
@@ -493,6 +494,35 @@ async function rotateLanToken() {
 /* ------------------------------------------------------------ 关于 */
 
 const version = ref('读取运行时信息…')
+
+/**
+ * 当前**界面构建指纹**（本 bundle 自己的文件名 + 同批 css）。
+ *
+ * 为什么需要它：应用内原本没有任何可信的版本显示 —— Go 端 `version()` 恒返回
+ * `"web-mode"`，指纹只打进 `data/logs/cloudprism.log`。而「双击新包却还是旧界面」
+ * 在单实例探测下是**必然**现象（新 exe 探到旧实例就静默退出、把浏览器指回旧端口），
+ * 于是用户完全无法自证跑的是哪一版，只能反复怀疑「修了到底生效没有」。
+ * （2026-09-21 实测踩过：用户双击 v1.7 两次都被顶掉，界面始终是带 bug 的 v1.6。）
+ *
+ * 取的是自身 bundle 名，与 `Release\<日期>-<tag>-Go-MD5.txt` 的「前端产物:」一行
+ * 逐字对照即可判定；css 不是本模块的 URL，只能从已加载资源里捞同批产物。
+ */
+const build = ref('（读取失败）')
+
+function readBuild() {
+  const tail = (u: string) => u.split('/').pop() ?? ''
+  try {
+    const js = tail(import.meta.url)
+    const css = performance
+      .getEntriesByType('resource')
+      .map((e) => e.name)
+      .filter((n) => /\/assets\/index-[\w-]+\.css$/.test(n))
+      .map(tail)[0]
+    build.value = [js, css].filter(Boolean).join(' + ') || '（读取失败）'
+  } catch {
+    build.value = '（读取失败）'
+  }
+}
 </script>
 
 <template>
@@ -853,7 +883,17 @@ const version = ref('读取运行时信息…')
             <div class="set-content">文件加密云端保险库（Go 内嵌 Web 服务版）</div>
           </div>
         </div>
-        <div class="about-note">{{ version }}</div>
+        <!-- 两行只读信息：服务端自报串 + 界面构建指纹。
+             「界面构建」与 Release 包里 -Go-MD5.txt 的「前端产物:」一行对照；
+             不一致就说明当前浏览器连的不是那个发布包 —— 单实例探测把新 exe 顶掉时
+             正是这种情况，不给这行字用户无从察觉。 -->
+        <div
+          class="about-note"
+          title="「界面构建」用于分辨当前跑的是哪个发布包：与 Release 包里 -Go-MD5.txt 的「前端产物:」一行对照即可"
+        >
+          <div>服务端：{{ version }}</div>
+          <div>界面构建：{{ build }}</div>
+        </div>
       </div>
     </div>
   </div>
