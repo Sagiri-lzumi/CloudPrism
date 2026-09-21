@@ -680,28 +680,37 @@ function confirmDlg(payload: string | boolean) {
                 @dblclick="e.isDir && enterDir(e)"
                 @contextmenu.prevent.stop="openCtx($event, e)"
               >
-                <!-- 行首勾选：仅多选批量态（≥2 项）显示，单选只靠 .row.sel 高亮 -->
-                <Icon v-if="isSel(e) && hasMulti" name="check" :size="16" class="row-check" />
+                <!-- 行首勾选：仅多选批量态（≥2 项）显示，单选只靠 .row.sel 高亮。
+                     槽位在多选态下对**每行**恒占 16px，勾选与否不改变列宽 ——
+                     详见 .row-check-slot 的样式注释。 -->
+                <span v-if="hasMulti" class="row-check-slot">
+                  <Icon v-if="isSel(e)" name="check" :size="16" class="row-check" />
+                </span>
                 <Icon :name="kindOfRow(e)" :size="18" class="row-ic" :class="{dir: e.isDir}" />
                 <span class="row-name" :title="e.display">{{ e.display }}</span>
                 <span class="row-size">{{ e.isDir ? '文件夹' : fmtSize(e.size) }}</span>
-                <button
-                  type="button"
-                  class="more"
-                  title="更多操作（删除、重命名、下载…）"
-                  @click.stop="openCtx($event, e)"
-                >
-                  <Icon name="more" :size="16" />
-                </button>
-                <button
-                  v-if="e.isDir"
-                  type="button"
-                  class="open"
-                  title="进入目录"
-                  @click.stop="enterDir(e)"
-                >
-                  <Icon name="chevron_right_med" :size="16" />
-                </button>
+                <!-- 行尾动作槽：定宽，与行类型无关（详见 .row-acts 的样式注释）。
+                     恒在的 ⋯ 钉在最右端，目录专属的「进入目录」插在它左侧 ——
+                     这样增删一个按钮既不推走「大小」列，也不让 ⋯ 左右跳。 -->
+                <span class="row-acts">
+                  <button
+                    v-if="e.isDir"
+                    type="button"
+                    class="open"
+                    title="进入目录"
+                    @click.stop="enterDir(e)"
+                  >
+                    <Icon name="chevron_right_med" :size="16" />
+                  </button>
+                  <button
+                    type="button"
+                    class="more"
+                    title="更多操作（删除、重命名、下载…）"
+                    @click.stop="openCtx($event, e)"
+                  >
+                    <Icon name="more" :size="16" />
+                  </button>
+                </span>
               </div>
             </div>
           </div>
@@ -832,10 +841,24 @@ function confirmDlg(payload: string | boolean) {
 }
 
 /* 行多选勾选（描边勾选框，随 accent 着色） */
+/* 多选勾选槽：多选态下为每一行恒留 16px。
+   此前 .row-check 只在「被选中」的行渲染，勾一行就把该行的图标/名称/大小
+   三列整体推右 28px（16 + margin-right 2 + flex gap 10）⇒ 同一列表里勾选行
+   与未勾选行的列左缘对不齐（实测 .row-ic 左缘 244 vs 216，来回跳）。
+   改成恒占槽后：进/出多选态时整列平移一次，行间始终对齐。
+   槽只在多选态出现 —— 单选态不占位，列表不会平白右移。 */
+.row-check-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
 .row-check {
   flex: none;
   color: var(--accent);
-  margin-right: 2px;
 }
 
 /* ---------------- 视图模式分段控件（macOS segmented control） ----------------
@@ -1093,8 +1116,10 @@ function confirmDlg(payload: string | boolean) {
 }
 
 /* 上传占位行：不可交互，名字压暗一档（它只是在等真条目替换自己）。
-   .row-tail 恒占 24px —— 与真条目行尾的 ⋯ 按钮同宽，否则有圆环/无圆环
-   两种占位行会让「大小」列左右跳动，看起来正是"错位"。 */
+   .row-tail 恒占与 .row-acts 同宽（58px）—— 占位行没有 ⋯/进入 钮，若只按
+   内容宽参与排版，「大小」列就会比真条目行右移一截，同一列表里数字列左右
+   跳，看起来正是"错位"。（同类问题还有目录行多一个「进入目录」钮，已由
+   定宽 .row-acts 一并解决。） */
 .row.up {
   cursor: default;
 }
@@ -1110,11 +1135,26 @@ function confirmDlg(payload: string | boolean) {
 .row-tail {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   flex: none;
-  width: 24px;
+  width: 58px;
   height: 24px;
-  margin-left: 2px;
+}
+
+/* 行尾动作槽：定宽 = 两个 24px 钮 + 一个 10px 间距，与行类型无关。
+   此前 ⋯ 与「进入目录」是 .row 的直接子元素，而「进入目录」只在目录行渲染
+   ⇒ 目录行凭空多出 24px 钮 + 10px flex gap = 34px，把「大小」列整体推左。
+   实测同一列表内目录行 size 右缘 1506、文件行 1540，两列数字对不齐。
+   改成定宽槽后两侧恒为同一位置。
+   ⋯ 置于 DOM 末位并配 justify-content: flex-end ⇒ 钉死在右端；目录专属钮
+   插在它左侧，出现/消失只占用左端空位。 */
+.row-acts {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: none;
+  width: calc(24px * 2 + 10px);
 }
 
 .open {
@@ -1143,7 +1183,6 @@ function confirmDlg(payload: string | boolean) {
   flex: none;
   width: 24px;
   height: 24px;
-  margin-left: 2px;
   color: var(--text2);
   background: transparent;
   border: none;

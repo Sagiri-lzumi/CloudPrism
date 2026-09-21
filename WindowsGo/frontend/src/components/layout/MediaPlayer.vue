@@ -232,41 +232,50 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="cp-media" :class="{failed}" @pointermove="pokeCtrl" @pointerleave="onMediaLeave">
-    <video
-      ref="v"
-      class="surface"
-      :src="url"
-      preload="metadata"
-      @loadedmetadata="(e: Event) => {duration = (e.target as HTMLVideoElement).duration; ready = true}"
-      @durationchange="(e: Event) => {duration = (e.target as HTMLVideoElement).duration; ready = true}"
-      @timeupdate="onTimeUpdate"
-      @play="playing = true"
-      @pause="onPause"
-      @ended="onEnded"
-      @error="failed = true"
-      @click="togglePlay"
-    ></video>
+    <!-- .stage 是「画面区」：它只包住 video 与覆盖其上的中央钮，
+         不含底部控制条。中央钮绝对定位在它里面 ⇒ 天然落在画面正中，
+         不需要知道控制条多高。（此前直接挂在 .cp-media 上，用
+         `top: calc(50% - 34px)` 手动减去半条控制条来"补偿"，可又同时
+         带着 translate(-50%,-50%) —— 后者已做了一次居中，于是补偿量被
+         重复扣了一次，圆钮实测比画面中心高 14px、比整个媒体框中心高
+         34px。补一个定位父级即可根治，别再引入与条高耦合的魔法数。） -->
+    <div class="stage">
+      <video
+        ref="v"
+        class="surface"
+        :src="url"
+        preload="metadata"
+        @loadedmetadata="(e: Event) => {duration = (e.target as HTMLVideoElement).duration; ready = true}"
+        @durationchange="(e: Event) => {duration = (e.target as HTMLVideoElement).duration; ready = true}"
+        @timeupdate="onTimeUpdate"
+        @play="playing = true"
+        @pause="onPause"
+        @ended="onEnded"
+        @error="failed = true"
+        @click="togglePlay"
+      ></video>
+
+      <!-- 中央播放钮（暂停且鼠标活动时悬浮；静止 2.5s/移出/播放即淡出，
+           保证首帧画面不被遮挡，点击视频画面本身亦可起播） -->
+      <Transition name="fade">
+        <button
+          v-if="showCtrl && !playing && !failed"
+          type="button"
+          class="big-play"
+          :title="ready ? '播放' : '加载中…'"
+          :disabled="!ready"
+          @click="togglePlay"
+        >
+          <Icon :name="ready ? 'play' : 'sync'" :size="30" :class="{spin: !ready}" />
+        </button>
+      </Transition>
+    </div>
 
     <!-- 解码失败：仅展示原因，不再提供导出入口 -->
     <div v-if="failed" class="err" role="alert">
       <p class="err-msg">无法解码此媒体（或后端流式响应异常）。</p>
       <p class="err-sub">请用系统播放器打开该格式，或检查后端连接。</p>
     </div>
-
-    <!-- 中央播放钮（暂停且鼠标活动时悬浮；静止 2.5s/移出/播放即淡出，
-         保证首帧画面不被遮挡，点击视频画面本身亦可起播） -->
-    <Transition name="fade">
-      <button
-        v-if="showCtrl && !playing && !failed"
-        type="button"
-        class="big-play"
-        :title="ready ? '播放' : '加载中…'"
-        :disabled="!ready"
-        @click="togglePlay"
-      >
-        <Icon :name="ready ? 'play' : 'sync'" :size="30" :class="{spin: !ready}" />
-      </button>
-    </Transition>
 
     <!-- 底条控制 -->
     <div v-if="!failed" class="bar">
@@ -318,6 +327,15 @@ onBeforeUnmount(() => {
   background: #000;
 }
 
+/* 画面区：video + 覆盖其上的中央钮。flex:1 吃掉控制条之外的高度，
+   position:relative 让中央钮以它为定位基准（居中即画面正中）。 */
+.stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
 .surface {
   flex: 1;
   min-height: 0;
@@ -325,10 +343,12 @@ onBeforeUnmount(() => {
   outline: none;
 }
 
-/* 中央播放钮：半透明黑圆钮悬浮在画面上方（媒体控件底，不随主题变化） */
+/* 中央播放钮：半透明黑圆钮悬浮在画面上方（媒体控件底，不随主题变化）。
+   定位基准是 .stage（画面区），故 top/left 各 50% + translate(-50%,-50%)
+   即精确居中——不要再加减任何与控制条高度相关的像素。 */
 .big-play {
   position: absolute;
-  top: calc(50% - 34px);
+  top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   display: inline-flex;
