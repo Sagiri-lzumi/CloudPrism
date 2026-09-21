@@ -134,16 +134,19 @@ func main() {
 	}()
 
 	// 托盘占主 goroutine（Windows 消息循环要求）；HTTP server 已在 goroutine。
-	// onQuit 直接 signal quitCh → 主流程继续走优雅收尾（tray.Run 返回后）。
+	// onQuit 只负责通知主流程：**结束托盘消息循环是 tray 包的事**（点「退出」即
+	// systray.Quit）。少了那一步 tray.Run 永不返回，下面那句 <-quitCh 就永远执行
+	// 不到 —— 用户看到的就是「点托盘『退出』没反应、进程退不掉」（2026-09-21 修）。
 	tray.Run(
 		func() { _ = win.OpenURL(url) }, // 打开界面
 		func() { app.st.LockVault() },   // 锁定密库
+		// 退出：托盘消息循环已由 tray 包结束，这里只通知主流程收尾。
 		func() {
 			select {
 			case quitCh <- struct{}{}:
 			default:
 			}
-		}, // 退出
+		},
 	)
 
 	// 主流程阻塞在 quitCh：托盘「退出」/ /api/app/quit / SIGINT 三路任一触发。
