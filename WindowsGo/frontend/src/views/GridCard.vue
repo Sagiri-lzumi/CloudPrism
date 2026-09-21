@@ -78,12 +78,17 @@ const multiMode = computed(() => ui.multi.length > 1)
 </script>
 
 <template>
+  <!-- 右键必须 .stop：FilesView 的条目区 .zone 也挂了 contextmenu（空白区弹菜单），
+       它在 DOM 上是本卡的祖先。只 .prevent 不 .stop 时事件会继续冒泡到 .zone，
+       那里无条件 openCtx(ev, undefined) 把 ctxEntry 覆盖成 null ⇒ 右键条目最终弹的
+       是「空白区菜单」，条目动作菜单等于失效（实测：右键卡片与右键列表行都只弹
+       「新建文件夹/上传文件…/上传文件夹…/刷新」）。⋯ 按钮的 @click.stop 同理。 -->
   <figure
     class="gc"
     :class="{sel: isSel(entry)}"
     @click="emit('select', $event, entry)"
     @dblclick="emit('open', entry)"
-    @contextmenu.prevent="emit('ctx', {ev: $event, entry})"
+    @contextmenu.prevent.stop="emit('ctx', {ev: $event, entry})"
   >
     <!-- 顶部操作带 22px：⋯ 在此，不压缩略图；勾选角标仅多选态出现 -->
     <div class="gc-head">

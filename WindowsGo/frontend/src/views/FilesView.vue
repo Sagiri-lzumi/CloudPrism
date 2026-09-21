@@ -613,6 +613,8 @@ function confirmDlg(payload: string | boolean) {
 
             <!-- 列表：行式（目录行尾提供直达钮） -->
             <div v-else class="list">
+              <!-- 行右键要 .stop：祖先 .zone 也挂 contextmenu（空白区菜单），
+                   不阻止冒泡会被它覆盖成空白菜单（详见 GridCard.vue 顶部注释）。 -->
               <div
                 v-for="e in entries"
                 :key="e.remote"
@@ -620,7 +622,7 @@ function confirmDlg(payload: string | boolean) {
                 :class="{sel: isSel(e)}"
                 @click="onItemClick($event, e)"
                 @dblclick="e.isDir && enterDir(e)"
-                @contextmenu.prevent="openCtx($event, e)"
+                @contextmenu.prevent.stop="openCtx($event, e)"
               >
                 <!-- 行首勾选：仅多选批量态（≥2 项）显示，单选只靠 .row.sel 高亮 -->
                 <Icon v-if="isSel(e) && hasMulti" name="check" :size="16" class="row-check" />
