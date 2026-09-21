@@ -22,10 +22,16 @@
   分层：z-index = --z-modal + 栈深度×10。原先四处各写 +100/+150/+200 的魔法偏移、
   还得在注释里解释「谁在谁上面」，现在由打开顺序唯一决定。
 
+  栈必须放在 lib/modalStack.ts（真·模块级）。**不能**写成 <script setup> 里的顶层
+  常量 —— 那个块的顶层代码是「每个组件实例跑一次」，每个浮层会各拿一份栈，于是
+  层级全部打平、Esc 的「只关最上层」也失效。v1.6 就是这么把向导内的目录选择器
+  盖死的（详见该文件头注释）。
+
   刻意保持的既有语义：**点击遮罩不关闭**（防误触，四处浮层原本一致）。
 -->
 <script setup lang="ts">
 import {computed, nextTick, onBeforeUnmount, ref, watch} from 'vue'
+import {isTopModal, popModal, pushModal} from '../../lib/modalStack'
 import Icon from '../fluent/Icon.vue'
 
 const props = withDefaults(
@@ -66,9 +72,9 @@ const emit = defineEmits<{close: []}>()
 
 /* ------------------------------------------------ 模态栈（Esc 与分层） */
 
-// 模块级：同屏可能叠着多个模态（快速连接 + 向导 + 恢复码），
-// 只有最上层那个该响应 Esc，也只有它配拿到最高 z-index。
-const stack: symbol[] = []
+// 栈本体在 lib/modalStack.ts（模块级单例）：同屏可能叠着多个模态（向导 + 目录
+// 选择器 + 恢复码），只有最上层那个该响应 Esc，也只有它配拿到最高 z-index。
+// 本实例只持有一个身份 id 与自己的深度镜像。
 const id = Symbol('modal')
 
 const depth = ref(0)
@@ -82,13 +88,9 @@ const maskStyle = computed(() => ({
   zIndex: `calc(var(--z-modal) + ${depth.value * 10})`,
 }))
 
-function isTop(): boolean {
-  return stack[stack.length - 1] === id
-}
-
 function onWindowKey(e: KeyboardEvent) {
   if (!active.value || !props.esc) return
-  if (e.key !== 'Escape' || !isTop()) return
+  if (e.key !== 'Escape' || !isTopModal(id)) return
   e.preventDefault()
   emit('close')
 }
@@ -119,8 +121,7 @@ function enter() {
   if (active.value) return
   active.value = true
   opener = (document.activeElement as HTMLElement | null) ?? null
-  stack.push(id)
-  depth.value = stack.length
+  depth.value = pushModal(id)
   window.addEventListener('keydown', onWindowKey)
   void nextTick(() => {
     const cur = document.activeElement as HTMLElement | null
@@ -137,8 +138,7 @@ function leave() {
   if (!active.value) return
   active.value = false
   window.removeEventListener('keydown', onWindowKey)
-  const i = stack.indexOf(id)
-  if (i >= 0) stack.splice(i, 1)
+  popModal(id)
   // depth 故意不复位：离场过渡期间仍维持原层级，免得淡出时突然掉到最底层
   // 归还焦点：打开者可能已随页面切换卸载，必须确认它仍在文档里
   if (opener && document.contains(opener)) opener.focus()
