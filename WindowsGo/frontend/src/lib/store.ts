@@ -30,11 +30,45 @@ export interface Crumb {
   remote: string
 }
 
+/** 上传占位（乐观条目）。为什么需要它：浏览器里的 File 在服务端列表里**还没有**
+ *  对应条目（要等加密上传完成才会出现），而用户要求「上传的时候文件就在列表里」，
+ *  所以由前端先占位，任务到达终态（done/failed/cancelled）即撤下 —— 对账在
+ *  onFrame 的 reconcileUploads 里做，不靠定时器。
+ *
+ *  · name 与任务侧 `TaskView.name`（= 本地文件 basename）同源，故用 name+dir 匹配；
+ *  · 只给「直接落在当前目录」的文件占位（rel 里带 '/' 的会进子目录，在当前列表里
+ *    显示反而是错的位置）；
+ *  · progress = null 表示还没匹配到任务（本地暂存阶段，进度未知）→ 画不定态圆环。 */
+export interface UploadPlaceholder {
+  key: string
+  name: string
+  size: number
+  /** 目标目录 remote（与 ui.remote 同语义：根 = 空串） */
+  dir: string
+  /** 创建时刻，仅作安全阀（超时未匹配且未终结则撤下） */
+  at: number
+  /** 已匹配到的任务 id（0 = 未匹配） */
+  taskId: number
+  /** 任务进度 0~100；null = 未知（未匹配） */
+  progress: number | null
+  /** 任务状态；'' = 未匹配 */
+  state: string
+}
+
+/** 圆环进度的显示阈值：只给「够大、传得够久」的文件画圈（用户 2026-09-21 要求
+ *  「一般可以不用这样显示」）。小文件瞬间完成，画圈只会闪一下反而干扰。 */
+export const UPLOAD_RING_MIN = 8 * 1024 * 1024
+
+/** 占位安全阀：单文件上传不该超过 30 分钟；超时未终结即撤下，避免永久幽灵条目。 */
+const UPLOAD_PLACEHOLDER_TTL = 30 * 60_000
+
 interface Ui {
   // —— 连接与会话（st:frame 驱动）——
   snap: appstate.Snapshot | null
   /** 活动传输任务明细（仅帧内 transferActive 时更新） */
   tasks: appstate.TaskView[]
+  /** 上传占位（乐观条目）：文件页在当前目录里把它们渲染成「正在上传」条目 */
+  uploads: UploadPlaceholder[]
   /** 长操作（向导/恢复码）阶段文案；空串=无操作 */
   opText: string
   opBusy: boolean
@@ -67,6 +101,7 @@ interface Ui {
 export const ui = reactive<Ui>({
   snap: null,
   tasks: [],
+  uploads: [],
   opText: '',
   opBusy: false,
   pendingRecovery: '',
@@ -100,10 +135,13 @@ function pollTick() {
   refreshSilent()
 }
 
-// 上一帧传输态/任务清单：onFrame 用以检测「活动→静止」边界，触发文件列表静默刷新
+// 上一帧传输态/任务清单：onFrame 用以检测「活动→静止」边界与「任务刚终结」边界
 let wasTransferActive = false
 let wasTasks: appstate.TaskView[] = []
 let lastManualReloadAt = 0
+
+/** 终态：与 pkg/transfer 的 State* 常量一致（完成任务即撤占位、即刷新列表） */
+const TERMINAL_STATES = new Set(['done', 'failed', 'cancelled'])
 
 // 帧事件处理器固定引用（EventsOff 需要同一引用）
 function onFrame(payload: unknown) {
@@ -112,15 +150,31 @@ function onFrame(payload: unknown) {
   const wasConnected = !!ui.snap?.connected
   ui.snap = f.snap
   ui.tasks = f.tasks ?? []
+  const tasks = f.tasks ?? []
   // 快照权威：连接建立瞬间自动收尾 op 忙碌态（防终态事件缺失卡死）
   if (!wasConnected && f.snap.connected && ui.opBusy) endOp()
   // 锁库/连接态变化时清理遗留的浏览态
   if (!f.snap.connected) {
+    ui.uploads = [] // 断开后任务没了对账依据，占位一并清掉
     if (ui.remote !== '') resetBrowse()
   }
-  // 上传批次收敛到当前目录 → 静默刷新一次（仅在文件页且仍连接时）。
-  // 判定用任务的目标父目录 remoteDir（与 ui.remote 同语义：根=空串），
-  // 而非文件级 remote（永远不相等）
+
+  // —— 上传完成就刷新（用户 2026-09-21：不要等 5s 空闲轮询）——
+  // 按「任务在本帧刚进入终态」判定（与上一帧同 id 的状态比较），而不是等整队列
+  // 从 active 翻到 idle —— 批量上传时后者要等最后一个文件，先传完的会被压住。
+  const prevState = new Map(wasTasks.map((t) => [t.id, t.state]))
+  const finishedNames: string[] = []
+  for (const t of tasks) {
+    if (t.direction !== 'upload' || !TERMINAL_STATES.has(t.state)) continue
+    if (prevState.get(t.id) === t.state) continue // 早已终结，不是「刚完成」
+    if (t.remoteDir !== ui.remote) continue // 传的不是当前目录，列表无需刷新
+    if (t.state === 'done') finishedNames.push(t.name)
+  }
+  if (finishedNames.length) scheduleRefreshAfterUpload(finishedNames)
+  reconcileUploads(tasks)
+
+  // 兜底：整队列 active→idle 且确实有传向当前目录的上传任务 → 再刷一次。
+  // 主路径已被上面的「刚终结」覆盖，这条防的是「终结帧与任务明细恰好错帧」。
   if (
     wasTransferActive &&
     !f.snap.transferActive &&
@@ -134,8 +188,76 @@ function onFrame(payload: unknown) {
     if (hit) refreshSilent()
   }
   wasTransferActive = f.snap.transferActive
-  wasTasks = f.tasks ?? []
+  wasTasks = tasks
 }
+
+/* ------------------------------------------------ 上传占位与完成即刷新 */
+
+/** 占位与任务对账：匹配到任务就带上真实进度；任务终结即撤下（done 时顺手刷新）。 */
+function reconcileUploads(tasks: appstate.TaskView[]) {
+  if (!ui.uploads.length) return
+  const kept: UploadPlaceholder[] = []
+  let changed = false
+  for (const p of ui.uploads) {
+    // 同名同目录即视为同一笔（同名重复上传时会一起收敛，可接受）
+    const t = tasks.find(
+      (x) => x.direction === 'upload' && x.remoteDir === p.dir && x.name === p.name,
+    )
+    if (t) {
+      if (p.taskId !== t.id || p.progress !== t.progress || p.state !== t.state) {
+        p.taskId = t.id
+        p.progress = t.progress
+        p.state = t.state
+      }
+      if (TERMINAL_STATES.has(t.state)) {
+        changed = true // 任务已终结 → 撤下占位（真实条目由刷新补上）
+        continue
+      }
+      kept.push(p)
+      continue
+    }
+    // 未匹配到任务：可能还在本地暂存（正常），也可能任务已被清空 → 超时才撤
+    if (Date.now() - p.at > UPLOAD_PLACEHOLDER_TTL) {
+      changed = true
+      continue
+    }
+    kept.push(p)
+  }
+  if (changed) ui.uploads = kept
+}
+
+let upTimer: ReturnType<typeof setTimeout> | null = null
+let upWanted: string[] = []
+
+/** 合并 300ms 内的多次完成：批量上传不能每完成一个文件就发一次列表请求。 */
+function scheduleRefreshAfterUpload(names: string[]) {
+  upWanted.push(...names)
+  if (upTimer) clearTimeout(upTimer)
+  upTimer = setTimeout(() => {
+    upTimer = null
+    const want = upWanted
+    upWanted = []
+    void refreshAfterUpload(want)
+  }, 300)
+}
+
+/** 立即刷新当前目录；若期望的条目没出现（网盘侧列表索引有短暂滞后），
+ *  按 0.8s / 2s 各再试一次 —— 有界重试，不做无限轮询。 */
+async function refreshAfterUpload(want: string[]) {
+  for (const delay of [0, 800, 2000]) {
+    if (delay) await sleep(delay)
+    if (ui.page !== 'files' || !ui.snap?.connected) return
+    const got = await listDir(ui.remote, {silent: true})
+    if (!got || !want.length) return
+    const names = new Set(got.map((e) => e.display))
+    if (want.every((n) => names.has(n))) return
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms))
+}
+
 
 // op 阶段文案：仅置忙碌（后端不发射终态；复位走调用方 finally endOp + onFrame 兜底）
 function onOpProgress(msg: unknown) {
@@ -260,8 +382,12 @@ export function applyFontSize(px: number) {
  * 列目录：seq 代际防旧结果覆盖新目录。
  * silent=true 时不置 loading、不清 sel，用于传输收敛与空闲轮询的静默刷新；
  * 静默模式仍保留 seq 代际防护，仅在条目集合确实变化时写回 ui.entries，避免闪烁。
+ * 返回本次读到的条目（代际已过期/失败返回 null），供「上传完成即刷新」核对。
  */
-export async function listDir(remote: string, opts: {silent?: boolean} = {}) {
+export async function listDir(
+  remote: string,
+  opts: {silent?: boolean} = {},
+): Promise<appstate.FileEntry[] | null> {
   ui.seq++
   const seq = ui.seq
   ui.remote = remote
@@ -273,7 +399,7 @@ export async function listDir(remote: string, opts: {silent?: boolean} = {}) {
   }
   try {
     const entries = await Files.List(remote)
-    if (seq !== ui.seq) return // 期间已切换目录
+    if (seq !== ui.seq) return null // 期间已切换目录
     if (opts.silent) {
       // 仅在条目集合变化时写回，保留当前 sel 避免闪烁
       if (!entriesEqual(ui.entries, entries)) {
@@ -289,13 +415,15 @@ export async function listDir(remote: string, opts: {silent?: boolean} = {}) {
     } else {
       ui.entries = entries
     }
+    return entries
   } catch (e) {
     const err = unwrap(e)
-    if (seq !== ui.seq) return
-    if (opts.silent) return // 静默失败不打扰用户
+    if (seq !== ui.seq) return null
+    if (opts.silent) return null // 静默失败不打扰用户
     ui.entries = []
     ui.loadError = err.message
     if (err.code !== ApiCode.Locked) showError('读取目录失败：' + err.message)
+    return null
   } finally {
     if (seq === ui.seq && !opts.silent) ui.loading = false
   }
@@ -415,12 +543,30 @@ export function navigate(p: PageId) {
 
 /** 选择并上传（工具栏/拖放/右键共用；remoteDir 缺省为当前浏览目录）。
  *  注意：上传/下载结束后**不再**强制跳转传输页 —— 进度由底部 TransferBar
- *  展示，用户想细看再点「详情」。批次收敛后由 onFrame 静默刷新当前目录。 */
+ *  展示，用户想细看再点「详情」。批次收敛后由 onFrame 静默刷新当前目录。
+ *
+ *  占位策略：发请求**之前**就在当前目录挂上乐观条目（用户要求「上传的时候
+ *  文件就在列表里」），随后由 onFrame 的任务对账逐步换成真实进度、终结即撤下。
+ *  只给直接落在 remoteDir 的文件占位（rel 带 '/' 会进子目录，占在当前目录是错位）。 */
 export async function uploadFiles(items: UploadItem[], remoteDir: string = ui.remote) {
   if (!items.length) {
     showInfo('没有可上传的文件')
     return
   }
+  const stamp = Date.now()
+  const batch: UploadPlaceholder[] = items
+    .filter((it) => !it.rel.includes('/'))
+    .map((it, i) => ({
+      key: `${stamp}-${i}-${it.rel}`,
+      name: it.rel,
+      size: it.file.size,
+      dir: remoteDir,
+      at: stamp,
+      taskId: 0,
+      progress: null,
+      state: '',
+    }))
+  if (batch.length) ui.uploads.push(...batch)
   try {
     // 加密发生在入队后的传输管线里（上传 = 加密 → 分块上传），
     // 因此「拖入即加密」在此处只是把文件交给队列，不需要额外步骤。
@@ -429,6 +575,9 @@ export async function uploadFiles(items: UploadItem[], remoteDir: string = ui.re
     const scope = dirs.size ? `（含文件夹，保留目录结构）` : ''
     showInfo(`已加入加密上传队列：${items.length} 个文件${scope}`)
   } catch (e) {
+    // 请求本身失败 → 不会产生任务，占位必须立刻撤掉（否则成幽灵条目）
+    const keys = new Set(batch.map((b) => b.key))
+    ui.uploads = ui.uploads.filter((u) => !keys.has(u.key))
     showError('上传失败：' + unwrap(e).message)
   }
 }

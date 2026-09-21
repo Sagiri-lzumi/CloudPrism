@@ -6,6 +6,11 @@
   布局约束（历史修复，勿回退）：⋯ 与多选勾选角标落在**顶部操作带**内的空白里，
   不压在缩略图上；多选角标仅批量态（≥2）显示，单选只靠整卡高亮。
 
+  上传占位态（props.upload 有值）：这是一个「正在上传」的乐观条目，服务端还没有
+  它 —— 不取缩略图（还没传上去，取也是 404）、不出 ⋯/勾选角标、不响应点击与右键
+  （所有动作都还没有对象）。够大的文件在缩略图面正中压一个圆环进度（见 store 的
+  UPLOAD_RING_MIN）。
+
   视觉：缩略图放在一层浅色"承托面"（.thumb）上，尺寸不一的图片有了统一的
   落位边界，网格看起来才整齐；卡片 hover/选中只改底色+描边+微投影，不做位移，
   避免网格整体"抖一下"。
@@ -16,9 +21,12 @@ import type {appstate} from '../types/appstate'
 import {thumbUrl, revoke, ui} from '../lib/store'
 import {kindOf, KIND_ICON} from '../lib/media'
 import Icon from '../components/fluent/Icon.vue'
+import ProgressRing from '../components/fluent/ProgressRing.vue'
 
 const props = defineProps<{
   entry: appstate.FileEntry
+  /** 有值 = 该卡是「上传中」占位（见文件头注释） */
+  upload?: {ratio: number | null; showRing: boolean}
 }>()
 
 const emit = defineEmits<{
@@ -27,6 +35,24 @@ const emit = defineEmits<{
   /** 上下文菜单：单对象载荷避免 Vue 编译器在组件事件上丢掉闭包变量 */
   ctx: [payload: {ev: MouseEvent; entry: appstate.FileEntry}]
 }>()
+
+const up = computed(() => props.upload ?? null)
+
+// 占位态下所有条目动作都不可用（还没有远端对象可操作）
+function onSelect(ev: MouseEvent) {
+  if (up.value) return
+  emit('select', ev, props.entry)
+}
+
+function onOpen() {
+  if (up.value) return
+  emit('open', props.entry)
+}
+
+function onCtx(ev: MouseEvent) {
+  if (up.value) return
+  emit('ctx', {ev, entry: props.entry})
+}
 
 const isImg = ref(!props.entry.isDir && kindOf(props.entry.display) === 'image')
 const thumb = ref('')
@@ -39,7 +65,7 @@ const imgLoaded = ref(false)
 let disposed = false
 
 onMounted(() => {
-  if (!isImg.value) return
+  if (up.value || !isImg.value) return
   loading.value = true
   void (async () => {
     try {
@@ -85,21 +111,23 @@ const multiMode = computed(() => ui.multi.length > 1)
        「新建文件夹/上传文件…/上传文件夹…/刷新」）。⋯ 按钮的 @click.stop 同理。 -->
   <figure
     class="gc"
-    :class="{sel: isSel(entry)}"
-    @click="emit('select', $event, entry)"
-    @dblclick="emit('open', entry)"
-    @contextmenu.prevent.stop="emit('ctx', {ev: $event, entry})"
+    :class="{sel: isSel(entry), up: !!up}"
+    @click="onSelect"
+    @dblclick="onOpen"
+    @contextmenu.prevent.stop="onCtx"
   >
-    <!-- 顶部操作带 22px：⋯ 在此，不压缩略图；勾选角标仅多选态出现 -->
+    <!-- 顶部操作带 22px：⋯ 在此，不压缩略图；勾选角标仅多选态出现。
+         上传占位态两者都不出（没有可操作的对象、也不在多选集里）。 -->
     <div class="gc-head">
-      <span v-if="isSel(entry) && multiMode" class="gc-check" aria-hidden="true">
+      <span v-if="!up && isSel(entry) && multiMode" class="gc-check" aria-hidden="true">
         <Icon name="check" :size="11" class="gc-check-ic" />
       </span>
       <button
+        v-if="!up"
         type="button"
         class="gc-more"
         title="更多操作（与右键菜单一致）"
-        @click.stop="emit('ctx', {ev: $event, entry})"
+        @click.stop="onCtx"
       >
         <Icon name="more" :size="14" />
       </button>
@@ -110,7 +138,7 @@ const multiMode = computed(() => ui.multi.length > 1)
         <Icon name="folder" :size="52" class="ic dir" />
       </template>
       <img
-        v-else-if="thumb"
+        v-else-if="!up && thumb"
         :src="thumb"
         class="img"
         :class="{in: imgLoaded}"
@@ -119,8 +147,16 @@ const multiMode = computed(() => ui.multi.length > 1)
         @load="imgLoaded = true"
         @error="fail = true"
       />
-      <Icon v-else-if="loading" name="sync" :size="28" class="ic spin" />
+      <Icon v-else-if="!up && loading" name="sync" :size="28" class="ic spin" />
       <Icon v-else :name="placeholderIcon" :size="44" class="ic" :class="{err: fail}" />
+
+      <!-- 上传进度圆环：只给够大的文件画（小文件瞬间完成，画了反而闪） -->
+      <ProgressRing
+        v-if="up && up.showRing"
+        class="up-ring"
+        :ratio="up.ratio"
+        :size="52"
+      />
     </div>
     <figcaption class="name" :title="entry.display">{{ entry.display }}</figcaption>
   </figure>
@@ -157,6 +193,28 @@ const multiMode = computed(() => ui.multi.length > 1)
   background: var(--accent-soft);
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-softer);
+}
+
+/* 上传占位（乐观条目）：不可交互，视觉上比真条目轻一档 —— 它在等真实条目
+   把它替换掉，抢眼反而会让人以为已经传完。 */
+.gc.up {
+  cursor: default;
+}
+
+.gc.up .name {
+  opacity: 0.65;
+}
+
+.gc.up .thumb {
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+
+/* 圆环压在缩略图面正中：绝对定位 + inset:0 + margin:auto，
+   与同层的占位图标解耦（否则两者会并排排开）。 */
+.up-ring {
+  position: absolute;
+  inset: 0;
+  margin: auto;
 }
 
 /* 顶部操作带 22px：徽章/⋯ 落在里面，不压在缩略图上 */

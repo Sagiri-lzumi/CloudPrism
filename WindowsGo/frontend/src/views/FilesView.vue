@@ -27,6 +27,8 @@ import {
   clearMulti,
   copyEntryName,
   copyEntryPath,
+  UPLOAD_RING_MIN,
+  type UploadPlaceholder,
 } from '../lib/store'
 import {fmtSize} from '../lib/format'
 import {kindOf, KIND_ICON} from '../lib/media'
@@ -36,6 +38,7 @@ import Icon from '../components/fluent/Icon.vue'
 import RoundMenu from '../components/fluent/RoundMenu.vue'
 import MessageBox from '../components/fluent/MessageBox.vue'
 import ProgressBar from '../components/fluent/ProgressBar.vue'
+import ProgressRing from '../components/fluent/ProgressRing.vue'
 import PageHeader from '../components/layout/PageHeader.vue'
 import GridCard from './GridCard.vue'
 import PreviewPanel from './PreviewPanel.vue'
@@ -47,9 +50,32 @@ const crumbs = computed(() => ui.crumbs)
 const entries = computed(() => ui.entries ?? [])
 const multiSel = computed(() => ui.multi)
 const hasMulti = computed(() => ui.multi.length > 1)
+
+/** 当前目录下的上传占位（乐观条目）。列表里排在真条目之前 —— 用户刚点完上传，
+ *  眼睛就在列表顶部找它；等任务终结，onFrame 撤占位 + 刷新，它就换成真条目。 */
+const uploadCards = computed(() => ui.uploads.filter((p) => p.dir === ui.remote))
+
+/** 空目录空态：有上传占位时不算空（否则刚点完上传会看到「此目录为空」闪一下） */
 const showEmpty = computed(
-  () => !ui.loading && !ui.loadError && ui.entries !== null && ui.entries.length === 0,
+  () =>
+    !ui.loading &&
+    !ui.loadError &&
+    ui.entries !== null &&
+    ui.entries.length === 0 &&
+    !uploadCards.value.length,
 )
+
+/** 占位 → 合成条目：只为让 GridCard/列表行复用既有排版（remote 恒为空串，
+ *  占位卡不取缩略图、不参与选中/多选，见 GridCard 的 upload 分支）。 */
+function uploadEntry(p: UploadPlaceholder): appstate.FileEntry {
+  return {name: p.name, display: p.name, isDir: false, size: p.size, remote: ''}
+}
+
+/** 圆环只给「够大、传得够久」的文件画（阈值见 store 的 UPLOAD_RING_MIN） */
+function ringFor(p: UploadPlaceholder): {ratio: number | null; showRing: boolean} {
+  return {ratio: p.progress, showRing: p.size >= UPLOAD_RING_MIN}
+}
+
 
 function isSel(e: appstate.FileEntry): boolean {
   return ui.multi.some((x) => x.remote === e.remote)
@@ -609,8 +635,14 @@ function confirmDlg(payload: string | boolean) {
               <p class="sub">点上方「上传」或直接拖入文件以开始</p>
             </div>
 
-            <!-- 网格：96px 缩略图卡 -->
+            <!-- 网格：上传占位在前（用户刚点完上传，眼睛就在列表顶部找它） -->
             <div v-else-if="ui.viewMode === 'grid'" class="grid">
+              <GridCard
+                v-for="p in uploadCards"
+                :key="'up-' + p.key"
+                :entry="uploadEntry(p)"
+                :upload="ringFor(p)"
+              />
               <GridCard
                 v-for="e in entries"
                 :key="e.remote"
@@ -623,6 +655,20 @@ function confirmDlg(payload: string | boolean) {
 
             <!-- 列表：行式（目录行尾提供直达钮） -->
             <div v-else class="list">
+              <!-- 上传占位行：不可点、无⋯（还没有远端对象可操作），
+                   只在大文件上显示圆环（阈值同网格）。 -->
+              <div v-for="p in uploadCards" :key="'up-' + p.key" class="row up" :title="p.name">
+                <Icon :name="KIND_ICON[kindOf(p.name)]" :size="18" class="row-ic" />
+                <span class="row-name">{{ p.name }}</span>
+                <span class="row-size">{{ fmtSize(p.size) }}</span>
+                <span class="row-tail">
+                  <ProgressRing
+                    v-if="p.size >= UPLOAD_RING_MIN"
+                    :ratio="p.progress"
+                    :size="22"
+                  />
+                </span>
+              </div>
               <!-- 行右键要 .stop：祖先 .zone 也挂 contextmenu（空白区菜单），
                    不阻止冒泡会被它覆盖成空白菜单（详见 GridCard.vue 顶部注释）。 -->
               <div
@@ -1044,6 +1090,31 @@ function confirmDlg(payload: string | boolean) {
   font-size: 0.786rem;
   color: var(--text2);
   text-align: right;
+}
+
+/* 上传占位行：不可交互，名字压暗一档（它只是在等真条目替换自己）。
+   .row-tail 恒占 24px —— 与真条目行尾的 ⋯ 按钮同宽，否则有圆环/无圆环
+   两种占位行会让「大小」列左右跳动，看起来正是"错位"。 */
+.row.up {
+  cursor: default;
+}
+
+.row.up:hover {
+  background: transparent;
+}
+
+.row.up .row-name {
+  opacity: 0.65;
+}
+
+.row-tail {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin-left: 2px;
 }
 
 .open {
