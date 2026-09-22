@@ -130,6 +130,25 @@ if ($LASTEXITCODE -ne 0) { Fail "go 不可用（请先安装 Go 1.24+）" }
 go env GOPROXY | Out-Null
 if ($LASTEXITCODE -ne 0) { $env:GOPROXY = "https://goproxy.cn,direct" }
 
+# ---------- 构建来源：git 修订号 ----------
+# 为什么单列一项：用户反复被「跑的到底是哪个包」困住 —— 单实例探测会把新 exe
+# 静默顶掉、界面仍旧版，而 `-MD5.txt` 只给指纹不给来源。Go 默认 `-buildvcs=auto`
+# 确实会把修订号编进 exe，但那要专用工具才读得出；这里直接落成文本，与 MD5 一起
+# 构成「产物 ↔ 提交」的对应。**取不到就写「未知」，绝不因此中断打包**
+# （用户可能在没有 git 的机器上跑这个脚本）。
+$rev = "未知"
+$dirty = "未知"
+try {
+    $revRaw = git rev-parse --short HEAD 2>$null
+    if ($LASTEXITCODE -eq 0 -and $revRaw) {
+        $rev = "$revRaw".Trim()
+        $dirty = if (git status --porcelain 2>$null) { "有未提交改动" } else { "干净" }
+    }
+} catch {
+    Write-Host "[release] 提示：读取 git 修订号失败，构建信息里记「未知」" -ForegroundColor Yellow
+}
+Write-Host "[release] 构建来源：$rev（工作区 $dirty）" -ForegroundColor DarkGray
+
 # ---------- 2. 前端产物 ----------
 # 默认跑 npm ci + npm run build；两个开关用于跳过（见文件头说明）：
 #   -SkipNpmCi    跳过 ci，复用现有 node_modules 再 build
@@ -220,6 +239,7 @@ $verInfo = @(
     "====================",
     "构建时间：$stamp",
     "标签：$Tag",
+    "提交：$rev（工作区 $dirty）",
     "前端产物：$($assetHashes -join ' + ')",
     "对应 dist 目录：WindowsGo/frontend/dist/assets/",
     "",
@@ -282,6 +302,7 @@ Write-Host "[release] S2 通过：双形态 exe 一致（MD5=$hashDir）" -Foreg
 $stampLines = @(
     "CloudPrismGo $ver 构建指纹",
     "时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+    "提交: $rev（工作区 $dirty）",
     "-dir exe MD5: $hashDir",
     "-exe exe MD5: $hashExe",
     "前端产物: $($assetHashes -join ' + ')",
