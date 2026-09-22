@@ -2,7 +2,18 @@
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File build\release.ps1 [-Tag <tag>] [-Clean] [-SkipNpmCi] [-SkipFrontend]
-# 默认 Tag=v1.1（当前是 1 的大版本，标签形态 v1.1/v1.2…）；产物落在仓库根 Release\<yyyy-MM-dd>-<Tag>-Go-{dir,exe}/：
+# 默认 Tag=v1.0；产物落在仓库根 Release\<yyyy-MM-dd>-<Tag>-Go-{dir,exe}/：
+#
+# 版本号规则（2026-09-22 用户定，**未发布期与发布后是两套**）：
+#   · **未发布期**：`v1.0` 是基线（第一个完整可用的包），其后**每改完打包一次**
+#     递增两位小数 —— `v1.01`、`v1.02`…（两位小数读作「第 N 次迭代包」，
+#     它明说了这是未发布的迭代，不会跟正式序列混淆）。
+#   · **正式发布序列从 `v1.1` 起**（用户说了「v1.1 之后才是之后的」），
+#     其后按 `v1.1` → `v1.2` → … 递增。
+#   ⇒ 不要把未发布期的迭代号写成 `v1.10` 这类：它与正式序列的 `v1.1`→`v1.10`
+#     在字面上撞车（这正是 2026-09-22 全部重打一遍的原因）。
+#   · 标签形态一律 `v<大>.<小>` 或 `v<大>.<两位迭代>`，**不沿用历史连续递增序号**
+#     （那串已到 v38，用户嫌太长），也**不打 git tag**（见下方说明）。
 #   -dir：CloudPrismGo.exe + assets\{icon.ico,self_test_guide.md,baidu_guide.md}（随包资源，
 #         便于日后替换/增补）+ data\tmp\（运行期临时数据目录占位）+
 #         README-便携版.txt
@@ -24,7 +35,7 @@
 # 全部路径用 $PSScriptRoot 相对定位（不写任何绝对路径，便于仓库整体搬迁）；
 # 任一步失败立即退出并给出非 0 码。
 param(
-    [string]$Tag = "v1.1",
+    [string]$Tag = "v1.0",
     [switch]$Clean,
     [switch]$SkipNpmCi,
     [switch]$SkipFrontend
