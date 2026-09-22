@@ -151,7 +151,10 @@ onBeforeUnmount(leave)
 
 <template>
   <Teleport to="body">
-    <Transition name="fade">
+    <!-- name="ms"（而不是复用全局的 fade）：遮罩与面板要用两套动效 ——
+         遮罩只淡入，面板还要过冲弹入。自定义名让这两条规则都收在本组件内，
+         不再跨文件耦合 base.css 的 .fade-*。 -->
+    <Transition name="ms">
       <!-- 遮罩点击不关闭：四处浮层原本的一致语义，防误触 -->
       <div v-if="open" class="ms-mask" :style="maskStyle">
         <div
@@ -216,9 +219,13 @@ onBeforeUnmount(leave)
   max-height: 100%;
   /* 焦点落在面板自身（如无输入的可聚焦内容）时不要画描边 */
   outline: none;
-  background: var(--surface);
+  /* view 档玻璃：模态压在整个界面之上，是毛玻璃效果最该看得见的地方。
+     面板宽度有上限、背后是静态的遮罩底，模糊代价可忽略。
+     inset 高光发丝线补在阴影之前 —— 面板无描边，这条线是「玻璃有厚度」的唯一暗示。 */
+  background: var(--glass-view);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   border-radius: var(--radius-card);
-  box-shadow: var(--shadow-pop);
+  box-shadow: var(--shadow-pop), inset 0 1px 0 var(--glass-edge);
 }
 
 /* ---- 页头：36px 图标块 + 标题（+ 补充）---- */
@@ -328,6 +335,46 @@ onBeforeUnmount(leave)
   flex: none;
 }
 
+/* ---- 进出场：遮罩淡入 + 面板过冲弹入 ----
+   Transition 类只落在遮罩元素上（面板是它的子元素），两条动效各归各的。
+
+   ⚠️ 面板的过冲动画**不能**写成 `.ms-enter-active .ms-panel { animation: ... }`。
+   Vue 判断「进出场何时结束」只看 `<Transition>` 根元素（这里是遮罩）身上的
+   `transition` 时长 —— 遮罩淡入用的是 --dur-fast（120ms），于是 120ms 后
+   `ms-enter-active` 就被摘掉，面板 460ms 的过冲动画**随之被截断**（动画属性不再
+   生效 ⇒ 元素立刻跳回静止态）。实测在 460ms 窗口内轮询 `.ms-panel` 的
+   animationName 恒为 `none`，就是这个原因；肉眼看是「弹到四分之一就没了」。
+   故改为**直接挂在 .ms-panel 上**：面板随 `v-if` 新建，动画在元素被创建时自然触发，
+   与过渡类的寿命无关（同一条路子在 DropCard / nav-ic 上已验证可靠）。
+   代价是面板没有独立的退场动画 —— 退场只由遮罩淡出承担，与改前一致。 */
+.ms-enter-active {
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.ms-leave-active {
+  transition: opacity calc(var(--dur) / 2) var(--ease);
+}
+
+.ms-enter-from,
+.ms-leave-to {
+  opacity: 0;
+}
+
+.ms-panel {
+  animation: ms-pop var(--dur-spring) var(--ease-spring);
+}
+
+@keyframes ms-pop {
+  0% {
+    opacity: 0;
+    transform: scale(.94) translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
 /* 手机：页头/条带/体/页脚内边距收窄一档，否则 375px 下正文只剩半行宽 */
 @media (max-width: 640px) {
   .ms-head {
@@ -347,5 +394,6 @@ onBeforeUnmount(leave)
   }
 }
 
-/* .fade-* 过渡基元已在 styles/base.css 全局定义，此处不重复。 */
+/* 进出场动效见上方 .ms-* 段（原先是复用 base.css 的 .fade-*，本组件另需面板过冲，
+   故独立成 ms 前缀，不再跨文件共用那一份）。 */
 </style>

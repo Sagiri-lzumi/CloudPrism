@@ -29,6 +29,7 @@ const RUNTIME_SET = new Set(['--insp-w'])
 
 /** 刻意不做深色转发的 token：
  *  · 与明暗无关：字体/字号/圆角/动效/层级；
+ *  · 毛玻璃的模糊半径与饱和度：不是颜色，明暗共用一档；
  *  · 刻意恒定：两类非模态黑罩（压在内容之上的"暗罩"，浅色下也不该变亮）；
  *  · 压色语义恒定：--text-on-accent（坐在品牌色填充上的字，两档都是白）。
  *  新增这类 token 时**必须**加进来 —— 加漏了会在这里大声失败，而不是静默。 */
@@ -48,8 +49,13 @@ const NO_DARK_NEEDED = new Set([
   '--scrim-media',
   '--dur',
   '--dur-fast',
+  '--dur-spring',
   '--ease',
   '--ease-emphasized',
+  '--ease-spring',
+  '--ease-spring-soft',
+  '--glass-blur',
+  '--glass-sat',
   '--text-on-accent',
 ])
 

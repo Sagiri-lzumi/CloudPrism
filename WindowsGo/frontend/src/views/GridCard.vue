@@ -1,25 +1,31 @@
 <!--
   GridCard.vue —— 网格模式条目卡（操作带 22px + 缩略图面 + 名称）。
-  图片条目异步请求加密缩略图（/t/ 令牌），退出视口卸载时吊销，防注册表被
-  大量浏览撑满（ErrTooManyTokens）；目录与其余文件显示类别占位图标。
+  图片条目异步请求加密缩略图（/t/ 令牌）；**视频条目异步抽中心帧当封面**
+  （/s/ 令牌 + 离屏 <video>，见 lib/videoCover.ts），两者都在退出视口卸载时
+  回收（令牌吊销 / objectURL revoke），防注册表被大量浏览撑满（ErrTooManyTokens）。
+  目录与其余文件显示类别占位图标。
 
   布局约束（历史修复，勿回退）：⋯ 与多选勾选角标落在**顶部操作带**内的空白里，
   不压在缩略图上；多选角标仅批量态（≥2）显示，单选只靠整卡高亮。
 
   上传占位态（props.upload 有值）：这是一个「正在上传」的乐观条目，服务端还没有
-  它 —— 不取缩略图（还没传上去，取也是 404）、不出 ⋯/勾选角标、不响应点击与右键
-  （所有动作都还没有对象）。够大的文件在缩略图面正中压一个圆环进度（见 store 的
+  它 —— 不取缩略图/封面（还没传上去，取也是 404）、不出 ⋯/勾选角标、不响应点击与
+  右键（所有动作都还没有对象）。够大的文件在缩略图面正中压一个圆环进度（见 store 的
   UPLOAD_RING_MIN）。
 
   视觉：缩略图放在一层浅色"承托面"（.thumb）上，尺寸不一的图片有了统一的
-  落位边界，网格看起来才整齐；卡片 hover/选中只改底色+描边+微投影，不做位移，
-  避免网格整体"抖一下"。
+  落位边界，网格看起来才整齐；卡片 hover 抬升 2px + 微放大（transform，不参与排版，
+  所以网格不会整体抖一下 —— 位移只发生在这一张卡上，邻居不重排）。
+
+  视频封面与图片**刻意走不同的 object-fit**：图片 contain（不能裁掉内容），
+  视频帧 cover（帧本身就是满幅画面，contain 会留出难看的黑边）。
 -->
 <script setup lang="ts">
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import type {appstate} from '../types/appstate'
 import {thumbUrl, revoke, ui} from '../lib/store'
 import {kindOf, KIND_ICON} from '../lib/media'
+import {requestVideoCover, type CoverHandle} from '../lib/videoCover'
 import Icon from '../components/fluent/Icon.vue'
 import ProgressRing from '../components/fluent/ProgressRing.vue'
 
@@ -54,8 +60,13 @@ function onCtx(ev: MouseEvent) {
   emit('ctx', {ev, entry: props.entry})
 }
 
-const isImg = ref(!props.entry.isDir && kindOf(props.entry.display) === 'image')
+const isImg = computed(() => !props.entry.isDir && kindOf(props.entry.display) === 'image')
+const isVideo = computed(() => !props.entry.isDir && kindOf(props.entry.display) === 'video')
 const thumb = ref('')
+/** 视频封面：本地 objectURL（由抽帧 Blob 造，非令牌 URL） */
+const cover = ref('')
+/** 封面时长（秒；0 = 容器没报时长，不画胶囊） */
+const coverDur = ref(0)
 const fail = ref(false)
 const loading = ref(false)
 // 图片解码完成后才淡入：缩略图是异步取的，直接挂上去会出现"从空白突然砸出
@@ -63,30 +74,70 @@ const loading = ref(false)
 const imgLoaded = ref(false)
 
 let disposed = false
+/** 抽帧任务句柄：卸载时 cancel，避免排队中的任务白跑一趟 */
+let coverTask: CoverHandle | null = null
 
 onMounted(() => {
-  if (up.value || !isImg.value) return
-  loading.value = true
-  void (async () => {
-    try {
-      const u = await thumbUrl(props.entry.remote)
-      if (disposed) {
-        void revoke(u).catch(() => {}) // 卸载后才返回的令牌直接吊销
-        return
-      }
-      thumb.value = u
-    } catch {
-      if (!disposed) fail.value = true
-    } finally {
-      if (!disposed) loading.value = false
-    }
-  })()
+  if (up.value) return
+  if (isImg.value) void loadThumb()
+  else if (isVideo.value) void loadCover()
 })
+
+async function loadThumb() {
+  loading.value = true
+  try {
+    const u = await thumbUrl(props.entry.remote)
+    if (disposed) {
+      void revoke(u).catch(() => {}) // 卸载后才返回的令牌直接吊销
+      return
+    }
+    thumb.value = u
+  } catch {
+    if (!disposed) fail.value = true
+  } finally {
+    if (!disposed) loading.value = false
+  }
+}
+
+/**
+ * 视频封面：抽中心帧（细节与降级策略见 lib/videoCover.ts）。
+ * 失败**不置 fail**：没有封面是正常结局（容器不支持等），卡片安静地显示类别
+ * 图标即可 —— 显示成错误态会把「浏览器解不了这个容器」误报成「文件坏了」。
+ */
+async function loadCover() {
+  loading.value = true
+  coverTask = requestVideoCover(props.entry)
+  try {
+    const out = await coverTask.promise
+    if (disposed) return
+    cover.value = URL.createObjectURL(out.blob)
+    coverDur.value = out.duration
+  } catch {
+    /* 见上方注释：保持类别图标 */
+  } finally {
+    if (!disposed) loading.value = false
+  }
+}
 
 onBeforeUnmount(() => {
   disposed = true
+  coverTask?.cancel()
+  coverTask = null
   if (thumb.value) void revoke(thumb.value).catch(() => {})
+  // 封面是本地 blob URL，走 URL.revokeObjectURL；不要用 store 的 revoke
+  // （它是给 /s/ /t/ 令牌用的，作用对象是服务端注册表）
+  if (cover.value) URL.revokeObjectURL(cover.value)
 })
+
+/** 秒 → 视频时长胶囊文案：`m:ss`，满一小时才带小时段。 */
+function fmtDur(sec: number): string {
+  const s = Math.max(0, Math.round(sec))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const r = s % 60
+  const mm = h > 0 ? String(m).padStart(2, '0') : String(m)
+  return `${h > 0 ? `${h}:` : ''}${mm}:${String(r).padStart(2, '0')}`
+}
 
 // 图标位内容：目录=folder；图片=缩略图/加载中/占位；其它=类别图标
 const placeholderIcon = computed(() =>
@@ -147,8 +198,28 @@ const multiMode = computed(() => ui.multi.length > 1)
         @load="imgLoaded = true"
         @error="fail = true"
       />
+      <!-- 视频封面（抽中心帧）：与图片同用 .img，但 object-fit 换 cover。
+           解码失败就当没有封面（清空 src 落到下面的占位图标分支），
+           不要走 fail —— 那会显示成红色错误图标，把「容器不支持」说成「文件坏了」。 -->
+      <img
+        v-else-if="!up && cover"
+        :src="cover"
+        class="img cover in"
+        alt=""
+        draggable="false"
+        @error="cover = ''"
+      />
       <Icon v-else-if="!up && loading" name="sync" :size="28" class="ic spin" />
       <Icon v-else :name="placeholderIcon" :size="44" class="ic" :class="{err: fail}" />
+
+      <!-- 视频标识：封面只是抽出来的一帧静止画面，没有播放角标与时长胶囊，
+           用户分不清「这是视频」还是「这是一张图」。
+           两者都是**绝对定位** —— 条件渲染的元素绝不能裸参与 .thumb 的 flex 排版，
+           否则它们一出现就把中间的 img 挤偏（见 .up-ring 同一处理，本项目踩过多次）。 -->
+      <template v-if="!up && cover">
+        <span class="play" aria-hidden="true"><Icon name="play" :size="15" /></span>
+        <span v-if="coverDur > 0" class="dur">{{ fmtDur(coverDur) }}</span>
+      </template>
 
       <!-- 上传进度圆环：只给够大的文件画（小文件瞬间完成，画了反而闪） -->
       <ProgressRing
@@ -180,11 +251,24 @@ const multiMode = computed(() => ui.multi.length > 1)
   user-select: none;
   overflow: hidden; /* 圆角裁剪内部面 */
   transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
-    box-shadow var(--dur-fast) var(--ease);
+    box-shadow var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease-spring);
 }
 
+/* hover：抬 2px + 微放大 + 浮起阴影，过冲曲线让它"弹"起来一下。
+   位移/缩放全在 transform 上，不参与排版 —— 所以「网格整体抖一下」并不会发生，
+   动的是这一张卡自己（早前版本曾因为担心抖动而完全不做位移，那是把
+   「transform 不重排」和「改变尺寸」混为一谈了）。
+   z-index 抬到 --z-raise：否则抬升后会被后序兄弟盖住半张。 */
 .gc:hover {
   background: color-mix(in srgb, var(--text) 5%, transparent);
+  box-shadow: var(--shadow-card);
+  transform: translateY(-2px) scale(1.012);
+  z-index: var(--z-raise);
+}
+
+/* 按压：收回去一点点，给"点到了"的触感 */
+.gc:active {
+  transform: translateY(0) scale(.985);
 }
 
 /* 选中态：accent-soft 底 + accent 描边 + 一圈极淡外环（三重强化，
@@ -320,6 +404,48 @@ const multiMode = computed(() => ui.multi.length > 1)
 /* 解码完成 → 淡入（由 @load 打标） */
 .img.in {
   opacity: 1;
+}
+
+/* 视频封面：帧画面按 cover 铺满承托面（图片那份是 contain，方向相反，别混）。
+   理由：帧本身就是 3:2/16:9 的满幅画面，contain 会在 4:3 的承托面里留出黑边，
+   看起来像"图很小、周围一圈空"。 */
+.img.cover {
+  object-fit: cover;
+}
+
+/* 播放角标：绝对定位 + inset:0 + margin:auto 居中（与 .up-ring 同一套写法）。
+   **不要**靠 flex 对齐来居中绝对定位子元素 —— 那依赖静态位置，行为不稳定。 */
+.play {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  /* 恒白图标 + 恒黑罩：压在任意一帧画面上都必须可读，故刻意不随主题变化
+     （与 MediaPlayer 的控件底同源，见 theme.css 的 --scrim-media 注释） */
+  color: #fff;
+  background: var(--scrim-media);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .3);
+  pointer-events: none;
+}
+
+/* 时长胶囊：右下角，与播放角标同一套恒定配色 */
+.dur {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  padding: 1px 5px;
+  font-size: 0.714rem;
+  line-height: 1.3;
+  color: #fff;
+  background: var(--scrim-media);
+  border-radius: var(--radius-round);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
 .spin {

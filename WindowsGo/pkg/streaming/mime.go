@@ -45,6 +45,13 @@ var mimeByExt = map[string]string{
 	".gif":  "image/gif",
 	".webp": "image/webp",
 	".bmp":  "image/bmp",
+	// 文档
+	//
+	// .pdf 必须显式给出 application/pdf：Chromium 只认这个类型才会把响应交给
+	// 内置 PDF 阅读器接管。落到 application/octet-stream（本表兜底值）时，
+	// nosniff 之下浏览器不会嗅探，表现是「点开变下载」而不是内嵌翻阅。
+	// /s/ 端点本就不设 Content-Disposition（inline 语义），故这里只需补类型。
+	".pdf": "application/pdf",
 	// 文本 / 字幕
 	".txt":  "text/plain; charset=utf-8",
 	".log":  "text/plain; charset=utf-8",

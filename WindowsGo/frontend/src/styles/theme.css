@@ -52,7 +52,17 @@
     /* 卡片描边透明：浅色靠 #fff 卡 vs #f4f5f7 底的明度差分层（苹果风无描边卡） */
     --stroke-card: transparent;
     --divider: rgba(16, 24, 40, .07);
-    --nav-bg: rgba(255, 255, 255, .72); /* 导航轨半透底（配 backdrop blur） */
+
+    /* ---- 玻璃面（配 --glass-blur/--glass-sat 的毛玻璃底）----
+       两档半透底按「面上压着什么」分，不是按位置分：
+        · chrome：窗口骨架（侧栏/底栏/页头），压的是静态窗口底色 —— 它只负责把骨架
+          从底色里「抬起来」一档，观感是层次而不是透明；
+        · view：浮出内容（菜单/对话框/通知/拖放卡/移动端预览浮层），压的是真实内容 ——
+          这里才真正看得到毛玻璃，所以取得更实一档（.84）保证正文对比度。
+       edge 是面上沿那条高光发丝线，玻璃「有厚度」的那一点暗示（浮层无描边时尤其重要）。 */
+    --glass-chrome: rgba(255, 255, 255, .68);
+    --glass-view: rgba(255, 255, 255, .84);
+    --glass-edge: rgba(255, 255, 255, .72);
 
     /* ---- 文字色 ---- */
     --text: #1c1c21;
@@ -97,11 +107,26 @@
     --scrim-hint: rgba(0, 0, 0, .28);
     --scrim-media: rgba(0, 0, 0, .55);
 
-    /* ---- 动效 ---- */
+    /* ---- 动效 ----
+       spring 组是「Q 弹」的来源：过冲曲线（>1 的贝塞尔端点）让元素到位时先冲过头
+       再弹回，视觉上才有弹性。用法分工刻意区分，别混：
+        · 进入/生成（模态、菜单、通知、拖放卡、角标）用 --dur-spring + --ease-spring ——
+          时长足够长，过冲才看得见；
+        · hover / 按压用 --dur-fast + --ease-spring —— 交互反馈必须跟手，
+          把过冲压在 130ms 内，是「一弹即止」而不是「慢悠悠晃回来」。 */
     --dur: 200ms;
     --dur-fast: 130ms;
+    --dur-spring: 460ms;
     --ease: cubic-bezier(.33, 0, .2, 1);        /* 标准 */
     --ease-emphasized: cubic-bezier(.2, .85, .25, 1); /* 入场/位移 */
+    --ease-spring: cubic-bezier(.34, 1.52, .5, 1);    /* 明显过冲 */
+    --ease-spring-soft: cubic-bezier(.22, 1.18, .36, 1); /* 克制的过冲（整页/大面） */
+
+    /* 毛玻璃参数：与明暗无关（模糊半径/饱和度不是颜色）。
+       饱和度略提是苹果毛玻璃的常规做法 —— 背景被模糊后本会发灰，
+       提饱和把透过来的色相拉回来，否则玻璃像一层脏塑料。 */
+    --glass-blur: 18px;
+    --glass-sat: 165%;
 
     /* ============================================ 深色调色板（单一真源）
        仅供下方两支别名转发，业务样式不应直接引用 --dk-*。 */
@@ -116,7 +141,11 @@
        只有约 6%，描边透明会「一坨黑」，需描边兜底（与浅色策略不同） */
     --dk-stroke-card: rgba(255, 255, 255, .08);
     --dk-divider: rgba(255, 255, 255, .09);
-    --dk-nav-bg: rgba(28, 28, 32, .74);
+    /* 深色玻璃：比浅色档更「重」一点 —— 深底上半透白会把底下的深色抬亮，
+       抬多了玻璃就变成一块发灰的板子，反而失去纵深。 */
+    --dk-glass-chrome: rgba(28, 28, 32, .66);
+    --dk-glass-view: rgba(38, 38, 44, .82);
+    --dk-glass-edge: rgba(255, 255, 255, .10);
     --dk-text: #f2f2f5;
     --dk-text2: #bfbfc8;
     /* 标题色：浅色档比正文再暗一档（#16161a vs #1c1c21），深色档对应再亮一档。
@@ -165,7 +194,9 @@ html[data-theme="dark"] {
     --stroke: var(--dk-stroke);
     --stroke-card: var(--dk-stroke-card);
     --divider: var(--dk-divider);
-    --nav-bg: var(--dk-nav-bg);
+    --glass-chrome: var(--dk-glass-chrome);
+    --glass-view: var(--dk-glass-view);
+    --glass-edge: var(--dk-glass-edge);
     --veil: var(--dk-veil);
 
     --text: var(--dk-text);
@@ -203,7 +234,9 @@ html[data-theme="dark"] {
         --stroke: var(--dk-stroke);
         --stroke-card: var(--dk-stroke-card);
         --divider: var(--dk-divider);
-        --nav-bg: var(--dk-nav-bg);
+        --glass-chrome: var(--dk-glass-chrome);
+    --glass-view: var(--dk-glass-view);
+    --glass-edge: var(--dk-glass-edge);
         --veil: var(--dk-veil);
 
         --text: var(--dk-text);
@@ -215,28 +248,34 @@ html[data-theme="dark"] {
     }
 }
 
-/* 降级：不支持 color-mix / backdrop-filter 的环境下，半透底直接用实色，
-   避免导航轨在浅色主题里变成「灰蒙蒙的塑料片」 */
+/* 降级：不支持 backdrop-filter 的环境（无毛玻璃可言）下，半透底直接用实色 ——
+   否则玻璃面在浅色主题里会变成「灰蒙蒙的塑料片」，比不加还难看。
+   两档都要兜：chrome 取贴近卡片的白、view 取纯白（浮层必须完全不透，正文可读优先）。 */
 @supports not (backdrop-filter: blur(1px)) {
     :root {
-        --nav-bg: #fbfbfc;
+        --glass-chrome: #fbfbfc;
+        --glass-view: #ffffff;
     }
 
     html[data-theme="dark"] {
-        --nav-bg: #1d1d21;
+        --glass-chrome: #1d1d21;
+        --glass-view: #232327;
     }
 
     @media (prefers-color-scheme: dark) {
         html[data-theme="auto"] {
-            --nav-bg: #1d1d21;
+            --glass-chrome: #1d1d21;
+            --glass-view: #232327;
         }
     }
 }
 
-/* 动效偏好：尊重系统「减少动态效果」，全局把过渡/动画压到近零 */
+/* 动效偏好：尊重系统「减少动态效果」，全局把过渡/动画压到近零
+   （spring 也在内：过冲曲线是「动」得最明显的一类，绝不能漏） */
 @media (prefers-reduced-motion: reduce) {
     :root {
         --dur: 1ms;
         --dur-fast: 1ms;
+        --dur-spring: 1ms;
     }
 }

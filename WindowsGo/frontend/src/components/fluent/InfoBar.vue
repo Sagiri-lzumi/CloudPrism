@@ -55,10 +55,12 @@ const iconOf = {info: 'info', success: 'completed', warning: 'feedback', error: 
   padding: 8px 8px 8px 12px;
   font-size: 0.857rem;
   color: var(--text);
-  background: var(--surface);
+  /* view 档玻璃：通知飘在界面之上，背后是内容 —— 用完全实心的底会把内容压死。 */
+  background: var(--glass-view);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-ctrl);
-  box-shadow: var(--shadow-pop);
+  box-shadow: var(--shadow-pop), inset 0 1px 0 var(--glass-edge);
   pointer-events: auto;
 }
 
@@ -101,14 +103,15 @@ const iconOf = {info: 'info', success: 'completed', warning: 'feedback', error: 
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
-/* 滑入：从右侧 120% 平移进入（qfw InfoBar push 动效） */
+/* 滑入：从右侧 120% 平移进入（qfw InfoBar push 动效），
+   走 spring 曲线 —— 通知是「弹」进来的，落定时有一点收回。 */
 .toast-enter-active {
-  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+  transition: opacity var(--dur) var(--ease), transform var(--dur-spring) var(--ease-spring);
 }
 
 .toast-enter-from {
   opacity: 0;
-  transform: translateX(120%);
+  transform: translateX(120%) scale(.96);
 }
 
 .toast-leave-active {

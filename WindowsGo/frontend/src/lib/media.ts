@@ -15,7 +15,10 @@ export const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
 /** 可代理拉取并纯文本渲染的扩展名 */
 export const TEXT_EXTS = ['.txt', '.md', '.log', '.json', '.xml', '.csv']
 
-export type MediaKind = 'video' | 'audio' | 'image' | 'text' | 'other'
+/** 交给浏览器内置阅读器内嵌翻阅的扩展名（/s/ 以 application/pdf 内联输出） */
+export const DOC_EXTS = ['.pdf']
+
+export type MediaKind = 'video' | 'audio' | 'image' | 'text' | 'pdf' | 'other'
 
 /** 按展示名扩展名归类预览类别；目录/无扩展名一律 other。 */
 export function kindOf(display: string): MediaKind {
@@ -24,6 +27,7 @@ export function kindOf(display: string): MediaKind {
   if (AUDIO_EXTS.includes(ext)) return 'audio'
   if (IMAGE_EXTS.includes(ext)) return 'image'
   if (TEXT_EXTS.includes(ext)) return 'text'
+  if (DOC_EXTS.includes(ext)) return 'pdf'
   return 'other'
 }
 
@@ -33,5 +37,6 @@ export const KIND_ICON: Record<MediaKind, string> = {
   audio: 'headphone',
   image: 'photo',
   text: 'document',
+  pdf: 'document',
   other: 'document',
 }

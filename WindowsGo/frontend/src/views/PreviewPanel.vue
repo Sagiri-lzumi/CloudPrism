@@ -14,6 +14,7 @@ import {computed, onBeforeUnmount, ref, watch} from 'vue'
 import {ui, mediaUrl, revoke, downloadSel, exportSel, selectEntry} from '../lib/store'
 import {fmtSize} from '../lib/format'
 import {kindOf, KIND_ICON} from '../lib/media'
+import {DocTooLargeError, fetchWholeViaRanges} from '../lib/docBlob'
 import Icon from '../components/fluent/Icon.vue'
 import Button from '../components/fluent/Button.vue'
 import ProgressBar from '../components/fluent/ProgressBar.vue'
@@ -30,6 +31,15 @@ const kind = computed(() => (sel.value && !isDir.value ? kindOf(sel.value.displa
 
 /** 当前签发的预览 URL（图片/文本/媒体共用；签发即记账，更换时吊销） */
 const url = ref('')
+
+/* PDF 的本地 objectURL（拼好的整份 Blob）与失败文案。
+   声明位置**必须**在下面 watch 之前：watch 带 immediate，首次选中就在 setup 期间
+   同步跑一轮，而那一轮开头要清空/吊销这两个值 —— 若把它们挪进下方「PDF」小节声明，
+   首次选中必然撞上 const 的 TDZ 抛 ReferenceError，表现为「面板一挂就白屏」。
+   （同类坑：`<script setup>` 里所有被 immediate watch 摸到的状态都得先声明。）
+   细节与根因见 lib/docBlob.ts 文件头。 */
+const pdfUrl = ref('')
+const pdfErr = ref('')
 /** 文本预览内容与状态 */
 const text = ref('')
 const textErr = ref('')
@@ -57,6 +67,10 @@ watch(sel, async (e) => {
   // 回收上一枚令牌（幂等：吊销不存在的令牌无害）
   if (curUrl) void revoke(curUrl).catch(() => {})
   curUrl = ''
+  // 整份 PDF 的 blob URL 与令牌 URL 是两笔账，更换条目时一并回收（否则内存只增不减）
+  if (pdfUrl.value) URL.revokeObjectURL(pdfUrl.value)
+  pdfUrl.value = ''
+  pdfErr.value = ''
   if (!e || isDir.value) {
     loading.value = false
     return
@@ -67,6 +81,7 @@ watch(sel, async (e) => {
     url.value = u
     curUrl = u
     if (kind.value === 'text') void loadText(u, gen)
+    else if (kind.value === 'pdf') void loadPdf(u, gen)
     loading.value = false
   } catch (err) {
     const apiErr = unwrap(err)
@@ -99,6 +114,42 @@ function onImgErr() {
   if (url.value) loadErr.value = '图片解码失败'
 }
 
+/* ------------------------------------------------------------------ PDF */
+
+/** 内嵌 PDF 的体积上限：整份进内存（Blob）换阅读器必然可读，超限只给下载。
+    128MiB 是「这个大小的 PDF 浏览器自己也未必扛得住」的保守线，不是传输上限。 */
+const PDF_INLINE_MAX = 128 * 1024 * 1024
+
+/**
+ * 取全 PDF 再喂给 iframe。
+ * 为什么不能直接把令牌 URL 给 iframe：见 lib/docBlob.ts 的文件头（阅读器不续请，
+ * >2MiB 的 PDF 只会拿到被截断的首段）。失败只影响内嵌，下载路径照旧可用。
+ */
+async function loadPdf(u: string, gen: number) {
+  try {
+    const got = await fetchWholeViaRanges(u, PDF_INLINE_MAX)
+    if (gen !== urlGen) return
+    pdfUrl.value = URL.createObjectURL(got.blob)
+    // 整份已在本地：令牌没必要继续占着注册表名额
+    void revoke(u).catch(() => {})
+  } catch (err) {
+    if (gen !== urlGen) return
+    pdfErr.value =
+      err instanceof DocTooLargeError
+        ? `此 PDF 约 ${fmtSize(err.total)}，超过内嵌预览上限，请下载后查看`
+        : 'PDF 载入失败（网络或解码错误）'
+  }
+}
+
+/**
+ * PDF「新窗口打开」：给的是已取全的 blob URL。
+ * 不能在卸载后仍然有效（blob URL 随本组件吊销），但主路径是面板内嵌阅读器，
+ * 这里只是阅读器被浏览器策略禁用时的兜底。
+ */
+function openPdfTab() {
+  if (pdfUrl.value) window.open(pdfUrl.value, '_blank', 'noopener')
+}
+
 // 超大文本只保留首尾各若干行，避免长文档拖垮渲染
 const TEXT_LIMIT = 400_000
 const textShown = computed(() => {
@@ -113,13 +164,16 @@ onBeforeUnmount(() => {
   urlGen++ // 阻止在途请求回写
   if (curUrl) void revoke(curUrl).catch(() => {})
   curUrl = ''
+  // blob URL 的生命周期挂在本组件上；不显式吊销就会留到整页卸载
+  if (pdfUrl.value) URL.revokeObjectURL(pdfUrl.value)
+  pdfUrl.value = ''
 })
 
 /* ------------------------------------------------------- 展示派生 */
 
 // 面板头部标题：展示名（目录/文件一致）
 const title = computed(() => sel.value?.display ?? '')
-const metaKind = computed(() => (isDir.value ? '目录' : {video: '视频', audio: '音频', image: '图片', text: '文本', other: '文件'}[kind.value]))
+const metaKind = computed(() => (isDir.value ? '目录' : {video: '视频', audio: '音频', image: '图片', text: '文本', pdf: 'PDF', other: '文件'}[kind.value]))
 const meta = computed(() => {
   const e = sel.value!
   const size = isDir.value ? '' : fmtSize(e.size)
@@ -132,7 +186,7 @@ const bigIcon = computed(() => (isDir.value ? 'folder' : KIND_ICON[kind.value]))
 // 该类别本应能内嵌预览。用于区分末尾兜底分支的两种语义：
 // 「这个类型不支持」是能力事实，「本该能预览却没拿到 URL」是故障 —— 两者
 // 文案绝不能混用，后者若沿用前者的措辞，会把 bug 伪装成设计取舍。
-const previewable = computed(() => ['video', 'audio', 'image', 'text'].includes(kind.value))
+const previewable = computed(() => ['video', 'audio', 'image', 'text', 'pdf'].includes(kind.value))
 
 const leadText = computed(() => {
   if (isDir.value) return '这是一个文件夹'
@@ -209,6 +263,40 @@ const leadText = computed(() => {
           <div v-else-if="!url && !loading" class="center"><p>无法读取文本</p></div>
         </div>
 
+        <!-- PDF：交给浏览器内置阅读器（缩放/翻页/搜索/打印都不必自己实现），
+             但**不能**把 /s/ 的令牌 URL 直接给它。Chromium 的 PDFium 阅读器只发
+             一次请求、且不带 Range；而 /s/ 对无 Range 请求也回 206 + 首段
+             （pkg/streaming 的 MaxResponseBytes = 2MiB），阅读器拿到截断的 206 后
+             **不会**补 Range 请求 ⇒ >2MiB 的 PDF 只读得到前 2MiB，且不报任何错。
+             实测：3.4MiB 的 PDF 走直连只有 1 个 /s/ 请求、共 2MiB、再无续请。
+             故先按 Range 分片把整份拼成 Blob（lib/docBlob.ts），再把 blob: URL 交给
+             iframe —— 对阅读器而言 blob 是一个完整、可随机访问的源，行为与整份 200
+             响应一致（已用静态 200 服务器对照验证过接管行为）。
+             不设 sandbox：PDF 阅读器在 Chromium 里是个扩展文档，加 sandbox
+             会把它整个挡掉、退化成空白页。 -->
+        <div v-else-if="kind === 'pdf' && !pdfUrl && !pdfErr" class="center">
+          <div class="ring"><ProgressBar indeterminate /></div>
+          <p class="sub2">正在取回整份 PDF…</p>
+        </div>
+
+        <div v-else-if="pdfUrl && kind === 'pdf'" class="pdf-wrap">
+          <iframe class="pdf" :src="pdfUrl" :title="`PDF 预览：${sel.display}`" />
+          <div class="pdf-foot">
+            <Button icon="view" @click="openPdfTab">新窗口打开</Button>
+            <Button icon="download" @click="downloadSel">下载</Button>
+          </div>
+        </div>
+
+        <!-- PDF 取全失败/超限：与上面 loadErr 同理，必须给出原因而不是落进
+             「此类型不支持内嵌预览」的兜底分支 —— 后者会把故障说成设计取舍。 -->
+        <div v-else-if="pdfErr" class="center err-line">
+          <p>{{ pdfErr }}</p>
+          <div class="actions">
+            <Button icon="download" @click="downloadSel">下载</Button>
+            <Button icon="share" @click="exportSel">解密导出</Button>
+          </div>
+        </div>
+
         <!-- 目录 / 不支持内嵌预览 / 载荷缺失（三种语义由 leadText 分流） -->
         <div v-else class="center">
           <Icon :name="bigIcon" :size="56" class="dim" />
@@ -234,7 +322,10 @@ const leadText = computed(() => {
   min-height: 0;
   /* 检查器是「面板」而不是「页面」：用 --surface 与列表的 --bg-page 拉开一层，
      左侧补一条分隔线界定边界（此前它是常驻右栏，与列表同底、无边界感，
-     整窗看起来就是"一大片空"） */
+     整窗看起来就是"一大片空"）。
+     桌面态刻意**不用**玻璃：它在这里是网格的第二列，背后是静态窗口底色 ——
+     毛玻璃在纯静态底上既看不出效果、又要为大面积区域付逐帧模糊的开销。
+     玻璃只加在 ≤640px 的浮层态（见文件末尾），那里它才真的压在内容之上。 */
   background: var(--surface);
   border-left: 1px solid var(--divider);
 }
@@ -377,6 +468,35 @@ const leadText = computed(() => {
   overflow-wrap: anywhere;
 }
 
+/* ---- PDF 内嵌阅读器 ----
+   正文区是 flex:1 + min-height:0 的列容器，iframe 必须显式吃掉剩余高度：
+   iframe 的默认高度是 150px 内联盒，不写 flex 就会被压成一条缝。
+   浏览器内建 UI（工具条/页面底）由阅读器自己画，配色跟随系统而非本应用主题，属预期。 */
+.pdf-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pdf {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: none;
+  background: var(--surface-2);
+}
+
+.pdf-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--divider);
+}
+
 /* ---- 手机端「返回列表」钮 ----
    桌面预览是常驻右栏，没有"退出"概念，故此钮默认不渲染；仅 ≤640px
    （预览被 FilesView 切成全屏浮层）时显形，作为收起浮层的显式入口。 */
@@ -408,6 +528,14 @@ const leadText = computed(() => {
   .head {
     min-height: 52px;
     padding: 6px 10px;
+  }
+
+  /* ≤640px 时本面板被 FilesView 切成全屏浮层（position:absolute; inset:0），
+     这时它压在文件列表之上 —— 玻璃在这里才真的有东西可糊。
+     底色与模糊都写在本组件里（FilesView 那份已交出 background，避免两处各写一遍）。 */
+  .cp-preview {
+    background: var(--glass-view);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   }
 }
 

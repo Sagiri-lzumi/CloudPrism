@@ -58,17 +58,20 @@ const emit = defineEmits<{click: [e: MouseEvent]}>()
   border-radius: var(--radius-ctrl);
   cursor: default; /* 桌面应用语义：不用手型 */
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
-    transform var(--dur-fast) var(--ease);
+    transform var(--dur-fast) var(--ease-spring);
 }
 
+/* hover 抬 1px、按压缩到 .94：位移/缩放都不参与排版，工具行不会因为
+   指针扫过而重排。过冲曲线压在 --dur-fast 内，是「一弹即止」而不是慢晃。 */
 .cp-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--text) 7%, transparent);
+  transform: translateY(-1px);
 }
 
-/* 按压：底色加深 + 轻微内缩，给出"按下去了"的触感 */
+/* 按压：底色加深 + 内缩，给出"按下去了"的触感 */
 .cp-btn:active:not(:disabled) {
   background: color-mix(in srgb, var(--text) 12%, transparent);
-  transform: scale(.96);
+  transform: translateY(0) scale(.94);
 }
 
 .cp-btn:disabled {

@@ -155,10 +155,12 @@ a:hover,
     opacity: 0;
 }
 
-/* 页面切换：opacity + 轻微上移（位移量克制，避免"整页弹跳"的廉价感） */
+/* 页面切换：opacity + 轻微上移 + 落定时的一点回弹。
+   位移量刻意克制（10px），过冲用 softer 档 —— 整页大幅过冲会晃眼，
+   这里只要「到达时不是硬刹车」那一点弹性。 */
 .page-enter-active {
     transition: opacity var(--dur) var(--ease-emphasized),
-        transform var(--dur) var(--ease-emphasized);
+        transform var(--dur-spring) var(--ease-spring-soft);
 }
 
 .page-leave-active {
@@ -167,17 +169,21 @@ a:hover,
 
 .page-enter-from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(10px);
 }
 
 .page-leave-to {
     opacity: 0;
 }
 
-/* 弹出层入场（菜单/对话框）：淡入 + 轻微放大，缓动带一点"落定"感 */
+/* 弹出层入场（菜单/对话框）：淡入 + 过冲弹入，缓动带一点"落定"感。
+   transform 单独走 --dur-spring：过冲曲线需要足够的时长才看得见过冲，
+   压在 130ms 里只会像抖了一下。
+   注：RoundMenu 的定位用 offsetWidth/offsetHeight（布局尺寸）测量，
+   不受入场 scale 影响，故放大幅度是安全的。 */
 .pop-enter-active {
     transition: opacity var(--dur-fast) var(--ease-emphasized),
-        transform var(--dur-fast) var(--ease-emphasized);
+        transform var(--dur-spring) var(--ease-spring);
 }
 
 .pop-leave-active {
@@ -186,7 +192,7 @@ a:hover,
 
 .pop-enter-from {
     opacity: 0;
-    transform: scale(.965) translateY(-3px);
+    transform: scale(.92) translateY(-6px);
 }
 
 .pop-leave-to {

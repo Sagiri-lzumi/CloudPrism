@@ -168,10 +168,15 @@ const menuStyle = computed(() => ({left: pos.value.left + 'px', top: pos.value.t
   z-index: var(--z-menu);
   min-width: 140px;
   padding: 4px;
-  background: var(--surface);
+  /* view 档玻璃：菜单压在文件网格/列表之上，毛玻璃在这里最直观。
+     菜单是 Teleport 到 body 的，backdrop-filter 建的 containing block 不会劫持定位。
+     inset 高光发丝线补在阴影之前：浅色主题下 --stroke-card 是透明的，
+     没有这条线，玻璃菜单的顶边就"缺一口气"。 */
+  background: var(--glass-view);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-card); /* 与卡片/弹层圆角口径一致 */
-  box-shadow: var(--shadow-pop);
+  box-shadow: var(--shadow-pop), inset 0 1px 0 var(--glass-edge);
 }
 
 .item {
@@ -188,15 +193,18 @@ const menuStyle = computed(() => ({left: pos.value.left + 'px', top: pos.value.t
   border: none;
   border-radius: var(--radius-ctrl); /* 与菜单容器/控件的圆角口径一致（原为一次性 4px） */
   text-align: left;
-  transition: background var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease-spring);
 }
 
 .item:hover:not(:disabled) {
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
+/* 按压：只缩不缩进 —— 条目撑满菜单内宽，任何横向位移都会被菜单的
+   overflow/圆角边界切掉一角。 */
 .item:active:not(:disabled) {
   background: color-mix(in srgb, var(--text) 12%, transparent);
+  transform: scale(.985);
 }
 
 .item.danger {

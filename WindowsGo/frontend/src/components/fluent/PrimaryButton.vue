@@ -54,18 +54,20 @@ const emit = defineEmits<{click: [e: MouseEvent]}>()
   border: none;
   border-radius: var(--radius-ctrl);
   cursor: default;
-  transition: filter var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+  transition: filter var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease-spring);
 }
 
 /* hover/active 用 filter 提亮/压暗：纯色底沿用这套方案（渐变时代的遗产），
-   好处是与 background 色值解耦，主题换色无需同步改这里 */
+   好处是与 background 色值解耦，主题换色无需同步改这里。
+   位移/缩放只走 transform，不参与排版。 */
 .cp-btn-primary:hover:not(:disabled) {
   filter: brightness(1.07);
+  transform: translateY(-1px);
 }
 
 .cp-btn-primary:active:not(:disabled) {
   filter: brightness(.94);
-  transform: scale(.96);
+  transform: translateY(0) scale(.94);
 }
 
 .cp-btn-primary:disabled {

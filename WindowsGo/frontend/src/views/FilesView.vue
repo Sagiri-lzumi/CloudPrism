@@ -1237,7 +1237,10 @@ function confirmDlg(payload: string | boolean) {
     position: absolute;
     inset: 0;
     z-index: var(--z-sheet);
-    background: var(--surface);
+    /* 底色不在这里给：浮层态的底色与毛玻璃由 PreviewPanel 自己管
+       （`.cp-preview` 的 ≤640px 分支）。此处若也写一份 background，
+       scoped 特异性更高、会静默压掉那一份，玻璃就永远不生效 —— 而
+       "两处各写一遍、其中一处永远赢" 正是本仓库反复踩到的那类事故。 */
   }
 
   /* 触摸目标放大：行 36→48px，行尾钮 24→40px */

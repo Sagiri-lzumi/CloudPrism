@@ -55,7 +55,12 @@ withDefaults(
   flex: none;
   min-height: 56px;
   padding: 0 14px;
-  background: var(--bg-page);
+  /* 页头是内容区最上一条：底色从「与页面同底」换成 chrome 档玻璃，
+     压的是静态窗口底色（内容在下方独立滚动区里，不会钻到它底下），
+     inset 高光把窗口顶边衬出来，否则玻璃面看起来就是块贴在顶上的灰板。 */
+  background: var(--glass-chrome);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: inset 0 1px 0 var(--glass-edge);
   border-bottom: 1px solid var(--divider);
 }
 

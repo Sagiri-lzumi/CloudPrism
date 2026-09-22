@@ -229,7 +229,12 @@ async function onDrop(e: DragEvent) {
         >
           <Icon :name="n.icon" :size="17" class="nav-ic" />
           <span class="nav-label lbl">{{ n.title }}</span>
-          <span v-if="badgeOf(n.page)" class="nav-badge">{{ badgeOf(n.page) }}</span>
+          <!-- :key 绑角标数值：数值一变就换一个新节点，badge-pop 动画随之重播
+               （否则同一个节点上只改文字，CSS 动画不会重新触发）。
+               帧循环每 100ms 重渲染一次，但 key 不变 ⇒ 不会无谓重播。 -->
+          <span v-if="badgeOf(n.page)" :key="badgeOf(n.page)" class="nav-badge">
+            {{ badgeOf(n.page) }}
+          </span>
         </button>
 
         <!-- 目录树：文件页的上下文，与导航用分区标题隔开 -->
@@ -337,8 +342,8 @@ async function onDrop(e: DragEvent) {
   width: var(--nav-w, 192px);
   min-width: var(--nav-w, 192px);
   padding: 0;
-  background: var(--nav-bg);
-  backdrop-filter: blur(16px) saturate(1.5);
+  background: var(--glass-chrome);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   border-right: 1px solid var(--divider);
   box-sizing: border-box;
   overflow: hidden;
@@ -388,12 +393,17 @@ async function onDrop(e: DragEvent) {
   background: transparent;
   border: none;
   border-radius: var(--radius-ctrl);
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease-spring);
 }
 
 .collapse-btn:hover {
   background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--text);
+}
+
+.collapse-btn:active {
+  transform: scale(.9);
 }
 
 /* ---- 导航主体（可滚动：目录树长起来时导航项不被顶出视野） ---- */
@@ -434,11 +444,18 @@ async function onDrop(e: DragEvent) {
   /* 选中态是「整块圆角面」而不是细指示条：与苹果风侧栏一致 */
   border-radius: var(--radius-ctrl);
   text-align: left;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease-spring);
 }
 
 .nav-item:hover:not(.on) {
   background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+/* 按压弹性：只做**收缩**不做位移 —— .nav-body 是 overflow-x:hidden 的容器，
+   横向位移会把条目右端（角标/文字）直接裁掉。收缩缩的是自身盒内，永不越界。 */
+.nav-item:active {
+  transform: scale(.97);
 }
 
 .nav-item.on {
@@ -450,10 +467,29 @@ async function onDrop(e: DragEvent) {
 .nav-ic {
   flex: none;
   color: var(--text2);
+  transition: transform var(--dur-fast) var(--ease-spring);
+}
+
+/* hover 时图标向内侧轻推 1px：给「这一项要被点了」一点预告。
+   推图标而不是推整行 —— 17px 的图标离条目边框很远，怎么挪都不会碰到裁剪边界。 */
+.nav-item:hover:not(.on) .nav-ic {
+  transform: translateX(1px);
 }
 
 .nav-item.on .nav-ic {
   color: var(--accent);
+  /* 切页时图标弹一下：.on 是切页时新加上的类，动画随之重播。
+     这是「Q 弹」在导航上最省的一次投放 —— 不改布局尺寸，只动图标。 */
+  animation: nav-ic-pop var(--dur-spring) var(--ease-spring);
+}
+
+@keyframes nav-ic-pop {
+  0% {
+    transform: scale(.72);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .nav-label {
@@ -478,6 +514,17 @@ async function onDrop(e: DragEvent) {
   border-radius: var(--radius-round);
   text-align: center;
   font-variant-numeric: tabular-nums;
+  /* 计数变化时弹一下（触发条件见模板里 :key 的注释） */
+  animation: badge-pop var(--dur-spring) var(--ease-spring);
+}
+
+@keyframes badge-pop {
+  0% {
+    transform: scale(.4);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 /* ---- 目录树宿主 ----
@@ -514,12 +561,17 @@ async function onDrop(e: DragEvent) {
   background: transparent;
   border: none;
   border-radius: var(--radius-ctrl);
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease-spring);
 }
 
 .foot-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--text) 7%, transparent);
   color: var(--text);
+}
+
+.foot-btn:active:not(:disabled) {
+  transform: scale(.95);
 }
 
 .foot-btn:disabled {
@@ -586,16 +638,11 @@ async function onDrop(e: DragEvent) {
   width: 100%;
 }
 
-/* ============================================================ 页面过渡 */
-.page-enter-active,
-.page-leave-active {
-  transition: opacity var(--dur) var(--ease);
-}
-
-.page-enter-from,
-.page-leave-to {
-  opacity: 0;
-}
+/* ============================================================ 页面过渡
+   .page-* 过渡基元定义在 styles/base.css（全局单一真源），此处**不要**再写一份。
+   这里曾有一份 scoped 版本，而 scoped 选择器带 [data-v-*]、特异性高于全局同名类
+   ⇒ 它一直压着 base.css 那份生效，导致「页面切换位移」这段设计其实从未被渲染过
+   （只淡入、不位移）。删掉重复实现后 base.css 才真正接管。 */
 
 .page-fill {
   height: 100%;
@@ -615,10 +662,13 @@ async function onDrop(e: DragEvent) {
   pointer-events: none;
   /* 提示级暗罩：比模态遮罩轻，且不随主题变化（见 theme.css 的 --scrim-hint） */
   background: var(--scrim-hint);
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(6px);
   animation: veil-in var(--dur-fast) var(--ease);
 }
 
+/* 拖放卡：压在整屏内容之上的浮层 → 用 view 档玻璃（此处是毛玻璃最该看得见的地方之一）。
+   过冲入场：卡片从 .9 冲到略大再落定，配合「松开即加密上传」这句提示，
+   手感上比单纯淡入更像「有个东西接住了文件」。 */
 .drop-card {
   display: flex;
   flex-direction: column;
@@ -628,10 +678,12 @@ async function onDrop(e: DragEvent) {
   padding: 24px 32px;
   border: 2px dashed var(--accent);
   border-radius: var(--radius-card);
-  background: var(--surface);
-  box-shadow: var(--shadow-pop);
+  background: var(--glass-view);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: var(--shadow-pop), inset 0 1px 0 var(--glass-edge);
   color: var(--accent);
   text-align: center;
+  animation: drop-pop var(--dur-spring) var(--ease-spring);
 }
 
 .drop-title {
@@ -662,6 +714,17 @@ async function onDrop(e: DragEvent) {
 @keyframes veil-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@keyframes drop-pop {
+  0% {
+    opacity: 0;
+    transform: scale(.9);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @keyframes veil-spin {
