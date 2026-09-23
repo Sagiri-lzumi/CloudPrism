@@ -99,21 +99,6 @@ CloudPrism/
 └── README.md
 ```
 
-## 文档
-
-| 文件 | 内容 |
-|---|---|
-| `WindowsGo/docs/ARCHITECTURE.md` | 分层原则、目录职责、构建与验证 |
-| `WindowsGo/docs/manual_smoke.md` | 手工冒烟清单 |
-| `WindowsGo/docs/self_test_guide.md` | 自测指南 |
-| `WindowsGo/docs/baidu_guide.md` | 百度网盘开放平台接入步骤 |
-| `WindowsGo/interop/README.md` | 密文格式的冻结黄金向量 |
-
-## 已知限制
-
-- exe 没有图标与版本元数据（纯 `go build` 不生成资源段）
-- 「检查更新」引擎已实现，界面暂无入口
-- 传输速度与缓存占用指标当前不上屏
 
 ## 许可证
 
