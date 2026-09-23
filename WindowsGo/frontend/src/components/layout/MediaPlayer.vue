@@ -379,14 +379,21 @@ onBeforeUnmount(() => {
   }
 }
 
+/* v1.01 真玻璃压在「会动的视频」上 —— 全应用唯一一个 backdrop-filter 跟着
+   逐帧内容跑的面（单实例，代价可控）。刻意用恒定深色玻璃而非 --glass-view：
+   视频明暗不定，light 档白玻璃 / dark 档深玻璃会随主题翻转控件极性；
+   媒体控件按业界惯例（QuickTime/YouTube）恒为深底白字 —— 与 .big-play 的
+   --scrim-media 恒黑罩同一口径（见 theme.css 的注释）。
+   .bar 内的文字/hover/轨道随之改恒定白系（token 纪律豁免同 .big-play）。 */
 .bar {
   display: flex;
   align-items: center;
   gap: 8px;
   height: 40px;
   padding: 0 12px;
-  background: var(--surface);
-  border-top: 1px solid var(--divider);
+  background: var(--scrim-media);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border-top: 1px solid rgba(255, 255, 255, .12);
   user-select: none;
 }
 
@@ -397,31 +404,31 @@ onBeforeUnmount(() => {
   flex: none;
   width: 28px;
   height: 28px;
-  color: var(--text);
+  color: rgba(255, 255, 255, .92);
   background: transparent;
   border: none;
   border-radius: var(--radius-ctrl);
 }
 
 .ctl:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  background: rgba(255, 255, 255, .16);
 }
 
 .time {
   flex: none;
   min-width: 44px;
   font-size: 0.786rem;
-  color: var(--text);
+  color: rgba(255, 255, 255, .85);
   font-variant-numeric: tabular-nums;
 }
 
 .time.dim {
-  color: var(--text2);
+  color: rgba(255, 255, 255, .55);
 }
 
 .seek,
 .vol {
-  --track: color-mix(in srgb, var(--text) 20%, transparent);
+  --track: color-mix(in srgb, #fff 30%, transparent);
   appearance: none;
   height: 4px;
   border-radius: var(--radius-round);
@@ -446,7 +453,8 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: var(--accent);
   border: none;
-  box-shadow: 0 0 0 2px var(--surface);
+  /* 深色玻璃条上的滑块描圈：恒白（同 .big-play 的豁免口径，不随主题） */
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, .85);
 }
 
 .seek:disabled {

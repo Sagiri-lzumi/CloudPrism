@@ -143,73 +143,78 @@ const dlg = reactive({open: false})
       </template>
     </PageHeader>
 
-    <!-- 续传横幅：锁库/退出遗留任务提示 -->
-    <Transition name="fade">
-      <div v-if="connected && (ui.snap?.resumeCount ?? 0) > 0" class="resume-banner">
-        <Icon name="history" :size="16" />
-        <span class="rb-text">
-          上次退出时有 {{ ui.snap!.resumeCount }} 个任务未完成，可立即恢复
-        </span>
-        <PrimaryButton icon="update" :disabled="busy" @click="resumePending">
-          恢复上传
-        </PrimaryButton>
-      </div>
-    </Transition>
-
-    <!-- 任务列表 -->
-    <div v-if="tasks.length" class="list">
-      <div
-        v-for="t in tasks"
-        :key="t.id"
-        class="t-row"
-        :class="'st-' + t.state"
-      >
-        <Icon
-          :name="t.direction === 'download' ? 'download' : 'send'"
-          :size="18"
-          class="dir-ic"
-          :class="t.direction"
-          :title="t.direction === 'download' ? '下载' : '上传'"
-        />
-        <div class="t-body">
-          <div class="t-line1">
-            <span class="t-name" :title="t.name">{{ t.name }}</span>
-            <span class="t-meta">
-              {{ fmtSize(t.doneBytes) }} / {{ fmtSize(t.totalBytes) }}
-            </span>
-          </div>
-          <div class="t-line2">
-            <ProgressBar
-              :value="t.state === 'done' ? 100 : fmtPct(t.progress)"
-              :indeterminate="t.state === 'running' && t.totalBytes <= 0"
-              :color="t.state === 'done' ? 'ok' : t.state === 'failed' ? 'err' : 'accent'"
-            />
-            <span v-if="t.state === 'running'" class="t-pct">{{ fmtPct(t.progress) }}%</span>
-          </div>
-          <div v-if="t.state === 'failed' && t.errorMsg" class="t-err" :title="t.errorMsg">
-            {{ t.errorMsg }}
-          </div>
+    <!-- v1.01：单一滚动区从 y=0 起，内容从浮层页头底下穿过（macOS 语义：
+         页头之下皆内容，续传横幅随内容滚走）。 -->
+    <div class="t-scroll">
+      <!-- 续传横幅：锁库/退出遗留任务提示 -->
+      <Transition name="fade">
+        <div v-if="connected && (ui.snap?.resumeCount ?? 0) > 0" class="resume-banner">
+          <Icon name="history" :size="16" />
+          <span class="rb-text">
+            上次退出时有 {{ ui.snap!.resumeCount }} 个任务未完成，可立即恢复
+          </span>
+          <PrimaryButton icon="update" :disabled="busy" @click="resumePending">
+            恢复上传
+          </PrimaryButton>
         </div>
-        <div class="t-right">
-          <span class="chip" :class="chip(t.state).cls">{{ chip(t.state).text }}</span>
-          <Button
-            v-if="t.state === 'failed' || t.state === 'cancelled'"
-            iconOnly
-            icon="update"
-            title="重试"
-            @click="retryOne(t.id)"
+      </Transition>
+
+      <!-- 任务列表：行键 = t.id —— 10Hz 帧只整组替换同键数组（patch 不重建），
+           只有真实的任务增删才进出动画，帧循环不会让它反复重播。 -->
+      <TransitionGroup v-if="tasks.length" tag="div" class="list" name="task">
+        <div
+          v-for="t in tasks"
+          :key="t.id"
+          class="t-row"
+          :class="'st-' + t.state"
+        >
+          <Icon
+            :name="t.direction === 'download' ? 'download' : 'send'"
+            :size="18"
+            class="dir-ic"
+            :class="t.direction"
+            :title="t.direction === 'download' ? '下载' : '上传'"
           />
+          <div class="t-body">
+            <div class="t-line1">
+              <span class="t-name" :title="t.name">{{ t.name }}</span>
+              <span class="t-meta">
+                {{ fmtSize(t.doneBytes) }} / {{ fmtSize(t.totalBytes) }}
+              </span>
+            </div>
+            <div class="t-line2">
+              <ProgressBar
+                :value="t.state === 'done' ? 100 : fmtPct(t.progress)"
+                :indeterminate="t.state === 'running' && t.totalBytes <= 0"
+                :color="t.state === 'done' ? 'ok' : t.state === 'failed' ? 'err' : 'accent'"
+              />
+              <span v-if="t.state === 'running'" class="t-pct">{{ fmtPct(t.progress) }}%</span>
+            </div>
+            <div v-if="t.state === 'failed' && t.errorMsg" class="t-err" :title="t.errorMsg">
+              {{ t.errorMsg }}
+            </div>
+          </div>
+          <div class="t-right">
+            <span class="chip" :class="chip(t.state).cls">{{ chip(t.state).text }}</span>
+            <Button
+              v-if="t.state === 'failed' || t.state === 'cancelled'"
+              iconOnly
+              icon="update"
+              title="重试"
+              @click="retryOne(t.id)"
+            />
+          </div>
         </div>
-      </div>
-    </div>
+      </TransitionGroup>
 
-    <!-- 空态 -->
-    <div v-else class="empty-state">
-      <span class="plate"><Icon name="sync" :size="32" /></span>
-      <p class="lead">暂无任务</p>
-      <p class="sub">上传/下载任务会显示在这里，可重试失败项或在结束后清空列表。</p>
-      <Button v-if="connected" icon="send" @click="pickUpload">上传文件…</Button>
-      <Button v-else icon="certificate" @click="navigate('vaults')">前往连接</Button>
+      <!-- 空态 -->
+      <div v-else class="empty-state">
+        <span class="plate"><Icon name="sync" :size="32" /></span>
+        <p class="lead">暂无任务</p>
+        <p class="sub">上传/下载任务会显示在这里，可重试失败项或在结束后清空列表。</p>
+        <Button v-if="connected" icon="send" @click="pickUpload">上传文件…</Button>
+        <Button v-else icon="certificate" @click="navigate('vaults')">前往连接</Button>
+      </div>
     </div>
 
     <!-- 清空确认 -->
@@ -232,28 +237,33 @@ const dlg = reactive({open: false})
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  /* 浮层页头的定位上下文（PageHeader 绝对定位在本视图顶缘） */
+  position: relative;
 }
 
 /* 工具行与内容区大标题已在 v1.3 收敛为顶部的统一页头（PageHeader 组件），
    本页不再需要工具栏 / 页头的样式覆盖。 */
 
-/* 空态：铺满页头以下的剩余高度。.empty-state 是全局类，其 height:100% 在
-   flex 列里会按父容器全高计算含 56px 页头，从而顶出一根多余的滚动条。 */
-.t-view > .empty-state {
+/* v1.01：页头之下皆内容 —— 横幅/列表/空态收进同一滚动区（从 y=0 起、
+   padding-top 让位浮层页头）。此前 .t-view > .empty-state 覆写是为抵消
+   flex 列里 height:100% 连 56px 页头一起算出的多余滚动条；空态挪进
+   确定高度的滚动器后全局 .empty-state 自然成立，覆写随之删除。 */
+.t-scroll {
   flex: 1;
-  height: auto;
   min-height: 0;
+  overflow-y: auto;
+  padding: calc(var(--page-head-h) + 12px) 16px 16px;
 }
 
-/* 续传横幅 */
+/* 续传横幅（外距的「顶/左/右」移交滚动区 padding，只留下与列表的间距） */
 .resume-banner {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 12px 16px 0;
+  margin: 0 0 12px;
   padding: 10px 14px;
   color: var(--text);
-  background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+  background: color-mix(in srgb, var(--warn) 12%, var(--glass-card));
   border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
   border-radius: var(--radius-card);
 }
@@ -263,12 +273,10 @@ const dlg = reactive({open: false})
   font-size: 0.857rem;
 }
 
-/* 任务列表滚动区（顶部留白与续传横幅一致，页头分隔线下不贴边） */
+/* 任务列表：纯布局（滚动职责已移交 .t-scroll）。position:relative 是
+   离场行绝对定位（.task-leave-active）的包含块。 */
 .list {
-  flex: 1;
-  min-height: 0;
-  margin: 12px 16px 16px;
-  overflow-y: auto;
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -279,11 +287,39 @@ const dlg = reactive({open: false})
   align-items: flex-start;
   gap: 12px;
   padding: 12px 14px;
-  background: var(--surface);
+  background: var(--glass-card);
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
   transition: border-color var(--dur-fast) var(--ease);
+}
+
+/* 任务行组过渡：进入滑入 / 离场淡出（绝对定位脱离流，让 move 的 FLIP
+   接管余行上移）、余行补位平滑。规则必须排在 .t-row 之后 —— 同特异度
+   靠源序在进场期间压掉基础 border-color transition，进场结束类摘除后
+   基础过渡恢复。 */
+.task-enter-active {
+  transition: opacity var(--dur) var(--ease),
+    transform var(--dur-spring) var(--ease-spring-soft);
+}
+
+.task-enter-from {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+.task-leave-active {
+  position: absolute;
+  width: 100%;
+  transition: opacity calc(var(--dur) / 2) var(--ease);
+}
+
+.task-leave-to {
+  opacity: 0;
+}
+
+.task-move {
+  transition: transform var(--dur) var(--ease-spring-soft);
 }
 
 .t-row.st-failed {

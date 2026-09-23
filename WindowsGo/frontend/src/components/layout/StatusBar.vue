@@ -69,12 +69,15 @@ const connecting = computed(() => ui.opBusy && !connected.value)
   user-select: none;
 }
 
-/* 连接态：小圆点 + 简短文字（无密库名/后端/时长等实时详情） */
+/* 连接态：小圆点 + 简短文字（无密库名/后端/时长等实时详情）。
+   v1.01：状态切换（on/busy/off）加过渡 —— 圆点变色/光晕从瞬跳变成渐变，
+   与 busy 的呼吸动画共存（transition 管换挡、animation 管呼吸）。 */
 .state {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  transition: color var(--dur) var(--ease);
 }
 
 .state .dot {
@@ -84,6 +87,8 @@ const connecting = computed(() => ui.opBusy && !connected.value)
   border-radius: 50%;
   background: var(--text2);
   opacity: 0.5;
+  transition: background-color var(--dur) var(--ease),
+    opacity var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 
 .state.on {

@@ -245,24 +245,42 @@ const multiMode = computed(() => ui.multi.length > 1)
   width: 100%;
   padding: 0;
   margin: 0;
-  border: 1px solid transparent;
+  /* v1.01：半透玻璃卡面（--glass-card，无 backdrop-filter —— 逐卡模糊的滚动
+     代价不可接受，环境光透过微微上色即是玻璃片观感）；描边随主题走
+     stroke-card（浅色透明靠明度差、深色极淡白兜底）。 */
+  border: 1px solid var(--stroke-card);
+  background: var(--glass-card);
   border-radius: var(--radius-card);
   cursor: default;
   user-select: none;
   overflow: hidden; /* 圆角裁剪内部面 */
+  /* 入场：v-for 换键（换目录/上传新增）重建即触发。动画挂在常驻类自身 ——
+     不挂 *-enter-active：本类已带 130ms 的基础 transition，Vue 的过渡时长
+     判定会把 enter 类上更长的动画在 130ms 处截断（ModalShell.vue 顶部注释
+     实测过的失效路径）。10Hz 帧只整组替换同键数组 ⇒ patch 不重建 ⇒ 不重播。 */
+  animation: card-in var(--dur-spring) var(--ease-spring);
+  /* 错峰淡入（--i 由 FilesView 的 v-for 注入）：delay 全部由 --dur 运算，
+     reduced-motion 把 token 压到 1ms 时错峰归零。 */
+  animation-delay: min(calc(var(--i, 0) * var(--dur) * .1), calc(var(--dur) * .8));
   transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
     box-shadow var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease-spring);
 }
 
-/* hover：抬 2px + 微放大 + 浮起阴影，过冲曲线让它"弹"起来一下。
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(10px) scale(.96); }
+  to { opacity: 1; transform: none; }
+}
+
+/* hover：抬 3px + 微放大 + 浮起阴影，过冲曲线让它"弹"起来一下。
    位移/缩放全在 transform 上，不参与排版 —— 所以「网格整体抖一下」并不会发生，
    动的是这一张卡自己（早前版本曾因为担心抖动而完全不做位移，那是把
    「transform 不重排」和「改变尺寸」混为一谈了）。
-   z-index 抬到 --z-raise：否则抬升后会被后序兄弟盖住半张。 */
+   z-index 抬到 --z-raise：否则抬升后会被后序兄弟盖住半张。
+   v1.01 幅度加深一档（-2px/1.012 → -3px/1.015，hover 底色混在玻璃卡面上）。 */
 .gc:hover {
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  background: color-mix(in srgb, var(--text) 6%, var(--glass-card));
   box-shadow: var(--shadow-card);
-  transform: translateY(-2px) scale(1.012);
+  transform: translateY(-3px) scale(1.015);
   z-index: var(--z-raise);
 }
 

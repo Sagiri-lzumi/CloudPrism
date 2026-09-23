@@ -586,6 +586,23 @@ watch(step, async () => {
   min-height: 300px;
 }
 
+/* 单选卡列 + 表单列：换步入场动画挂在两个步容器自身的常驻类上 ——
+   v-if 换步整棵重建、重建即触发（ModalShell 同款路数）。
+   刻意不用 <Transition mode="out-in">：out-in 会把新步挂载推迟到旧步
+   离场之后，而本组件 watch(step) 在 nextTick 聚焦新步首项 —— 那一刻
+   新步还不在 DOM，焦点会落在正在离场的旧步上、随即被销毁掉回 body
+   （ModalShell 头注释实测过的失效路径）；且离场窗口期旧步仍持有焦点，
+   连按 Enter 会跳两步。同步重建 + 自身动画两端都不破。 */
+.radio-col,
+.form-col {
+  animation: wiz-step var(--dur) var(--ease-emphasized);
+}
+
+@keyframes wiz-step {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
 /* 单选卡列 */
 .radio-col {
   display: flex;
@@ -601,7 +618,9 @@ watch(step, async () => {
   padding: 13px 14px;
   text-align: left;
   color: var(--text);
-  background: var(--bg-page);
+  /* v1.01：半透玻璃卡面（向导浮在 ModalShell 玻璃面板上，半透卡与玻璃
+     基座同族；.mini-radio 那类小凹面井保持 --bg-page 不变） */
+  background: var(--glass-card);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-card);
   cursor: pointer;
@@ -609,7 +628,7 @@ watch(step, async () => {
 }
 
 .radio-card:hover {
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-page));
+  background: color-mix(in srgb, var(--accent) 6%, var(--glass-card));
 }
 
 .radio-card.on {

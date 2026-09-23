@@ -1,6 +1,6 @@
 <!--
   Card.vue —— 内容卡片容器（qfw CardWidget 对应物）。
-  视觉：surface 底、radius 8、细描边 + 轻阴影；
+  视觉：v1.01 起半透玻璃卡面（--glass-card，无模糊）、radius-card、细描边 + 轻阴影；
   clickable 模式提供 hover 提亮与 :active 按压反馈，供密库卡片等使用。
 -->
 <script setup lang="ts">
@@ -29,7 +29,7 @@ const emit = defineEmits<{click: []}>()
 
 <style scoped>
 .cp-card {
-  background: var(--surface);
+  background: var(--glass-card);
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
@@ -49,13 +49,15 @@ const emit = defineEmits<{click: []}>()
 }
 
 /* 苹果风 hover：只提亮底色，不抬升阴影（分层靠明度差，
-   原硬编码悬停阴影已随 token 化移除） */
+   原硬编码悬停阴影已随 token 化移除）。
+   v1.01：hover/按压混在半透玻璃卡面上（不透明 surface-* 会把玻璃感
+   在 hover 瞬间整个抹掉）。 */
 .clickable:hover {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--text) 5%, var(--glass-card));
 }
 
 .clickable:active {
-  background: var(--surface-pressed);
+  background: color-mix(in srgb, var(--text) 10%, var(--glass-card));
   transform: scale(0.99);
 }
 </style>

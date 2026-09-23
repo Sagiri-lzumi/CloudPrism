@@ -285,12 +285,20 @@ function confirm() {
   min-width: 0;
 }
 
-/* 新建文件夹行 */
+/* 新建文件夹行：v1.01 加就地展开的入场（v-if 新建即触发 —— 元素自身
+   keyframe，与 ModalShell 同路数；LineEdit 的 autofocus 不受动画影响。
+   Esc 只收这一行的语义在 keydown 上，与动画无关）。 */
 .lp-mkdir {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+  animation: mkdir-in var(--dur) var(--ease-emphasized);
+}
+
+@keyframes mkdir-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
 }
 
 .lp-mkdir-ic {

@@ -342,6 +342,14 @@ async function onDrop(e: DragEvent) {
   width: var(--nav-w, 192px);
   min-width: var(--nav-w, 192px);
   padding: 0;
+  /* v1.01 折叠/展开动画化：只过渡列宽（custom property 换值触发的是
+     computed width 变化，transition 拿得到）。子元素规则零改动 ——
+     .lbl 在折叠态 display:none（瞬时消失，无文字可裁），图标恒居中于
+     ≥56px 的行内、角标 15px，均不越界（此前担心的裁切只发生在
+     「位移子元素」，宽度过渡不移动子元素）。网格 auto 列随宽逐帧重排，
+     一次性 200ms 可接受。≤640px 下 width:auto 不可插值，过渡自动失效为
+     no-op，底部 TabBar 不受影响。 */
+  transition: width var(--dur) var(--ease), min-width var(--dur) var(--ease);
   background: var(--glass-chrome);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   border-right: 1px solid var(--divider);

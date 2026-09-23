@@ -635,29 +635,42 @@ function confirmDlg(payload: string | boolean) {
               <p class="sub">点上方「上传」或直接拖入文件以开始</p>
             </div>
 
-            <!-- 网格：上传占位在前（用户刚点完上传，眼睛就在列表顶部找它） -->
-            <div v-else-if="ui.viewMode === 'grid'" class="grid">
-              <GridCard
-                v-for="p in uploadCards"
-                :key="'up-' + p.key"
-                :entry="uploadEntry(p)"
-                :upload="ringFor(p)"
-              />
-              <GridCard
-                v-for="e in entries"
-                :key="e.remote"
-                :entry="e"
-                @select="onItemClick"
-                @open="enterDir"
-                @ctx="onCardCtx"
-              />
-            </div>
+            <!-- 网格/列表：v1.01 起容器间淡切（out-in）。条目自身的入场动画挂在
+                 GridCard / .row 的常驻类上（v-for 换键重建即触发，与过渡类寿命
+                 无关 —— 挂 *-enter-active 会被 Vue 按根元素过渡时长截断）；
+                 --i 是错峰 delay 的序号变量。 -->
+            <Transition v-else name="swap" mode="out-in">
+              <!-- 网格：上传占位在前（用户刚点完上传，眼睛就在列表顶部找它） -->
+              <div v-if="ui.viewMode === 'grid'" key="grid" class="grid">
+                <GridCard
+                  v-for="(p, pi) in uploadCards"
+                  :key="'up-' + p.key"
+                  :entry="uploadEntry(p)"
+                  :upload="ringFor(p)"
+                  :style="{'--i': pi}"
+                />
+                <GridCard
+                  v-for="(e, i) in entries"
+                  :key="e.remote"
+                  :entry="e"
+                  :style="{'--i': i}"
+                  @select="onItemClick"
+                  @open="enterDir"
+                  @ctx="onCardCtx"
+                />
+              </div>
 
-            <!-- 列表：行式（目录行尾提供直达钮） -->
-            <div v-else class="list">
-              <!-- 上传占位行：不可点、无⋯（还没有远端对象可操作），
-                   只在大文件上显示圆环（阈值同网格）。 -->
-              <div v-for="p in uploadCards" :key="'up-' + p.key" class="row up" :title="p.name">
+              <!-- 列表：行式（目录行尾提供直达钮） -->
+              <div v-else key="list" class="list">
+                <!-- 上传占位行：不可点、无⋯（还没有远端对象可操作），
+                     只在大文件上显示圆环（阈值同网格）。 -->
+                <div
+                  v-for="(p, pi) in uploadCards"
+                  :key="'up-' + p.key"
+                  class="row up"
+                  :title="p.name"
+                  :style="{'--i': pi}"
+                >
                 <Icon :name="KIND_ICON[kindOf(p.name)]" :size="18" class="row-ic" />
                 <span class="row-name">{{ p.name }}</span>
                 <span class="row-size">{{ fmtSize(p.size) }}</span>
@@ -672,10 +685,11 @@ function confirmDlg(payload: string | boolean) {
               <!-- 行右键要 .stop：祖先 .zone 也挂 contextmenu（空白区菜单），
                    不阻止冒泡会被它覆盖成空白菜单（详见 GridCard.vue 顶部注释）。 -->
               <div
-                v-for="e in entries"
+                v-for="(e, i) in entries"
                 :key="e.remote"
                 class="row"
                 :class="{sel: isSel(e)}"
+                :style="{'--i': i}"
                 @click="onItemClick($event, e)"
                 @dblclick="e.isDir && enterDir(e)"
                 @contextmenu.prevent.stop="openCtx($event, e)"
@@ -712,7 +726,8 @@ function confirmDlg(payload: string | boolean) {
                   </button>
                 </span>
               </div>
-            </div>
+              </div>
+            </Transition>
           </div>
         </section>
 
@@ -771,6 +786,8 @@ function confirmDlg(payload: string | boolean) {
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* 浮层页头的定位上下文（PageHeader 绝对定位在本视图顶缘） */
+  position: relative;
 }
 
 /* 文件列表 + （可选）拖柄 + 预览检查器。
@@ -918,7 +935,9 @@ function confirmDlg(payload: string | boolean) {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: var(--bg-page);
+  /* v1.01 起不刷底色：环境光从窗口底（.app-shell 的 --aurora-*）透进内容区，
+     滚到页头底下的内容连同环境光一起被玻璃磨掉 —— 没有这层透明，
+     「内容从玻璃下滚过」只能磨到纯色，等于白做。 */
 }
 
 /* 拖柄（文件列表/预览）：column 2 */
@@ -934,6 +953,10 @@ function confirmDlg(payload: string | boolean) {
   grid-column: 3;
   min-height: 0;
   min-width: 0;
+  /* 检查器是面板列：整体从 y=0 起、自身 padding-top 让位 —— 它自己的信息头
+     落在浮层页头正下方，与既有视觉一致；≤640px 全屏浮层态（inset:0）同享
+     这一条（浮层 z 620 < 页头 700，页头保持可点，「进去出不来」守卫不破）。 */
+  padding-top: var(--page-head-h);
   /* v-if 挂载是瞬时的，给一个淡入避免"啪"一下出现。
      不做宽度/位移过渡：grid 列宽过渡在本机会抖，横向位移还可能引出滚动条。 */
   animation: insp-in var(--dur) var(--ease);
@@ -999,8 +1022,12 @@ function confirmDlg(payload: string | boolean) {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  /* 与页头的左右内边距对齐（14px），内容左缘和面包屑/标题在同一条竖线上 */
-  padding: 12px 14px;
+  /* 滚动区从 y=0 起（页头是浮层，不再占流）：首屏内容以 padding-top 让到页头
+     之下，滚动后内容从 56px 玻璃页头底下穿过 —— scroll-under 的全部机关只在
+     「让位 padding 写在滚动容器**内部**」这一条上（写在容器外只会把滚动区
+     整体推到页头之下，永远滚不进去）。
+     左右 14px 与页头内边距对齐，内容左缘和面包屑/标题在同一条竖线上。 */
+  padding: calc(var(--page-head-h) + 12px) 14px 12px;
 }
 
 .center {
@@ -1074,6 +1101,26 @@ function confirmDlg(payload: string | boolean) {
   padding: 0 10px;
   border-radius: var(--radius-ctrl);
   user-select: none;
+  /* v1.01：网格卡早有 hover/按压反馈，行此前是瞬跳 —— 补齐同一套语言
+     （背景淡入 + 按压缩放）。transform 不参与排版，定宽槽不受影响。 */
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease-spring);
+  /* 入场：v-for 换键（换目录/上传新增）重建即触发 —— 动画挂在元素自身常驻类
+     （ModalShell 教训：不挂 *-enter-active，免得被 Vue 的过渡时长判定截断）。
+     10Hz 帧只整组替换同键数组 ⇒ patch 不重建 ⇒ 不会反复重播。 */
+  animation: row-in var(--dur) var(--ease-emphasized);
+  /* 错峰淡入：delay 全部由 --dur 参与运算，reduced-motion 把 token 压到 1ms
+     时错峰随之归零（不允许出现不经 token 的时长/延迟）。 */
+  animation-delay: min(calc(var(--i, 0) * var(--dur) * .1), calc(var(--dur) * .8));
+}
+
+.row:active {
+  transform: scale(.99);
+}
+
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
 }
 
 .row:hover {
@@ -1168,11 +1215,18 @@ function confirmDlg(payload: string | boolean) {
   background: transparent;
   border: none;
   border-radius: var(--radius-ctrl);
+  /* v1.01：与 .more 同款过渡 + 按压反馈（此前「进入目录」钮状态瞬跳） */
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease-spring);
 }
 
 .open:hover {
   background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--accent);
+}
+
+.open:active {
+  transform: scale(.9);
 }
 
 /* 更多菜单（hover 才显式可见，右键始终可用） */

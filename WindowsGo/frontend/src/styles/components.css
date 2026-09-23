@@ -8,7 +8,9 @@
 
 /* ---- 设置卡骨架 ----
    美学约定（跨页面复用）：左侧图标块 + 标题/说明两行 + 右侧操作区。
-   卡片为实色面 + 柔描边（不用重阴影，避免设置页出现"层层浮起"的杂乱感），
+   v1.01 起卡面为半透玻璃底（--glass-card，无 backdrop-filter —— 成片卡面
+   逐个模糊的滚动代价不可接受，环境光透过微微上色即是玻璃片观感）+ 柔描边
+   （不用重阴影，避免设置页出现"层层浮起"的杂乱感），
    仅可点击卡在 hover 时浮一点点。 */
 .set-card {
   display: flex;
@@ -16,7 +18,7 @@
   gap: 12px;
   min-height: 62px;
   padding: 10px 16px;
-  background: var(--surface);
+  background: var(--glass-card);
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-card);
 }
@@ -28,7 +30,9 @@
 }
 
 .set-card.clickable:hover {
-  background: var(--surface-hover);
+  /* hover 混在玻璃卡面上加深一档（不用不透明 surface-hover —— 那会把
+     玻璃感在 hover 瞬间整个抹掉） */
+  background: color-mix(in srgb, var(--text) 5%, var(--glass-card));
   border-color: var(--stroke);
   box-shadow: var(--shadow-1);
 }

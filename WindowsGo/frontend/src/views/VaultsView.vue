@@ -682,12 +682,14 @@ async function onOtherConfirm(payload: string | boolean) {
 
 <style scoped>
 .v-view {
-  /* 列布局：统一页头（56px）固定在顶，未连接/已连接两种状态各自滚动——
+  /* 列布局：统一页头（56px）浮在顶，未连接/已连接两种状态各自滚动——
      此前本容器自己 overflow-y:auto，页头会跟着内容一起滚走。 */
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  /* 浮层页头的定位上下文（未连接态无页头，仅已连接态用到） */
+  position: relative;
 }
 
 /* ---------- 未连接：欢迎区 ---------- */
@@ -851,11 +853,12 @@ async function onOtherConfirm(payload: string | boolean) {
 
 /* ---------- 已连接：设置页同款单列卡片 ---------- */
 .v-conn {
-  /* 页头以下的滚动区：占满剩余高度（不再 height:100%，否则会被页头顶出滚动条） */
+  /* 滚动区从 y=0 起（页头是浮层，不再占流），padding-top 让位 ——
+    内容从玻璃页头底下穿过（scroll-under）；占满剩余高度。 */
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 18px 24px 28px;
+  padding: calc(var(--page-head-h) + 18px) 24px 28px;
 }
 
 /* 单列内容列宽：与设置页统一为 860px（此前本页 760 / 设置页 860，切换页面时
@@ -868,14 +871,15 @@ async function onOtherConfirm(payload: string | boolean) {
   gap: 8px;
 }
 
-/* 概览卡：图标 + 名称/后端（动作已按骨架约定上收页头，卡内不再放按钮） */
+/* 概览卡：图标 + 名称/后端（动作已按骨架约定上收页头，卡内不再放按钮）。
+   v1.01：半透玻璃卡面（无模糊），环境光透过微微上色。 */
 .ov-card {
   display: flex;
   align-items: center;
   gap: 14px;
   margin-bottom: 6px;
   padding: 18px 16px;
-  background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 7%, var(--surface)), var(--surface));
+  background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 7%, var(--glass-card)), var(--glass-card));
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
@@ -1007,7 +1011,8 @@ async function onOtherConfirm(payload: string | boolean) {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-/* 其它密库列表 */
+/* 其它密库列表（v1.01 注：凹面井 —— 刻意不透、保持 --bg-page，
+   与设置页 .expand-items / .mini-radio 同族「嵌入面」，不上玻璃） */
 .other-list {
   display: flex;
   flex-direction: column;

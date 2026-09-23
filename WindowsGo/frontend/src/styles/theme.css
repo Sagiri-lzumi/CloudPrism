@@ -7,7 +7,9 @@
  *    由本次迁移推翻——深色下需要更亮的系统蓝保证对比度；
  *  - 分层走「明度差」而非描边：浅色卡片描边透明（#fff 卡浮在 #f4f5f7
  *    底上）；深色保留极淡白描边兜底（否则深灰卡沉进黑底"一坨黑"）；
- *  - 底色干净：移除 --bg-ambient 环境光渐层（Mica 残留），苹果风要平铺底色；
+ *  - 底色：v38 曾为苹果风删掉环境光渐层、改平铺底色；v1.01 有意恢复
+ *    （见 --aurora-*）—— 用户明确要「毛玻璃更深、更看得见」，玻璃要有
+ *    东西可糊，窗口底必须先有层次（macOS 的玻璃也是磨的壁纸，不是磨的纯色）；
  *  - 字号一律 px 语义（历史教训：pt 在 96DPI 下会放大约 33%）：正文以
  *    1rem = 设置字号（默认 14px），标题用 rem 等比缩放；间距/圆角固定 px。
  *
@@ -43,10 +45,17 @@
 
     /* ---- 表面分层 ---- */
     --bg-page: #f4f5f7;         /* 窗口底色 */
+    /* ---- 环境光（aurora）：三盏极低透明度的径向光，铺满窗口底 ----
+       消费点在 layout.css 的 .app-shell（底色之上、一切内容之下）。
+       只在玻璃/半透面底下显形——纯底色区肉眼几乎察觉不到它的存在，
+       玻璃骨架（侧栏/页头/底栏）与 --glass-card 半透卡面把它「糊」出来，
+       这就是「玻璃片浮在光上」的观感。深色档的灯更亮一档（见 --dk-aurora-*）。 */
+    --aurora-1: rgba(0, 122, 255, .055);    /* 蓝：左上 */
+    --aurora-2: rgba(94, 92, 230, .05);     /* 紫：右上 */
+    --aurora-3: rgba(52, 199, 89, .045);    /* 绿：底缘 */
     --surface: #ffffff;         /* 卡片/输入面 */
     --surface-2: #fafbfc;       /* 卡内嵌套面（组内行、只读块） */
     --surface-hover: #f4f5f7;
-    --surface-pressed: #eceef1;
     --fill-quiet: #f1f3f5;      /* 图标块/安静底 */
     --stroke: rgba(16, 24, 40, .10);
     /* 卡片描边透明：浅色靠 #fff 卡 vs #f4f5f7 底的明度差分层（苹果风无描边卡） */
@@ -54,14 +63,18 @@
     --divider: rgba(16, 24, 40, .07);
 
     /* ---- 玻璃面（配 --glass-blur/--glass-sat 的毛玻璃底）----
-       两档半透底按「面上压着什么」分，不是按位置分：
-        · chrome：窗口骨架（侧栏/底栏/页头），压的是静态窗口底色 —— 它只负责把骨架
-          从底色里「抬起来」一档，观感是层次而不是透明；
+       三档半透底按「面上压着什么、付不付得起模糊」分，不是按位置分：
+        · chrome：窗口骨架（侧栏/底栏/页头），压的是窗口底 + 环境光（页头自 v1.01
+          起浮在内容上，压的还有滚过来的真实内容）—— 负责把骨架从底色里「抬起来」；
         · view：浮出内容（菜单/对话框/通知/拖放卡/移动端预览浮层），压的是真实内容 ——
-          这里才真正看得到毛玻璃，所以取得更实一档（.84）保证正文对比度。
+          这里才真正看得到毛玻璃，所以取得更实一档（.84）保证正文对比度；
+        · card：成片大面积卡面（网格卡/设置卡/任务行）—— **只半透、不模糊**：
+          逐个 backdrop-filter 的滚动代价成倍，环境光透过它微微上色即是「玻璃片」
+          观感。纯 alpha 无模糊，无 backdrop-filter 的环境照常可用，不需 @supports 兜底。
        edge 是面上沿那条高光发丝线，玻璃「有厚度」的那一点暗示（浮层无描边时尤其重要）。 */
-    --glass-chrome: rgba(255, 255, 255, .68);
+    --glass-chrome: rgba(255, 255, 255, .60);
     --glass-view: rgba(255, 255, 255, .84);
+    --glass-card: rgba(255, 255, 255, .55);
     --glass-edge: rgba(255, 255, 255, .72);
 
     /* ---- 文字色 ---- */
@@ -87,15 +100,21 @@
                   0 16px 32px -8px rgba(16, 24, 40, .14),
                   0 32px 64px -24px rgba(16, 24, 40, .18);
 
-    /* ---- 浮层层级（z-index 档位：面板 < 遮罩 < 菜单 < 模态 < 通知）----
+    /* ---- 浮层层级（z-index 档位：面板 < 页头 < 遮罩 < 菜单 < 模态 < 通知）----
        叠加模态（向导/快速连接/恢复码需叠在 MessageBox 之上）用 calc 偏移，
        相对关系集中在此可查；散点数值一律收编，明暗同值无深色转发。 */
     --z-raise: 2;      /* 卡内局部抬升（勾选角标） */
     --z-sheet: 620;    /* 面板级浮层（≤640px 预览全屏） */
+    --z-head: 700;     /* 浮层页头（内容从其下滚过）。必须 > --z-sheet：
+                          页头要可点，否则移动端预览浮层「进去出不来」 */
     --z-veil: 800;     /* 全窗遮罩（拖放提示/拖拽拦截） */
     --z-menu: 1000;    /* 弹出菜单 */
     --z-modal: 1500;   /* 基准模态对话框 */
     --z-toast: 2000;   /* 通知条（永远最高） */
+
+    /* 浮层页头高度（PageHeader 的 min-height 与各页滚动区让位 padding 的
+       共用真源）：改它就是同时改「页头多高」和「内容让多少」 */
+    --page-head-h: 56px;
 
     /* 模态遮罩：苹果风半透黑（深色档加深一档，防黑底上穿透感不足） */
     --veil: rgba(0, 0, 0, .4);
@@ -124,9 +143,11 @@
 
     /* 毛玻璃参数：与明暗无关（模糊半径/饱和度不是颜色）。
        饱和度略提是苹果毛玻璃的常规做法 —— 背景被模糊后本会发灰，
-       提饱和把透过来的色相拉回来，否则玻璃像一层脏塑料。 */
-    --glass-blur: 18px;
-    --glass-sat: 165%;
+       提饱和把透过来的色相拉回来，否则玻璃像一层脏塑料。
+       v1.01 加深一档（18→24px / 165→180%）：环境光与滚动穿透上线后
+       玻璃后面终于有东西可磨，模糊半径值得付。 */
+    --glass-blur: 24px;
+    --glass-sat: 180%;
 
     /* ============================================ 深色调色板（单一真源）
        仅供下方两支别名转发，业务样式不应直接引用 --dk-*。 */
@@ -134,7 +155,6 @@
     --dk-surface: #232327;
     --dk-surface-2: #1e1e22;
     --dk-surface-hover: #2a2a30;
-    --dk-surface-pressed: #32323a;
     --dk-fill-quiet: #2b2b31;
     --dk-stroke: rgba(255, 255, 255, .12);
     /* 深色卡片保留极淡白描边：深灰卡(#232327)浮在黑底(#1a1a1e)上明度差
@@ -143,9 +163,15 @@
     --dk-divider: rgba(255, 255, 255, .09);
     /* 深色玻璃：比浅色档更「重」一点 —— 深底上半透白会把底下的深色抬亮，
        抬多了玻璃就变成一块发灰的板子，反而失去纵深。 */
-    --dk-glass-chrome: rgba(28, 28, 32, .66);
+    --dk-glass-chrome: rgba(28, 28, 32, .60);
     --dk-glass-view: rgba(38, 38, 44, .82);
+    --dk-glass-card: rgba(38, 38, 44, .55);
     --dk-glass-edge: rgba(255, 255, 255, .10);
+    /* 深色环境光：灯比浅色档亮一档 —— 深底上太淡的光晕直接看不见，
+       玻璃后面没有可磨的层次就等于没铺。 */
+    --dk-aurora-1: rgba(10, 132, 255, .14);
+    --dk-aurora-2: rgba(100, 98, 235, .12);
+    --dk-aurora-3: rgba(48, 209, 88, .10);
     --dk-text: #f2f2f5;
     --dk-text2: #bfbfc8;
     /* 标题色：浅色档比正文再暗一档（#16161a vs #1c1c21），深色档对应再亮一档。
@@ -189,15 +215,19 @@ html[data-theme="dark"] {
     --surface: var(--dk-surface);
     --surface-2: var(--dk-surface-2);
     --surface-hover: var(--dk-surface-hover);
-    --surface-pressed: var(--dk-surface-pressed);
     --fill-quiet: var(--dk-fill-quiet);
     --stroke: var(--dk-stroke);
     --stroke-card: var(--dk-stroke-card);
     --divider: var(--dk-divider);
     --glass-chrome: var(--dk-glass-chrome);
     --glass-view: var(--dk-glass-view);
+    --glass-card: var(--dk-glass-card);
     --glass-edge: var(--dk-glass-edge);
     --veil: var(--dk-veil);
+
+    --aurora-1: var(--dk-aurora-1);
+    --aurora-2: var(--dk-aurora-2);
+    --aurora-3: var(--dk-aurora-3);
 
     --text: var(--dk-text);
     --text2: var(--dk-text2);
@@ -229,15 +259,19 @@ html[data-theme="dark"] {
         --surface: var(--dk-surface);
         --surface-2: var(--dk-surface-2);
         --surface-hover: var(--dk-surface-hover);
-        --surface-pressed: var(--dk-surface-pressed);
         --fill-quiet: var(--dk-fill-quiet);
         --stroke: var(--dk-stroke);
         --stroke-card: var(--dk-stroke-card);
         --divider: var(--dk-divider);
         --glass-chrome: var(--dk-glass-chrome);
-    --glass-view: var(--dk-glass-view);
-    --glass-edge: var(--dk-glass-edge);
+        --glass-view: var(--dk-glass-view);
+        --glass-card: var(--dk-glass-card);
+        --glass-edge: var(--dk-glass-edge);
         --veil: var(--dk-veil);
+
+        --aurora-1: var(--dk-aurora-1);
+        --aurora-2: var(--dk-aurora-2);
+        --aurora-3: var(--dk-aurora-3);
 
         --text: var(--dk-text);
         --text2: var(--dk-text2);

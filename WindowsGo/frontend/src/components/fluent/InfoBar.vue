@@ -121,4 +121,10 @@ const iconOf = {info: 'info', success: 'completed', warning: 'feedback', error: 
 .toast-leave-to {
   opacity: 0;
 }
+
+/* 顶掉队再入列的补位：离场后其余通知条平滑上移（整列位移 = 大面，
+   用 spring-soft 档过冲）。此前没有这条 ⇒ 撤一条其余全部瞬跳。 */
+.toast-move {
+  transition: transform var(--dur-spring) var(--ease-spring-soft);
+}
 </style>

@@ -156,8 +156,9 @@ a:hover,
 }
 
 /* 页面切换：opacity + 轻微上移 + 落定时的一点回弹。
-   位移量刻意克制（10px），过冲用 softer 档 —— 整页大幅过冲会晃眼，
-   这里只要「到达时不是硬刹车」那一点弹性。 */
+   位移量刻意克制（14px），过冲用 softer 档 —— 整页大幅过冲会晃眼，
+   这里只要「到达时不是硬刹车」那一点弹性。v1.01 位移 10→14px：
+   动画加强轮，整页入场值得多走一点。 */
 .page-enter-active {
     transition: opacity var(--dur) var(--ease-emphasized),
         transform var(--dur-spring) var(--ease-spring-soft);
@@ -169,7 +170,7 @@ a:hover,
 
 .page-enter-from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(14px);
 }
 
 .page-leave-to {
@@ -196,6 +197,28 @@ a:hover,
 }
 
 .pop-leave-to {
+    opacity: 0;
+}
+
+/* 视图内容切换（文件页 网格↔列表）：容器级淡切 + 轻位移（out-in）。
+   位移 6px 刻意克制 —— 容器 transform 不改布局尺寸，RoundMenu 的
+   offsetWidth/offsetHeight 测量口径不受影响。条目自身的入场动画
+   挂在各条目的常驻类上（GridCard/.row），与这里的容器过渡分层。 */
+.swap-enter-active {
+    transition: opacity var(--dur) var(--ease-emphasized),
+        transform var(--dur) var(--ease-emphasized);
+}
+
+.swap-leave-active {
+    transition: opacity calc(var(--dur) / 2) var(--ease);
+}
+
+.swap-enter-from {
+    opacity: 0;
+    transform: translateY(6px);
+}
+
+.swap-leave-to {
     opacity: 0;
 }
 

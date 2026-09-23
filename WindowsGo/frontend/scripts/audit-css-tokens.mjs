@@ -25,7 +25,11 @@ import {fileURLToPath} from 'node:url'
 const SRC = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'src')
 
 /** 由前端 JS 运行时写入内联样式的自定义属性，CSS 侧自然"未定义"。 */
-const RUNTIME_SET = new Set(['--insp-w'])
+/** 运行时注入的变量（JS :style 写入，不在 CSS 里定义）：
+ *  · --insp-w：检查器分栏宽度（splitMove 拖动）；
+ *  · --i：条目错峰入场序号（FilesView 的 v-for 注入，GridCard/.row 的
+ *    animation-delay 消费）。带默认值兜底（var(--i, 0)）。 */
+const RUNTIME_SET = new Set(['--insp-w', '--i'])
 
 /** 刻意不做深色转发的 token：
  *  · 与明暗无关：字体/字号/圆角/动效/层级；
@@ -41,10 +45,12 @@ const NO_DARK_NEEDED = new Set([
   '--radius-round',
   '--z-raise',
   '--z-sheet',
+  '--z-head',
   '--z-veil',
   '--z-menu',
   '--z-modal',
   '--z-toast',
+  '--page-head-h',
   '--scrim-hint',
   '--scrim-media',
   '--dur',

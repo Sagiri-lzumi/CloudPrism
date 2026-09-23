@@ -905,6 +905,8 @@ function readBuild() {
   flex-direction: column;
   height: 100%;
   box-sizing: border-box;
+  /* 浮层页头的定位上下文（PageHeader 绝对定位在本视图顶缘） */
+  position: relative;
 }
 
 /* 页头已由 components/layout/PageHeader.vue 承担（v1.3 起三页共用同一根
@@ -914,11 +916,12 @@ function readBuild() {
    各写一份且逐字节相同；.group-title 两页间距还不一致（16/4/4 vs 14/4/2）。 */
 
 /* 滚动内容区：单列居中，分组标题分隔。
-   顶部留白 18px —— 页头自带一条分隔线，内容再贴边会显局促。 */
+   滚动区从 y=0 起（页头是浮层），padding-top 让位 —— 内容从玻璃页头底下
+   穿过；让位之外再留 18px —— 页头自带一条分隔线，内容贴边会显局促。 */
 .s-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 18px 24px 28px;
+  padding: calc(var(--page-head-h) + 18px) 24px 28px;
 }
 
 /* 单列内容列宽：与密库页统一为 860px（设置页右侧有「数值框 + 单位 + 按钮」
@@ -944,13 +947,13 @@ function readBuild() {
   color: var(--muted);
 }
 
-/* ---- 百度凭证表单卡 ---- */
+/* ---- 百度凭证表单卡（v1.01：半透玻璃卡面，无模糊） ---- */
 .b-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 14px;
-  background: var(--surface);
+  background: var(--glass-card);
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-card);
 }
