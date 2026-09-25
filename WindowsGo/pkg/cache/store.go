@@ -83,6 +83,8 @@ type Store struct {
 	limit     int64  // 容量上限（字节），<=0 表示不限制
 	log       *slog.Logger
 
+	// mu 保护 entries/total/closed。**锁序铁律：Store.mu → entry.mu**，
+	// 任何路径都不得反向持锁（反了就与 Purge 构成 ABBA 死锁，见 Put）。
 	mu      sync.Mutex
 	entries map[string]*entry // remote → 条目
 	// total 是已占用字节的**估算值**：写入时按实际写入量累加（块文件稀疏
@@ -97,12 +99,23 @@ type entry struct {
 	mu   sync.Mutex   // 序列化同一条目的读与填充（同一文件基本顺序访问）
 	busy atomic.Int32 // 正在 IO 的 goroutine 数，淘汰时跳过（避免边写边删）
 
+	// lastAcc 是 meta.LastAccess 的原子镜像，**只用于淘汰排序**。
+	// 淘汰在持有 Store.mu 时排序，此时不可能再去取 entry.mu（锁序相反），
+	// 直接读 meta.LastAccess 就是与并发 Put 的数据竞争 —— 这里走原子量读。
+	lastAcc atomic.Int64
+
 	remote  string
 	dirName string    // 落盘名（可能带 " (2)" 消歧后缀）
 	meta    *metaJSON // 元信息（entry.mu 保护）
 
 	lastFlush time.Time // 上次元信息落盘时间
 	dirty     bool      // 元信息有待落盘
+}
+
+// touch 记录最近访问时间（调用方须持 entry.mu）。
+func (e *entry) touch(now int64) {
+	e.meta.LastAccess = now
+	e.lastAcc.Store(now)
 }
 
 // Options 是 Store 的构造参数。
@@ -176,7 +189,10 @@ func (s *Store) reload() {
 		if m.Entry == "" {
 			continue
 		}
-		s.entries[remote] = &entry{remote: remote, dirName: m.Entry, meta: m}
+		// lastAcc 由磁盘上的 LastAccess 播种：reload 期间无并发，直接存即可
+		e := &entry{remote: remote, dirName: m.Entry, meta: m}
+		e.lastAcc.Store(m.LastAccess)
+		s.entries[remote] = e
 		s.total += s.measure(remote, m)
 		claimed[m.Entry] = true
 		claimed[m.Entry+partSuffix] = true
@@ -291,7 +307,7 @@ func (s *Store) Fetch(remote string, cipherSize, start, end int64) ([]byte, bool
 			return nil, false // 文件被外部删除/损坏：按未命中处理
 		}
 	}
-	e.meta.LastAccess = time.Now().Unix()
+	e.touch(time.Now().Unix())
 	e.dirty = true
 	_ = s.flushMeta(e, false)
 	return data, true
@@ -320,6 +336,10 @@ func (s *Store) lookup(remote string, cipherSize int64) *entry {
 //
 // 落在块内的部分就地 WriteAt（块文件稀疏增长），补齐整块覆盖区间后去掉
 // .part 后缀转正。任何失败只记日志：缓存写不进不影响这次读取。
+//
+// 锁序铁律：**Store.mu → entry.mu**，全包唯一。写块阶段只持 entry.mu，
+// 总量记账与淘汰放到释放 entry.mu 之后再取 Store.mu —— 反过来与 Purge
+// （持 Store.mu 逐个取 entry.mu）构成 ABBA 死锁：播放中点「清空缓存」必死。
 func (s *Store) Put(remote, display string, cipherSize, start int64, data []byte) {
 	if len(data) == 0 || start < 0 {
 		return
@@ -330,10 +350,23 @@ func (s *Store) Put(remote, display string, cipherSize, start int64, data []byte
 		return
 	}
 
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.busy.Add(1)
 	defer e.busy.Add(-1)
+
+	s.writeChunks(e, start, data)
+
+	s.mu.Lock()
+	s.total += int64(len(data))
+	s.mu.Unlock()
+	s.enforceLimit(e.remote)
+}
+
+// writeChunks 在 entry.mu 保护下把片段写进所属块并落盘元信息。
+//
+// 只碰条目自己的状态，不取 Store.mu（锁序见 Put）。
+func (s *Store) writeChunks(e *entry, start int64, data []byte) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
 	end := start + int64(len(data)) - 1
 	for _, idx := range e.chunkIndexes(start, end) {
@@ -362,16 +395,11 @@ func (s *Store) Put(remote, display string, cipherSize, start int64, data []byte
 			}
 		}
 	}
-	e.meta.LastAccess = time.Now().Unix()
+	e.touch(time.Now().Unix())
 	e.dirty = true
 	if err := s.flushMeta(e, false); err != nil {
 		s.warn("写元信息失败", err, e.remote)
 	}
-
-	s.mu.Lock()
-	s.total += int64(len(data))
-	s.mu.Unlock()
-	s.enforceLimit(e.remote)
 }
 
 // ensureEntry 取出或建立条目；分块大小/文件大小变更导致旧条目不可用时
@@ -401,6 +429,7 @@ func (s *Store) ensureEntry(remote, display string, cipherSize int64) (*entry, e
 	meta.Chunks = buildChunks(meta.Entry, meta.Chunked, cipherSize, s.chunkSize)
 
 	e := &entry{remote: remote, dirName: meta.Entry, meta: meta}
+	e.lastAcc.Store(time.Now().Unix()) // 新条目最"新"，不会被立刻淘汰
 	if meta.Chunked {
 		if err := os.MkdirAll(filepath.Join(s.dir, meta.Entry), 0o755); err != nil {
 			return nil, err
@@ -521,7 +550,7 @@ func (s *Store) enforceLimit(keep string) {
 		list = append(list, e)
 	}
 	sort.Slice(list, func(i, j int) bool {
-		return list[i].meta.LastAccess < list[j].meta.LastAccess
+		return list[i].lastAcc.Load() < list[j].lastAcc.Load()
 	})
 	for _, e := range list {
 		if s.total <= s.limit {
@@ -534,8 +563,15 @@ func (s *Store) enforceLimit(keep string) {
 	}
 }
 
-// removeLocked 删除条目对应的磁盘内容与内存记录（调用方须持有 Store.mu）。
+// removeLocked 删除条目对应的磁盘内容与内存记录。
+//
+// 调用方须持有 Store.mu；本函数自己按 **Store.mu → entry.mu** 的顺序取
+// entry.mu（取 entry.mu 是为了不与并发 Put 的块内写入互相踩 —— 它保证
+// 「删文件」发生在写者收手之后）。同一顺序也是不得反转的全局约定，见 Put。
 func (s *Store) removeLocked(e *entry) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	// 先按真实占用扣账，再删文件（删完就量不到了）
 	s.total -= s.measure(e.remote, e.meta)
 	if s.total < 0 {
@@ -553,6 +589,10 @@ func (s *Store) removeLocked(e *entry) {
 }
 
 // Purge 清空本密库的全部缓存（保留作用域目录与占用标记）。
+//
+// 逐个条目「加锁→删除→解锁」，不在两轮之间长持 Store.mu：清一个大缓存
+// 可能删几 GB 文件，长持会让正在播放的 Fetch/lookup 全部排队。entry.mu
+// 由 removeLocked 内部按统一锁序取，这里**不能再自己取**（会自锁死）。
 func (s *Store) Purge() error {
 	s.mu.Lock()
 	remotes := make([]string, 0, len(s.entries))
@@ -564,9 +604,7 @@ func (s *Store) Purge() error {
 	for _, rm := range remotes {
 		s.mu.Lock()
 		if e, ok := s.entries[rm]; ok {
-			e.mu.Lock()
 			s.removeLocked(e)
-			e.mu.Unlock()
 		}
 		s.mu.Unlock()
 	}

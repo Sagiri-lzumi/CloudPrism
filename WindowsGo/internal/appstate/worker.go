@@ -2,6 +2,7 @@ package appstate
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/paths"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/pipeline"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/storage"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/transfer"
 )
 
@@ -94,7 +96,35 @@ func (s *State) uploadFileVia(ctx context.Context, conn *connState, local, remot
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	if err := s.prepareOverwrite(ctx, conn, tmpName, remote); err != nil {
+		return err
+	}
 	return conn.backend.UploadChunked(ctx, tmpName, remote, opts.Chunk, report)
+}
+
+// prepareOverwrite 处理「远端已存在同样大小的对象」这一死角。
+//
+// 后端的断点续传判据是「远端大小 ≥ 源大小即视为已传完」（见
+// Local.UploadChunked / WebDAV.UploadChunked 的短路），用于**中断续传**是
+// 对的；但在覆盖场景下会退化成**静默 no-op**——本地内容改了、大小恰好没变
+// （改一个字、换一张同分辨率图），重传时一个字节都不会写，界面却报「上传
+// 完成」，同步索引还会把这个文件记成已同步。
+//
+// 大小相同即无法证明内容相同 ⇒ 先删后传，强制完整重写；大小不同（真的
+// 续传）原样不动，断点续传能力不受影响。
+func (s *State) prepareOverwrite(ctx context.Context, conn *connState, localCipher, remote string) error {
+	st, err := os.Stat(localCipher)
+	if err != nil {
+		return err
+	}
+	size, err := conn.backend.GetSize(ctx, remote)
+	if err != nil || size != st.Size() {
+		return nil // 远端不存在或大小不同：不是这条死角
+	}
+	if err := conn.backend.Delete(ctx, remote); err != nil && !errors.Is(err, storage.ErrNotFound) {
+		return err
+	}
+	return nil
 }
 
 // enqueueTasks 任务入队并落续传记录。入队前二次校验连接未变

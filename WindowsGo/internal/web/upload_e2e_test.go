@@ -609,6 +609,82 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) {
 	t.Fatalf("超时未出现：%s", path)
 }
 
+// TestUploadSameSizeOverwriteIsNotNoop 钉死「同尺寸覆盖必须真的重写远端」。
+//
+// 回归的是一个静默的数据正确性问题：后端（Local / WebDAV）的断点续传判据是
+// 「远端大小 ≥ 源大小即视为已传完」，覆盖场景下退化成 **no-op** —— 本地内容
+// 改了、大小恰好没变（改一个字、换一张同分辨率图），重传时一个字节都不写，
+// 界面报「上传完成」，同步索引还把它记成已同步。
+//
+// 断言方式：两次上传的密文都带**随机 IV**，只要真的重写了，盘上的密文字节
+// 必然不同；若被短路成 no-op，字节会一模一样。这里用「文件名加密关闭」的
+// 密库，因为只有此时第二次上传才会落在同一个远端路径上。
+func TestUploadSameSizeOverwriteIsNotNoop(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("CLOUDPRISM_DATA_DIR", dataDir)
+
+	vaultDir := filepath.Join(dataDir, "vault")
+	if err := os.MkdirAll(vaultDir, 0o755); err != nil {
+		t.Fatalf("建密库目录失败: %v", err)
+	}
+	addr := newUploadTestServer(t, dataDir)
+
+	// 关闭文件名加密 ⇒ 同一个逻辑名每次映射到同一个远端对象，才可能被短路
+	if _, err := http.Post(
+		"http://"+addr+"/api/vault/open",
+		"application/json",
+		jsonBody(t, map[string]any{
+			"kind":           "local",
+			"localDir":       vaultDir,
+			"masterPassword": "test-master-password",
+			"filenameEnc":    false,
+			"create":         true,
+			"vaultName":      "e2e-overwrite",
+		}),
+	); err != nil {
+		t.Fatalf("建库请求失败: %v", err)
+	}
+
+	remote := filepath.Join(vaultDir, "same.txt.cpenc")
+	upload := func(content string) {
+		t.Helper()
+		body, ctype := multipartBody(t, []multipartFile{{rel: "same.txt", content: content}}, "")
+		resp, err := http.Post("http://"+addr+"/api/transfer/upload", ctype, body)
+		if err != nil {
+			t.Fatalf("上传请求失败: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("上传应 200，实得 %d：%s", resp.StatusCode, raw)
+		}
+	}
+
+	upload("AAAA") // 4 字节
+	first := waitForCiphertext(t, remote, 4, 10*time.Second)
+	before, err := os.ReadFile(remote)
+	if err != nil {
+		t.Fatalf("读取首次上传的密文失败: %v", err)
+	}
+
+	// 等长（4 字节）但内容不同的第二次上传：必须真的覆盖
+	upload("BBBB")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		after, rerr := os.ReadFile(remote)
+		if rerr == nil && !bytes.Equal(before, after) {
+			if int64(len(after)) != first {
+				t.Fatalf("同尺寸覆盖后密文长度应不变（%d），实得 %d", first, len(after))
+			}
+			return // 已重写
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("同尺寸覆盖上传是静默 no-op：远端密文字节未变（新增的 prepareOverwrite 未生效？）")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // waitForNoStage 等待暂存目录被任务终态回调回收干净。
 func waitForNoStage(t *testing.T, dataDir string, timeout time.Duration) {
 	t.Helper()

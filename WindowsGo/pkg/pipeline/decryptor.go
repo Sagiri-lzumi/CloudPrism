@@ -92,6 +92,12 @@ func (d *Decryptor) DecryptRangeToBytes(ctx context.Context, remote string, star
 	if len(ct) == 0 {
 		return []byte{}, nil
 	}
+	// 后端少给字节（远端被截断/覆盖、分卷缺失）时必须在此拦下：下面的
+	// out[from : from+(end-start)] 会直接越界 panic，而这是流式代理与缩略图
+	// 的热路径，一次 panic 就是整个进程。
+	if want := int64(r.CtEnd - r.CtStart); int64(len(ct)) < want {
+		return nil, errors.New("pipeline: 远端密文数据不足（容器不完整或已损坏）")
+	}
 
 	out := make([]byte, len(ct))
 	ctr.XORAt(out, ct, uint64(r.FirstBlock))
@@ -160,6 +166,11 @@ func (d *Decryptor) DownloadAndDecrypt(ctx context.Context, remote, local string
 // workers==1 即顺序路径（同一代码，零调度差异）；每个 goroutine 独占一块
 // 1MiB 池缓冲（Range 请求优先走零拷贝直写路径，见 storage.ReadRangeInto），
 // 完成后归还复用。进度按已完成字节累计（atomic）。
+//
+// 首错即取消：任一分片失败会 cancel 派生上下文，喂料侧从 jobs<-s 上立即
+// 醒来退出。**这一步不能省** —— jobs 是无缓冲通道，出错 worker 直接 return
+// 后若喂料侧仍阻塞在发送上，就再没有人接收，整条下载链路（以及队列线程）
+// 会永久挂死（v1.02 起的真实缺陷）。
 func decryptShards(ctx context.Context, b storage.Backend, remote string, dst io.WriterAt, ctr *cryptox.CTR, hl, totalPlain int64, workers int, report func(float64)) error {
 	shards := Shards(totalPlain)
 	if len(shards) == 0 {
@@ -168,10 +179,13 @@ func decryptShards(ctx context.Context, b storage.Backend, remote string, dst io
 	if workers > len(shards) {
 		workers = len(shards)
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	var (
 		wg   sync.WaitGroup
 		done atomic.Int64
-		errs = make(chan error, len(shards))
+		errs = make(chan error, len(shards)) // 容量 ≥ worker 数：出错发送永不阻塞
 	)
 	jobs := make(chan Shard)
 	for w := 0; w < workers; w++ {
@@ -181,7 +195,8 @@ func decryptShards(ctx context.Context, b storage.Backend, remote string, dst io
 			for s := range jobs {
 				if err := decryptOneShard(ctx, b, remote, dst, ctr, hl, s, totalPlain, &done, report); err != nil {
 					errs <- err
-					return // 首错：停止消费，让调度方退出
+					cancel() // 首错：取消整轮，放行喂料侧与其余 worker
+					return
 				}
 			}
 		}()
@@ -201,7 +216,7 @@ feed:
 	wg.Wait()
 	close(errs)
 	for err := range errs {
-		return err
+		return err // 首条即真实原因（取消引发的 context.Canceled 只会排在它后面）
 	}
 	return ctx.Err()
 }
