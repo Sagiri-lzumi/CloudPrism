@@ -117,18 +117,18 @@ func TestLoadRejectsGarbage(t *testing.T) {
 	}
 }
 
-func TestSaveFallsBackToPlainOnProtectFailure(t *testing.T) {
+// TestSaveFailsClosedOnProtectFailure 锁定「加密失败不留明文」这条安全属性：
+// 注入的加密器报错时 Save 必须返回错误，且**不得**写出任何文件 —— 早期
+// 实现会静默降级成 PLAIN 落盘，把令牌以明文写在磁盘上而无任何提示。
+func TestSaveFailsClosedOnProtectFailure(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "token")
 	f := NewFile(p, failProtector{})
-	if err := f.Save("fallback"); err != nil {
-		t.Fatalf("加密失败时应降级而非报错，实得 %v", err)
+	if err := f.Save("secret"); err == nil {
+		t.Fatal("加密失败时 Save 必须报错，不得降级明文落盘")
 	}
-	raw, _ := os.ReadFile(p)
-	if !strings.HasPrefix(string(raw), "PLAIN:") {
-		t.Fatalf("加密失败应降级 PLAIN，实得 %.8s", raw)
-	}
-	if got, ok := NewFile(p, nil).Load(); !ok || got != "fallback" {
-		t.Fatalf("降级后的值应可用 PLAIN 读回: got=%q ok=%v", got, ok)
+	if _, err := os.Stat(p); err == nil {
+		raw, _ := os.ReadFile(p)
+		t.Fatalf("加密失败时不应写文件，实得 %.32s", raw)
 	}
 }
 

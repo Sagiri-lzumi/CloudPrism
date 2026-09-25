@@ -9,6 +9,9 @@
 //	"DPAPI:" + base64(protect(utf8(value)))   —— DPAPI 加密（Windows）
 //	"PLAIN:" + base64(utf8(value))            —— 明文兜底（非 Windows/测试）
 //
+// 注：`PLAIN:` 只在**构造时显式传入 nil 保护器**（非 Windows / 测试）时写出；
+// 注入的加密器运行期失败不会降级成 PLAIN，而是直接报错（见 Save）。
+//
 // 加解密实现由装配层注入（DPAPI 在 internal/platform/win，而 pkg/* 不允许
 // import internal/*），因此这里只声明 Protector 接口。
 package secret
@@ -18,6 +21,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -63,16 +67,20 @@ func (f *File) Exists() bool {
 
 // Save 加密写入秘密值。
 //
-// 注入的加密器失败时自动降级 PLAIN（对齐 BaiduCredStore.Save 的兜底语义）：
-// 宁可明文落盘也不让用户卡在「开了局域网却拿不到令牌」。
+// **加密器失败一律向上报错，不做明文降级。** 早期实现（对齐 BaiduCredStore
+// 的兜底语义）在 DPAPI 失败时静默写 `PLAIN:<base64>`：结果是局域网访问
+// 令牌、百度密钥被以明文落在磁盘上，而用户界面上一切正常 ——「失败的加密」
+// 被伪装成成功，这比功能不可用严重得多。现在失败即返回错误、不落任何文件，
+// 由装配层把失败如实展示出来（可用性让位于「不留明文秘密」）。
+//
+// prot 显式为 nil 时 NewFile 装入的 plainProtector 不受影响：那是**显式
+// 选择**的明文存储（非 Windows / 测试），Protect 不会返回错误。
 func (f *File) Save(value string) error {
 	payload, err := f.prot.Protect([]byte(value))
-	scheme := f.prot.Scheme()
 	if err != nil {
-		payload = []byte(value)
-		scheme = "PLAIN"
+		return fmt.Errorf("secret: 加密秘密值失败，已放弃写入（不降级为明文）: %w", err)
 	}
-	blob := scheme + ":" + base64.StdEncoding.EncodeToString(payload)
+	blob := f.prot.Scheme() + ":" + base64.StdEncoding.EncodeToString(payload)
 
 	if dir := filepath.Dir(f.path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {

@@ -33,6 +33,37 @@ func TestRedactSensitiveAttrs(t *testing.T) {
 	}
 }
 
+// TestRedactsWithAttrs 钉死 logger.With(...) 绑定的属性同样打码。
+//
+// 回归：redactHandler 嵌入 slog.Handler，若不重写 WithAttrs/WithGroup，这两个
+// 方法会直接透传到底层 handler，于是「用 With 绑定的敏感值」完全绕过 Handle
+// 里的脱敏 —— 一条很隐蔽的泄密缝（脱敏只看 Handle 收到的那一批 Attrs）。
+func TestRedactsWithAttrs(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(&redactHandler{Handler: slog.NewTextHandler(&buf, nil)})
+
+	// 只经 With 绑定，Handle 收到的是 0 个属性
+	log.With("masterPassword", "s3cr3t-pass").With("token", "deadbeef").Info("重试")
+	out := buf.String()
+	if !strings.Contains(out, "masterPassword=****") || !strings.Contains(out, "token=****") {
+		t.Errorf("With 绑定的敏感属性应打码，实得: %s", out)
+	}
+	if strings.Contains(out, "s3cr3t-pass") || strings.Contains(out, "deadbeef") {
+		t.Errorf("With 绑定的秘密明文泄漏进日志: %s", out)
+	}
+
+	// WithGroup 之后仍需打码
+	buf.Reset()
+	log.WithGroup("auth").Info("连接", "secretKey", "abc123", "host", "127.0.0.1")
+	out = buf.String()
+	if strings.Contains(out, "abc123") {
+		t.Errorf("分组内秘密明文泄漏进日志: %s", out)
+	}
+	if !strings.Contains(out, "127.0.0.1") {
+		t.Errorf("普通属性被误伤: %s", out)
+	}
+}
+
 // 测试轮转：小上限下写入多条日志后旧文件被顺延改名。
 func TestRotatorRotatesFiles(t *testing.T) {
 	dir := t.TempDir()

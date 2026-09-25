@@ -73,6 +73,25 @@ func (h *redactHandler) Handle(ctx context.Context, r slog.Record) error {
 	return h.Handler.Handle(ctx, clean)
 }
 
+// WithAttrs 逐项脱敏后再下传。
+//
+// 必须重写：本类型**嵌入** slog.Handler，不重写时该方法会直接透传到底层
+// handler —— 于是 logger.With("token", x) 绑定的属性完全绕过 Handle 里的
+// 脱敏（脱敏只看 Handle 收到的 Attrs），"只要用 With 就不打码" 是条隐蔽的
+// 泄密缝。WithGroup 同理。
+func (h *redactHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	clean := make([]slog.Attr, 0, len(attrs))
+	for _, a := range attrs {
+		clean = append(clean, redact(a))
+	}
+	return &redactHandler{Handler: h.Handler.WithAttrs(clean)}
+}
+
+// WithGroup 保持包装层，避免组内属性回落到未脱敏的底层 handler。
+func (h *redactHandler) WithGroup(name string) slog.Handler {
+	return &redactHandler{Handler: h.Handler.WithGroup(name)}
+}
+
 // redact 判定属性是否需要打码。
 //
 // 键名按小写做子串匹配：调用方习惯各异（masterPassword / master_pw /

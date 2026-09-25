@@ -20,7 +20,7 @@ func TestAPIRejectsNonPost(t *testing.T) {
 	ok := func() (any, error) { reached = true; return nil, nil }
 
 	wrappers := map[string]http.HandlerFunc{
-		"wrapErr": s.wrapErr(func(*http.Request) (any, error) { return ok() }),
+		"wrapErr":  s.wrapErr(func(*http.Request) (any, error) { return ok() }),
 		"wrapJSON": s.wrapJSON(func(*http.Request, []byte) (any, error) { return ok() }),
 	}
 

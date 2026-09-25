@@ -70,10 +70,7 @@ func (s *Session) DeriveKey(salt []byte) ([protocol.KeyLen]byte, error) {
 func (s *Session) ClearCache() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, k := range s.keyCache {
-		zeroize(k[:])
-	}
-	clear(s.keyCache)
+	zeroCache(s.keyCache)
 }
 
 // Close 清零密码与缓存密钥并关闭会话（退出会话时必须调用）。
@@ -81,12 +78,22 @@ func (s *Session) ClearCache() {
 func (s *Session) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, k := range s.keyCache {
-		zeroize(k[:])
-	}
-	clear(s.keyCache)
+	zeroCache(s.keyCache)
 	zeroize(s.pw)
 	s.pw = nil
+}
+
+// zeroCache 清零并清空派生密钥缓存。
+//
+// 注意 `for _, k := range m` 里 k 是**值拷贝**：直接 zeroize(k[:]) 清的只是
+// 栈上的临时副本，map 里的密钥一个字节都没动（v1.02 前的真实缺陷——看上去
+// 在擦密钥，实际什么都没擦）。必须显式写回后清空 map。
+func zeroCache(m map[string][protocol.KeyLen]byte) {
+	for key, k := range m {
+		zeroize(k[:])
+		m[key] = k
+	}
+	clear(m)
 }
 
 // zeroize 原地清零字节切片。使用内建 clear：pw/key 均为堆上分配的
