@@ -335,3 +335,60 @@ func TestSubdirVaultSync(t *testing.T) {
 		t.Errorf("子目录密库索引应 1 条: %v", idx)
 	}
 }
+
+// TestRemotePathDirSegmentsAreStable 钉住同步路径的**目录段是确定性的**。
+//
+// 这是「重复同步会把同一个本地目录反复上传到新位置、云端越积越多同名目录」
+// 这条缺陷的守卫：索引按明文相对路径记账，只要目录段每次算出来不一样，
+// 每轮同步就会重新建一棵树（v1.01 及更早的真实行为）。
+//
+// 反过来，**文件名段必须仍然是随机的** —— 那是「同名文件不暴露内容相同」
+// 的既有设计，不能一起改成确定性。
+func TestRemotePathDirSegmentsAreStable(t *testing.T) {
+	sess := session.New("pw")
+	defer sess.Close()
+	eng := NewSyncEngine(sess, nil, "", true, []byte("fixed-salt-16B!"))
+
+	dirOf := func(p string) string {
+		i := strings.LastIndex(p, "/")
+		if i < 0 {
+			t.Fatalf("路径应含目录段: %q", p)
+		}
+		return p[:i]
+	}
+
+	a, err := eng.RemotePath("photos/2026/a.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := eng.RemotePath("photos/2026/a.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirOf(a) != dirOf(again) {
+		t.Errorf("同一相对路径两次算出的目录段不同：%q vs %q", dirOf(a), dirOf(again))
+	}
+
+	// 同目录下的另一个文件必须落进**同一棵**目录树
+	other, err := eng.RemotePath("photos/2026/b.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirOf(other) != dirOf(a) {
+		t.Errorf("同目录文件被分到了不同目录：%q vs %q", dirOf(other), dirOf(a))
+	}
+
+	// 文件名段仍随机：两次算出不同的叶子名
+	if a == again {
+		t.Errorf("文件名段应当是随机的，却两次相同：%q", a)
+	}
+
+	// 不同目录不能映射到同一密文目录（否则两棵子树会被压成一棵）
+	otherDir, err := eng.RemotePath("videos/2026/a.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirOf(otherDir) == dirOf(a) {
+		t.Errorf("不同明文目录得到相同密文目录：%q", dirOf(a))
+	}
+}

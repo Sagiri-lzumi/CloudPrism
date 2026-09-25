@@ -102,6 +102,15 @@ func (s *State) deriveKey(conn *connState) ([protocol.KeyLen]byte, error) {
 }
 
 // encryptName 加密单段名称（文件名加密开启时），并视 isFile 追加扩展名。
+//
+// isFile=false 即**目录段**，走确定性加密（cryptox.EncryptDirName）：
+// 同一逻辑目录名恒得同一密文名，Mkdir 才真正幂等。用随机 nonce 加密目录名是
+// v1.01 及更早的真实缺陷 —— 同一目录在一次上传里被加密多次（Mkdir 一次、
+// 每个文件的父目录段各一次），于是云端炸出一堆「解密后同名」的目录，
+// 用户看到的就是「上传一个文件夹却生成多个文件夹」。
+//
+// 文件段仍用随机 nonce（同名文件在云端不应暴露「内容相同」），
+// 且文件本来只在一个地方加密一次，不需要确定性。
 func (s *State) encryptName(conn *connState, plain string, isFile bool) (string, error) {
 	name := plain
 	if conn.meta.FilenameEnc {
@@ -109,7 +118,12 @@ func (s *State) encryptName(conn *connState, plain string, isFile bool) (string,
 		if err != nil {
 			return "", err
 		}
-		enc, err := cryptox.EncryptFilename(plain, key[:])
+		var enc string
+		if isFile {
+			enc, err = cryptox.EncryptFilename(plain, key[:])
+		} else {
+			enc, err = cryptox.EncryptDirName(plain, key[:])
+		}
 		if err != nil {
 			return "", err
 		}

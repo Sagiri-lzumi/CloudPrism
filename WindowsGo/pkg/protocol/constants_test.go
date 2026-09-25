@@ -2,6 +2,8 @@ package protocol
 
 import (
 	"encoding/base32"
+	"encoding/base64"
+	"strings"
 	"testing"
 )
 
@@ -45,6 +47,10 @@ func TestWireFormatConstants(t *testing.T) {
 
 		{"FileExtension", FileExtension, ".cpenc"},
 		{"Base32Alphabet", Base32Alphabet, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"},
+		{"Base64URLAlphabet", Base64URLAlphabet,
+			"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"},
+		{"FilenameMaxPlainBytes", FilenameMaxPlainBytes, 150},
+		{"FilenameMaxEncodedBytes", FilenameMaxEncodedBytes, 244},
 	}
 
 	for _, tc := range tests {
@@ -72,6 +78,48 @@ func TestBase32AlphabetMatchesStdEncoding(t *testing.T) {
 		if got != Base32Alphabet[i] {
 			t.Errorf("Base32Alphabet[%d] = %q，标准库为 %q", i, Base32Alphabet[i], got)
 		}
+	}
+}
+
+// TestBase64URLAlphabetMatchesStdEncoding 验证对外声明的 Base64URL 字母表
+// 与 cryptox 实际使用的 base64.RawURLEncoding 一致，并顺带锁死
+// 「文件名字符集里没有 + / =」这条云盘硬约束。
+func TestBase64URLAlphabetMatchesStdEncoding(t *testing.T) {
+	if len(Base64URLAlphabet) != 64 {
+		t.Fatalf("Base64URLAlphabet 长度应为 64，实为 %d", len(Base64URLAlphabet))
+	}
+	for i := range 64 {
+		// 单字节 b = i<<2 的高 6 位恰为 i，故编码结果的首字符就是字母表第 i 项
+		got := base64.RawURLEncoding.EncodeToString([]byte{byte(i << 2)})[0]
+		if got != Base64URLAlphabet[i] {
+			t.Errorf("Base64URLAlphabet[%d] = %q，标准库为 %q", i, Base64URLAlphabet[i], got)
+		}
+	}
+	for _, bad := range []rune{'+', '/', '='} {
+		if strings.ContainsRune(Base64URLAlphabet, bad) {
+			t.Errorf("Base64URLAlphabet 含文件名不安全字符 %q", bad)
+		}
+	}
+}
+
+// TestFilenameLengthBound 锁定「密文名 + .cpenc 绝不超 255 字节」这条由
+// 云端限制倒推出来的不变式。
+//
+// 它把三个互相牵制的量绑在一起：明文上限、nonce/tag 开销、编码膨胀率。
+// 谁把明文上限调大（例如为了「别截断」改成 300），这条就会红 —— 而那正是
+// 「长中文名视频被云盘拒收」这个缺陷的复发条件。
+func TestFilenameLengthBound(t *testing.T) {
+	raw := FilenameMaxPlainBytes + FilenameNonceLen + GCMTagLen
+	encoded := base64.RawURLEncoding.EncodedLen(raw)
+	if got := encoded + len(FileExtension); got != FilenameMaxEncodedBytes {
+		t.Errorf("密文名上限应为 %d，实为 %d（明文 %d + 开销 %d → Base64URL %d + 扩展名 %d）",
+			FilenameMaxEncodedBytes, got, FilenameMaxPlainBytes,
+			FilenameNonceLen+GCMTagLen, encoded, len(FileExtension))
+	}
+	// 主流网盘与 Windows 的单段文件名上限
+	const cloudNameLimit = 255
+	if FilenameMaxEncodedBytes > cloudNameLimit {
+		t.Errorf("密文名上限 %d 已越过云端 %d 字节限制", FilenameMaxEncodedBytes, cloudNameLimit)
 	}
 }
 

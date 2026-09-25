@@ -145,6 +145,35 @@ const (
 	FileExtension = ".cpenc"
 
 	// Base32Alphabet 是 Base32 编码字母表（RFC 4648），不含填充符 =。
+	//
+	// 用途已收窄到**恢复码**（RecoveryCodeLen 个字符，形如 XXXX-XXXX-…）；
+	// 文件名密文自 v1.02 起改用 Base64URL（见 Base64URLAlphabet），
+	// 解码端仍兼容 Base32 老名字。
 	// 对照 constants.py:93
 	Base32Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+
+	// Base64URLAlphabet 是文件名密文自 v1.02 起使用的 Base64URL 字母表，
+	// 不含填充符 =（RawURLEncoding → 末尾以 -/_ 收束）。
+	//
+	// 为什么从 Base32 换过来：Base32 每 5 字节膨胀成 8 字符（+60%），
+	// 一份 40 字中文名的密文可达 240+ 字符，逼近甚至越过云盘与 Windows
+	// 单段文件名的 255 字节上限；Base64URL 只膨胀 +33%，同样只用
+	// `A-Za-z0-9-_` 这些文件名安全字符（无 +、/、=）。
+	Base64URLAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+	// FilenameMaxPlainBytes 是文件名**明文**的字节上限，超出按 rune 安全截断
+	// （见 cryptox.truncateRunes / cryptox.EncryptFilename）。
+	//
+	// 上限由云端的硬约束倒推：密文名 = Base64URL(nonce12 ‖ 密文 ‖ tag16) + ".cpenc"，
+	// 要保证整名 ≤ 255 字节（主流网盘与 Windows 单段文件名的通行上限）：
+	//
+	//	ceil((150 + 12 + 16) × 4/3) = 238，+ len(".cpenc") = 244 ≤ 255
+	//
+	// 即 150 字节明文（约 50 个汉字 / 150 个 ASCII 字符）是「绝不撞限」的
+	// 最大可用值。截断只发生在超过这个长度的名字上，且只截尾巴。
+	FilenameMaxPlainBytes = 150
+
+	// FilenameMaxEncodedBytes 是「密文名 + 扩展名」的长度上限，
+	// 由 FilenameMaxPlainBytes 推导而来，供测试与文档引用（勿手改）。
+	FilenameMaxEncodedBytes = 244
 )

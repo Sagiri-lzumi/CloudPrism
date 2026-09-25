@@ -112,7 +112,12 @@ func (e *SyncEngine) remoteJoin(relRemote string) string {
 }
 
 // encName 文件名加密开启时加密单个路径段。
-func (e *SyncEngine) encName(name string) (string, error) {
+//
+// isFile=false（目录段）走**确定性**加密，与 appstate.encryptName 同口径：
+// 同步与手动上传必须为同一逻辑目录给出同一个密文名，否则两边会各建一棵树。
+// 目录段用随机 nonce 还会让「改过一个文件后再次同步」把整条路径指到新位置，
+// 云端于是越积越多同名目录（v1.01 及更早的真实缺陷）。
+func (e *SyncEngine) encName(name string, isFile bool) (string, error) {
 	if !e.filenameEnc {
 		return name, nil
 	}
@@ -120,28 +125,35 @@ func (e *SyncEngine) encName(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return cryptox.EncryptFilename(name, key[:])
+	if isFile {
+		return cryptox.EncryptFilename(name, key[:])
+	}
+	return cryptox.EncryptDirName(name, key[:])
 }
 
 // RemotePath 本地相对路径 → 后端加密容器路径。
 //
 // 逐段处理文件名加密（目录段同样加密，路径结构对外不可见），
-// 末段追加 .cpenc 扩展名。对照 sync_engine.py:96-104。
+// 末段追加 .cpenc 扩展名。目录段确定性、文件名随机（理由见 encName）。
+// 对照 sync_engine.py:96-104
 func (e *SyncEngine) RemotePath(relPath string) (string, error) {
 	segs := strings.Split(strings.ReplaceAll(relPath, "\\", "/"), "/")
-	enc := make([]string, 0, len(segs))
+	parts := make([]string, 0, len(segs))
 	for _, s := range segs {
-		if s == "" {
-			continue
+		if s != "" {
+			parts = append(parts, s)
 		}
-		name, err := e.encName(s)
+	}
+	if len(parts) == 0 {
+		return "", errors.New("vault: 空相对路径无法生成远程路径")
+	}
+	enc := make([]string, 0, len(parts))
+	for i, s := range parts {
+		name, err := e.encName(s, i == len(parts)-1)
 		if err != nil {
 			return "", err
 		}
 		enc = append(enc, name)
-	}
-	if len(enc) == 0 {
-		return "", errors.New("vault: 空相对路径无法生成远程路径")
 	}
 	enc[len(enc)-1] += protocol.FileExtension
 	return e.remoteJoin(strings.Join(enc, "/")), nil

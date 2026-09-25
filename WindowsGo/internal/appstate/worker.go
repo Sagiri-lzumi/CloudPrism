@@ -162,33 +162,87 @@ func (s *State) UploadPaths(ctx context.Context, localPaths []string, remoteDir 
 		}
 	}
 
-	// 远端目录先建（幂等；空目录不产生任务，与 Python 行为一致）
-	if len(dirs) > 0 {
-		opCtx, cancel := contextWithTimeout(ctx, opTimeout)
-		defer cancel()
-		for _, d := range dirs {
-			enc, eErr := s.encryptRelPath(conn, d, false)
-			if eErr != nil {
-				return eErr
+	opCtx, cancel := contextWithTimeout(ctx, opTimeout)
+	defer cancel()
+
+	// ---- 目录解析：逻辑目录 → **唯一**密文目录 ----
+	//
+	// 目录名加密自 v1.02 起是确定性的（同一逻辑目录恒得同一密文名），所以
+	// Mkdir 建出的目录与文件父目录段天然一致。但历史密库里的目录名是随机加密
+	// 的——同一个逻辑目录可能已有多个密文名并存（正是「上传一个文件夹生成多个
+	// 文件夹」的残留），因此建目录前先看一眼远端：**已有解密后同名的目录就复用**，
+	// 而不是再造一个新的。这样重传会落回既有那棵树，而不是越传越裂。
+	//
+	// 列目录按父路径缓存，每个父目录只 ListDir 一次（走 ListDir 是为了拿到
+	// 已解密的展示名，顺带复用它「解不开就回退密文名」的容错）。
+	dirCache := map[string]string{ // 逻辑相对路径 → 密文相对路径
+		"": "", // remoteDir 自身
+	}
+	childDirs := map[string]map[string]string{} // 密文父路径 → (明文名 → 密文名)
+
+	var resolveDir func(rel string) (string, error)
+	resolveDir = func(rel string) (string, error) {
+		if enc, ok := dirCache[rel]; ok {
+			return enc, nil
+		}
+		parentRel, name := splitRelTail(rel)
+		parentEnc, err := resolveDir(parentRel)
+		if err != nil {
+			return "", err
+		}
+		parentRemote := joinRemote(trimSlash(remoteDir), parentEnc)
+
+		idx, ok := childDirs[parentRemote]
+		if !ok {
+			idx = s.listChildDirs(opCtx, conn, parentRemote)
+			childDirs[parentRemote] = idx
+		}
+		nameEnc, existing := idx[name]
+		if !existing {
+			nameEnc, err = s.encryptName(conn, name, false)
+			if err != nil {
+				return "", err
 			}
-			remote := joinRemote(trimSlash(remoteDir), enc)
-			if mErr := conn.backend.Mkdir(opCtx, joinRemote(conn.vaultPath, remote)); mErr != nil {
-				return mErr
-			}
+			idx[name] = nameEnc
+		}
+		enc := joinRemote(parentEnc, nameEnc)
+		// 远端目录先建（幂等；空目录不产生任务，与 Python 行为一致）。
+		// 命中既有目录时这一次 Mkdir 是纯幂等操作——Local/WebDAV/百度三后端
+		// 都把它当成功，无需先探测存在性。
+		if mErr := conn.backend.Mkdir(opCtx, joinRemote(conn.vaultPath, joinRemote(trimSlash(remoteDir), enc))); mErr != nil {
+			return "", mErr
+		}
+		dirCache[rel] = enc
+		return enc, nil
+	}
+
+	for _, d := range dirs {
+		if _, err := resolveDir(d); err != nil {
+			return err
 		}
 	}
 
 	tasks := make([]*transfer.Task, 0, len(files))
 	for _, f := range files {
-		enc, eErr := s.encryptRelPath(conn, f.rel, true) // 末段为文件名
-		if eErr != nil {
-			return eErr
+		// 父目录先用同一个解析器落地（保证与 Mkdir 用的是同一个密文名），
+		// 末段文件名再单独加密一次并加 .cpenc
+		parentRel, base := splitRelTail(f.rel)
+		parentEnc, err := resolveDir(parentRel)
+		if err != nil {
+			return err
 		}
-		// 与 Mkdir/下载一致：先拼 vaultPath 前缀（子库密库时上传目标在库内）
-		remote := joinRemote(conn.vaultPath, joinRemote(trimSlash(remoteDir), enc))
+		leaf, err := s.encryptName(conn, base, true)
+		if err != nil {
+			return err
+		}
+		// 与 Mkdir/下载一致：先拼 vaultPath 前缀（子库密库时上传目标在库内）。
+		// 自底向上拼，避开 parentEnc 为空串（文件直接落在 remoteDir 下）时
+		// joinRemote 会多出一个尾斜杠。
+		remote := joinRemote(conn.vaultPath,
+			joinRemote(trimSlash(remoteDir), joinRemote(parentEnc, leaf)))
 		t := transfer.NewTask(f.local, remote, transfer.DirUpload)
 		t.RemoteDir = trimSlash(remoteDir) // UI 目录 remote（根=空串）：前端刷新判定用
-		t.DisplayName = filepath.Base(f.local)
+		t.DisplayName = base
 		// 携带本地源快照：续传/锁库补拍后按 size+mtime 校验源未变（对照
 		// Python _make_upload_task 的 expected_size/expected_mtime）
 		if st, sErr := os.Stat(f.local); sErr == nil {
@@ -202,19 +256,42 @@ func (s *State) UploadPaths(ctx context.Context, localPaths []string, remoteDir 
 	return s.enqueueTasks(conn, tasks)
 }
 
-// encryptRelPath 加密相对路径的每一段（目录/文件名加密配置逐段应用）；
-// lastIsFile 时末段追加 .cpenc 扩展名。
-func (s *State) encryptRelPath(conn *connState, rel string, lastIsFile bool) (string, error) {
-	segs := strings.Split(strings.ReplaceAll(rel, "\\", "/"), "/")
-	out := make([]string, len(segs))
-	for i, seg := range segs {
-		enc, err := s.encryptName(conn, seg, lastIsFile && i == len(segs)-1)
-		if err != nil {
-			return "", err
-		}
-		out[i] = enc
+// splitRelTail 把逻辑相对路径拆成（父逻辑路径, 末段）。
+// 根级条目（如 "a.txt"）的父路径是空串，与 UploadPaths 的基准语义一致。
+func splitRelTail(rel string) (parent, base string) {
+	if i := strings.LastIndex(rel, "/"); i >= 0 {
+		return rel[:i], rel[i+1:]
 	}
-	return strings.Join(out, "/"), nil
+	return "", rel
+}
+
+// listChildDirs 列出 parentRemote（已拼 vaultPath 的远端路径）下的子目录，
+// 返回「解密后的展示名 → 实际密文名」。
+//
+// 存在的意义只有一个：历史密库里同一逻辑目录可能存有**多个**密文名
+// （v1.01 及更早用随机 nonce 加密目录名，上传一次就多裂一个），
+// 上传前先查一遍，命中就复用，避免继续裂下去。重复同名时取先列到的那个
+// —— 无法从名字判断哪个是有内容的，多出来的空目录需要用户自行清理。
+//
+// 列不出（目录不存在 / 后端故障）时返回空表：调用方退回确定性密文名自建，
+// 不让一次列目录失败把整次上传打掉。
+func (s *State) listChildDirs(ctx context.Context, conn *connState, parentRemote string) map[string]string {
+	out := map[string]string{}
+	full := joinRemote(conn.vaultPath, parentRemote)
+	entries, err := s.ListDir(ctx, full)
+	if err != nil {
+		return out
+	}
+	for _, e := range entries {
+		if !e.IsDir {
+			continue
+		}
+		if _, dup := out[e.Display]; dup {
+			continue
+		}
+		out[e.Display] = strings.TrimPrefix(strings.TrimPrefix(e.Remote, full), "/")
+	}
+	return out
 }
 
 // DownloadFiles 下载远端条目（文件或目录；目录递归展开，本地保留明文

@@ -2,11 +2,13 @@ package cryptox
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/protocol"
 )
@@ -14,6 +16,14 @@ import (
 // 文件名加密黄金向量：key = 0x5A*32、nonce = 00..0b（12 字节定值），
 // 由参考实现 AES.new(key, MODE_GCM, nonce) + b32_encode_nopad 真实运行后
 // 打印（filename.py:71-86）。定值 nonce 只用于对拍 —— 生产路径的 nonce 每次随机。
+//
+// ⚠️ 这些常量是 **Python 端写下的 Base32 老格式**（v1.01 及更早）。
+// v1.02 起 Go 产出的密文名改编码为 Base64URL，但 nonce‖密文‖标签的**原始字节
+// 一字未变**，所以：
+//   - 对拍锚点从「字符串相等」下移到「解码后的原始字节相等」（见
+//     TestEncryptFilenameRawBytesMatchPython）；
+//   - 这些老名字仍然必须解得开（TestDecryptFilenameGolden）—— 它们是
+//     真实存在于用户云端的历史文件名，解不开就是数据不可读。
 const (
 	goldenFilenameKey   = "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
 	goldenFilenameNonce = "000102030405060708090a0b"
@@ -268,16 +278,23 @@ func TestB32TrailingBitsAreNotValidated(t *testing.T) {
 	}
 }
 
-// TestEncryptFilenameGolden 是最强的兼容证明：
-// 定 key + 定 nonce 下，Go 的输出必须与 Python 端**逐字符相等**。
-func TestEncryptFilenameGolden(t *testing.T) {
+// TestEncryptFilenameRawBytesMatchPython 是最强的兼容证明：
+// 定 key + 定 nonce 下，Go 产出的 nonce‖密文‖标签 **原始字节** 必须与 Python
+// 端逐字节相等。
+//
+// 对拍锚点刻意放在字节层而不是字符串层：v1.02 把外层编码从 Base32 换成
+// Base64URL，字符串自然不同了 —— 但真正的互操作契约（AES-GCM 的参数、
+// nonce 长度、拼接顺序、标签位置）全部体现在这些字节里。老向量用
+// Base32 解出字节再比，等于同时验证了「新实现没动密码学」和
+// 「老名字的字节仍然解得出来」两件事。
+func TestEncryptFilenameRawBytesMatchPython(t *testing.T) {
 	key := mustHex(t, goldenFilenameKey)
 	nonce := mustHex(t, goldenFilenameNonce)
 
 	tests := []struct {
-		name  string
-		plain string
-		want  string
+		name      string
+		plain     string
+		pythonB32 string
 	}{
 		{"中英混合含空格括号", goldenFilenameMixed, goldenFilenameMixedEnc},
 		{"单字符", goldenFilenameSingle, goldenFilenameSingleEnc},
@@ -286,40 +303,185 @@ func TestEncryptFilenameGolden(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			wantRaw, err := B32DecodeNoPad(tc.pythonB32)
+			if err != nil {
+				t.Fatalf("Python 向量解码失败: %v", err)
+			}
+			gotRaw, err := encryptFilenameRaw(tc.plain, key, nonce)
+			if err != nil {
+				t.Fatalf("encryptFilenameRaw 失败: %v", err)
+			}
+			if !bytes.Equal(gotRaw, wantRaw) {
+				t.Fatalf("原始字节与 Python 端不一致\n got = %x\nwant = %x", gotRaw, wantRaw)
+			}
+
+			// 新编码下的字符串形态：Base64URL(同一批字节)
 			got, err := encryptFilenameWithNonce(tc.plain, key, nonce)
 			if err != nil {
 				t.Fatalf("encryptFilenameWithNonce 失败: %v", err)
 			}
-			if got != tc.want {
-				t.Errorf("密文与 Python 端不一致\n got = %s\nwant = %s", got, tc.want)
+			if want := B64EncodeNoPad(wantRaw); got != want {
+				t.Errorf("编码后应等于 Base64URL(Python 字节)\n got = %s\nwant = %s", got, want)
 			}
 		})
 	}
 }
 
-func TestDecryptFilenameGolden(t *testing.T) {
+// TestEncryptFilenameUsesBase64URL 钉住新格式的形状：
+// 只用 A-Za-z0-9-_、无填充符、长度由明文长度按 4/3 膨胀推出。
+func TestEncryptFilenameUsesBase64URL(t *testing.T) {
 	key := mustHex(t, goldenFilenameKey)
 
-	tests := []struct {
-		name    string
-		encoded string
-		want    string
+	for _, plain := range []string{"", "a", "测试-file (1).txt", strings.Repeat("长文件名", 10) + ".mp4"} {
+		enc, err := EncryptFilename(plain, key)
+		if err != nil {
+			t.Fatalf("EncryptFilename(%q) 失败: %v", plain, err)
+		}
+		for _, r := range enc {
+			if !strings.ContainsRune(protocol.Base64URLAlphabet, r) {
+				t.Errorf("%q 的密文含字母表外字符 %q（密文 %q）", plain, r, enc)
+			}
+		}
+		// 长度必须与「nonce + 密文 + 标签」的 Base64URL 编码完全吻合，
+		// 多一个或少一个都说明编码换了实现
+		rawLen := protocol.FilenameNonceLen + len(truncateFilename(plain)) + protocol.GCMTagLen
+		if want := base64.RawURLEncoding.EncodedLen(rawLen); len(enc) != want {
+			t.Errorf("%q 的密文长度 %d，应为 %d", plain, len(enc), want)
+		}
+	}
+}
+
+// TestEncryptFilenameTruncatesOverlongName 锁定超长名的截断行为：
+// 密文名 + .cpenc 永不越过云端 255 字节上限。
+//
+// 截断是 v1.02 与用户确认的取舍 —— 真实存在的长中文标题视频（40+ 汉字）
+// 在旧格式下会产出 240+ 字符的密文名，被云盘直接拒收。
+func TestEncryptFilenameTruncatesOverlongName(t *testing.T) {
+	key := mustHex(t, goldenFilenameKey)
+
+	cases := []struct {
+		name      string
+		plain     string
+		wantPlain string // 期望解回来的明文（截断后）
 	}{
-		{"中英混合含空格括号", goldenFilenameMixedEnc, goldenFilenameMixed},
-		{"单字符", goldenFilenameSingleEnc, goldenFilenameSingle},
-		{"空文件名", goldenFilenameEmptyEnc, goldenFilenameEmpty},
+		{
+			name:      "超长中文名",
+			plain:     strings.Repeat("长文件名", 60) + ".mp4", // 724 字节 > 150
+			wantPlain: strings.Repeat("长文件名", 12) + "长文",   // 150 字节 = 12×12 + 6
+		},
+		{
+			name:      "超长 ASCII 名",
+			plain:     strings.Repeat("x", 400),
+			wantPlain: strings.Repeat("x", protocol.FilenameMaxPlainBytes),
+		},
+		{
+			name:      "恰好在边界内",
+			plain:     strings.Repeat("x", protocol.FilenameMaxPlainBytes),
+			wantPlain: strings.Repeat("x", protocol.FilenameMaxPlainBytes),
+		},
+		{
+			name: "边界外的多字节字符整字保留",
+			// 147 个 ASCII + 3 字节汉字 = 150，恰好装得下第一个汉字
+			plain:     strings.Repeat("x", 147) + strings.Repeat("字", 4),
+			wantPlain: strings.Repeat("x", 147) + "字",
+		},
+		{
+			name: "被切断的多字节字符整体丢弃",
+			// 148 + 3 = 151 字节，装不下整个汉字 → 退掉这个字，只剩 148 个 x
+			plain:     strings.Repeat("x", 148) + strings.Repeat("字", 4),
+			wantPlain: strings.Repeat("x", 148),
+		},
 	}
 
-	for _, tc := range tests {
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := DecryptFilename(tc.encoded, key)
+			enc, err := EncryptFilename(tc.plain, key)
+			if err != nil {
+				t.Fatalf("EncryptFilename 失败: %v", err)
+			}
+			if total := len(enc) + len(protocol.FileExtension); total > protocol.FilenameMaxEncodedBytes {
+				t.Errorf("密文名 + 扩展名 = %d 字节，越过上限 %d", total, protocol.FilenameMaxEncodedBytes)
+			}
+			got, err := DecryptFilename(enc, key)
 			if err != nil {
 				t.Fatalf("DecryptFilename 失败: %v", err)
 			}
-			if got != tc.want {
-				t.Errorf("解出 %q，Python 端明文为 %q", got, tc.want)
+			if got != tc.wantPlain {
+				t.Errorf("解出 %q（%d 字节），应为 %q", got, len(got), tc.wantPlain)
+			}
+			if !strings.HasPrefix(tc.plain, got) {
+				t.Errorf("截断结果是原名的前缀才合理：%q 不是 %q 的前缀", got, tc.plain)
+			}
+			// 截断绝不能切坏字符
+			if !utf8.ValidString(got) {
+				t.Errorf("截断产出了非法 UTF-8: %q", got)
 			}
 		})
+	}
+}
+
+// TestEncryptDirNameIsDeterministic 钉住目录名的确定性映射。
+//
+// 这是「上传一个文件夹却生成多个文件夹」的根因修复点：同一密钥 + 同一目录名
+// 必须恒得同一密文名，否则 Mkdir 出来的目录与文件父目录段对不上。
+func TestEncryptDirNameIsDeterministic(t *testing.T) {
+	key := mustHex(t, goldenFilenameKey)
+
+	first, err := EncryptDirName("photos", key)
+	if err != nil {
+		t.Fatalf("EncryptDirName 失败: %v", err)
+	}
+	for range 8 {
+		again, err := EncryptDirName("photos", key)
+		if err != nil {
+			t.Fatalf("EncryptDirName 失败: %v", err)
+		}
+		if again != first {
+			t.Fatalf("目录名密文不稳定：%s vs %s", first, again)
+		}
+	}
+	// 不同目录名必须落到不同密文（nonce 派生域若不隔离会毁掉目录结构）
+	other, err := EncryptDirName("videos", key)
+	if err != nil {
+		t.Fatalf("EncryptDirName 失败: %v", err)
+	}
+	if other == first {
+		t.Error("不同目录名得到了相同密文")
+	}
+	// 确定性名同样能解回来，且与文件名用的是同一套解密路径
+	got, err := DecryptFilename(first, key)
+	if err != nil {
+		t.Fatalf("确定性目录名解密失败: %v", err)
+	}
+	if got != "photos" {
+		t.Errorf("解出 %q，应为 %q", got, "photos")
+	}
+	// 别的密钥必须解不开（nonce 由密钥派生，密钥错时认证必然失败）
+	if _, err := DecryptFilename(first, bytes.Repeat([]byte{0x77}, protocol.KeyLen)); !errors.Is(err, ErrFilenameAuth) {
+		t.Errorf("错误密钥应返回 ErrFilenameAuth，实为 %v", err)
+	}
+}
+
+// TestDecryptFilenameAcceptsLegacyBase32 锁定向后兼容：
+// v1.01 及更早（含 Python 端）写下的 Base32 密文名必须照样解得开。
+//
+// 两种格式的字母表是包含关系，靠 GCM 标签裁决，故这条同时验证
+// 「先 Base64URL 后 Base32」的回退顺序真的生效。
+func TestDecryptFilenameAcceptsLegacyBase32(t *testing.T) {
+	key := mustHex(t, goldenFilenameKey)
+
+	for _, tc := range []struct{ enc, plain string }{
+		{goldenFilenameMixedEnc, goldenFilenameMixed},
+		{goldenFilenameSingleEnc, goldenFilenameSingle},
+		{goldenFilenameEmptyEnc, goldenFilenameEmpty},
+	} {
+		got, err := DecryptFilename(tc.enc, key)
+		if err != nil {
+			t.Fatalf("老格式 %q 解密失败: %v", tc.enc, err)
+		}
+		if got != tc.plain {
+			t.Errorf("解出 %q，应为 %q", got, tc.plain)
+		}
 	}
 }
 
@@ -339,6 +501,10 @@ func TestDecryptFilenameRejectsInvalidUTF8(t *testing.T) {
 //
 // 用例集刻意包含各类真实网盘上会出现的名字：超长名、纯 emoji、
 // 含路径分隔符与 Windows 保留字符、首尾空白。
+//
+// ⚠️ 超长名（超过 protocol.FilenameMaxPlainBytes）往返**不再恒等** ——
+// 会被 rune 安全截断，见 TestEncryptFilenameTruncatesOverlongName。
+// 这里的期望值是「截断后的形式」，而不是原名。
 func TestEncryptDecryptRoundTrip(t *testing.T) {
 	key := mustHex(t, goldenFilenameKey)
 
@@ -346,12 +512,11 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 		"",
 		"a",
 		"测试-file (1).txt",
-		strings.Repeat("长文件名", 60) + ".mp4",
 		"😀🎬🔒.mkv",
 		`含\斜杠/与:星*号?引"<>|.rmvb`,
 		"  首尾空白  ",
 		"\u0000含控制字符",
-		strings.Repeat("x", 255),
+		strings.Repeat("x", 255), // 超长 → 截断
 	}
 
 	for _, name := range names {
@@ -363,8 +528,8 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("DecryptFilename(%q) 失败: %v", name, err)
 		}
-		if got != name {
-			t.Errorf("往返不一致\n got = %q\nwant = %q", got, name)
+		if want := truncateFilename(name); got != want {
+			t.Errorf("往返不一致\n got = %q\nwant = %q", got, want)
 		}
 	}
 }
