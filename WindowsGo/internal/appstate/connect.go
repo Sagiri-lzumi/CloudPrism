@@ -72,6 +72,11 @@ func (s *State) OpenVault(ctx context.Context, req OpenRequest) (OpenVaultResult
 		return OpenVaultResult{}, err
 	}
 
+	// 云端分卷：超过分卷尺寸的文件在远端拆成 <名>.cpenc.part-1…N 多个对象，
+	// 由装饰器把分卷折叠回「一个逻辑文件」的语义。挂在这一层之后，加密管线、
+	// 流式代理、目录列表、下载/删除/改名全都不需要知道分卷的存在。
+	backend = storage.NewParted(backend, int64(s.chunkBytes()))
+
 	// 真实网络往返都要兜超时：backend 实现接受 ctx，统一截断。
 	opCtx, cancel := contextWithTimeout(ctx, opTimeout)
 	defer cancel()
@@ -474,14 +479,32 @@ func trimSlash(p string) string {
 // 传输偏好下发（设置页保存后调用）
 // ---------------------------------------------------------------------------
 
-// chunkBytesByIndex 分块大小索引 → 字节（对照 settings 键注释）。
-var chunkBytesByIndex = [...]int{256 << 10, 512 << 10, 1 << 20, 4 << 20}
+// chunkBytesByIndex 分卷尺寸档位索引 → 字节（对照 settings 键注释）。
+//
+// v1.02 起这一档同时是**云端分卷尺寸**：超过它的文件在远端拆成
+// <名>.cpenc.part-1…N 多个对象。因此档位整体上移到 4/16/64/256 MB ——
+// 老的 256KB/4MB 档对大文件意味着几千上万个对象（一次列目录就要几百 KB
+// 报文），既拖慢列表也把网盘目录撑爆。小文件（≤ 档位）仍是一个对象。
+var chunkBytesByIndex = [...]int{4 << 20, 16 << 20, 64 << 20, 256 << 20}
+
+// DefaultChunkIndex 是未设置时的默认档（64 MB）。
+const DefaultChunkIndex = 2
+
+// chunkBytes 取生效的分卷尺寸（字节）。越界/未设置时回默认档。
+func (s *State) chunkBytes() int {
+	idx := s.cfg.Store.Int(settings.KeyChunkIndex, DefaultChunkIndex)
+	if idx < 0 || idx >= len(chunkBytesByIndex) {
+		idx = DefaultChunkIndex
+	}
+	return chunkBytesByIndex[idx]
+}
 
 // ApplyTransferPrefs 把设置里的传输参数下发到队列：分块大小、单任务
 // 加密核数、并发任务数。设置页保存后由绑定层调用（连接态外调用无害，
 // 队列常驻）。
 func (s *State) ApplyTransferPrefs() {
 	s.applyTransferPrefsLocked()
+	s.applyPartSize()
 }
 
 // applyTransferPrefsLocked 实现见上；连接装配内部也调用一次。
@@ -489,10 +512,6 @@ func (s *State) applyTransferPrefsLocked() {
 	store := s.cfg.Store
 	q := s.cfg.Queue
 
-	idx := store.Int(settings.KeyChunkIndex, 0)
-	if idx < 0 || idx >= len(chunkBytesByIndex) {
-		idx = 0
-	}
 	// 加密核数：0/未设置时按 CPU 数，上限 8（避免小核数机器过载）
 	workers := store.Int(settings.KeyMaxCores, 0)
 	if workers <= 0 {
@@ -501,6 +520,22 @@ func (s *State) applyTransferPrefsLocked() {
 	if workers > 8 {
 		workers = 8
 	}
-	q.SetTransferOptions(chunkBytesByIndex[idx], workers)
+	q.SetTransferOptions(s.chunkBytes(), workers)
 	q.SetMaxConcurrent(store.Int(settings.KeyConcurrent, 2))
+}
+
+// applyPartSize 把当前档位同步给分卷装饰器（仅影响后续写入）。
+//
+// 必须与队列的分块尺寸同源：Parted 用「分块尺寸」当分卷尺寸，
+// 两边不一致会让设置页显示的数字与实际落盘的分卷大小对不上。
+func (s *State) applyPartSize() {
+	s.mu.RLock()
+	conn := s.conn
+	s.mu.RUnlock()
+	if conn == nil {
+		return
+	}
+	if parted, ok := conn.backend.(*storage.Parted); ok {
+		parted.SetPartSize(int64(s.chunkBytes()))
+	}
 }

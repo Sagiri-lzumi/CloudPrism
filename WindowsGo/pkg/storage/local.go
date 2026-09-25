@@ -22,10 +22,11 @@ type Local struct {
 	root string // 已 EvalSymlinks + Abs 规范化的绝对根路径
 }
 
-// 编译期断言：Local 同时实现 Backend 与可选的 RangeReaderInto。
+// 编译期断言：Local 同时实现 Backend 与两个可选优化接口。
 var (
 	_ Backend         = (*Local)(nil)
 	_ RangeReaderInto = (*Local)(nil)
+	_ RangeUploader   = (*Local)(nil)
 )
 
 // NewLocal 构造本地后端。root 必须已存在且是目录 —— 与 Python 端一致
@@ -353,7 +354,12 @@ func (b *Local) UploadChunked(
 	}
 	defer dst.Close()
 
-	buf := make([]byte, chunk)
+	// 缓冲按「分块尺寸」与「文件大小」取小者：分块尺寸是上传大文件时的粒度，
+	// 对一个小文件按它开缓冲纯属浪费 —— v1.02 把档位提到 64 MB 之后，
+	// 并发 2 个任务就会为几个 KB 的文件各占 64 MB，且这块内存在目标文件
+	// 已建好（0 字节）之后才分配，等于把「文件存在但还没写」的空窗拉长到
+	// 肉眼可观测的几十毫秒（列表里会一闪而过一个 0 字节条目）。
+	buf := make([]byte, min(int64(chunk), total))
 	var written int64
 	emitted := false
 	for offset+written < total {
@@ -380,6 +386,103 @@ func (b *Local) UploadChunked(
 
 	if !emitted {
 		emit(1.0) // 空文件，或续传时目标已完整
+	}
+	return nil
+}
+
+// UploadRange 把本地文件的 [off, off+length) 写成一个独立对象（Parted 分卷用）。
+//
+// 与 UploadChunked 的差别只有「窗口」：读源用 ReadAt(off+written)、写目标用
+// WriteAt(written)，续传基准是**目标已有字节数**（即本卷已写完的部分）。
+// 因此中途失败重传只影响这一卷，前面几卷已经落盘的不必再传。
+//
+// 对照 RangeUploader 接口注释（pkg/storage/parted.go）。
+func (b *Local) UploadRange(
+	ctx context.Context, local, remote string, off, length int64, onProgress func(float64),
+) error {
+	if off < 0 || length < 0 {
+		return fmt.Errorf("%w: 分卷窗口 [%d,+%d) 非法", ErrRange, off, length)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	emit := func(v float64) {
+		if onProgress != nil {
+			onProgress(v)
+		}
+	}
+
+	src, err := os.Open(local)
+	if err != nil {
+		return notFoundOrBackend(err, local)
+	}
+	defer src.Close()
+
+	info, err := src.Stat()
+	if err != nil {
+		return fmt.Errorf("%w: 读取本地源文件 %s 失败: %v", ErrBackend, local, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%w: 本地源不是文件：%s", ErrNotFound, local)
+	}
+	if off > info.Size() {
+		return fmt.Errorf("%w: 分卷起点 %d 超出源文件 %d 字节", ErrRange, off, info.Size())
+	}
+	// 末卷可能短于 partSize：按源文件长度夹一次，而不是报错
+	length = min64(length, info.Size()-off)
+	if length == 0 {
+		emit(1.0)
+		return nil
+	}
+
+	dstPath, err := b.resolve(remote)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+		return fmt.Errorf("%w: 创建目录 %s 失败: %v", ErrBackend, filepath.Dir(dstPath), err)
+	}
+
+	// 续传基准：目标已存在的字节数（只可能小于本卷长度）
+	var wrote int64
+	if di, err2 := os.Stat(dstPath); err2 == nil && !di.IsDir() {
+		wrote = di.Size()
+	}
+	if wrote > length {
+		wrote = 0 // 目标比本卷大，异常，重写
+	}
+
+	flags := os.O_RDWR | os.O_CREATE
+	if wrote == 0 {
+		flags |= os.O_TRUNC
+	}
+	dst, err := os.OpenFile(dstPath, flags, 0o644)
+	if err != nil {
+		return fmt.Errorf("%w: 打开目标 %s 失败: %v", ErrBackend, remote, err)
+	}
+	defer dst.Close()
+
+	// 分块读写：chunk 取 DefaultChunk，每个分块边界检查取消
+	buf := make([]byte, DefaultChunk)
+	for wrote < length {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		want := min64(int64(len(buf)), length-wrote)
+		n, rerr := src.ReadAt(buf[:want], off+wrote)
+		if n > 0 {
+			if _, werr := dst.WriteAt(buf[:n], wrote); werr != nil {
+				return fmt.Errorf("%w: 写入 %s 失败: %v", ErrBackend, remote, werr)
+			}
+			wrote += int64(n)
+			emit(float64(wrote) / float64(length))
+		}
+		if rerr != nil {
+			if errors.Is(rerr, io.EOF) {
+				break
+			}
+			return fmt.Errorf("%w: 读取本地源文件 %s 失败: %v", ErrBackend, local, rerr)
+		}
 	}
 	return nil
 }

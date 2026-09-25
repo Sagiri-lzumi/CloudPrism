@@ -32,7 +32,7 @@ func (s *Settings) Get() map[string]any {
 		"cacheLimitMb":  store.Int(settings.KeyCacheLimitMB, 512),
 		"cachePath":     store.Get(settings.KeyCachePath, ""),
 		"chunkSizeMb":   store.Int(settings.KeyCacheChunkMB, cache.DefaultChunkMB),
-		"chunkIndex":    store.Int(settings.KeyChunkIndex, 1),
+		"chunkIndex":    store.Int(settings.KeyChunkIndex, appstate.DefaultChunkIndex),
 		"concurrent":    store.Int(settings.KeyConcurrent, 2),
 		"syncDir":       store.Get(settings.KeySyncLocalDir, ""),
 		"maxCores":      store.Int(settings.KeyMaxCores, 0),
@@ -97,7 +97,10 @@ func (s *Settings) PurgeCache() (appstate.CacheInfo, error) {
 	return s.st.CacheInfo(), nil
 }
 
-// SetTransfer 分块档位与并发任务数，立即应用到后续任务。
+// SetTransfer 分卷尺寸档位与并发任务数，立即应用到后续任务。
+//
+// 档位同时决定「云端分卷尺寸」：超过它的文件在远端拆成多个对象，
+// 因此改档位只影响后续写入（已有分卷照旧可读）。
 func (s *Settings) SetTransfer(chunkIndex, concurrent int) error {
 	store := s.st.Store()
 	store.SetInt(settings.KeyChunkIndex, chunkIndex)

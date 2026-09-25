@@ -70,6 +70,10 @@ func Describe(b Backend) (name, addr, kind string) {
 		return "WebDAV", v.baseURL, "webdav"
 	case *Baidu:
 		return "百度网盘", "百度网盘（开放平台授权）", "baidu"
+	case *Parted:
+		// 分卷装饰器对上层透明：描述信息取自被包装的真实后端
+		// （缓存作用域、状态栏、最近密库记录都依赖这个 kind/addr）
+		return Describe(v.inner)
 	}
 	return fmt.Sprintf("%T", b), "-", "unknown"
 }

@@ -30,7 +30,10 @@ type WebDAV struct {
 }
 
 // 编译期断言。
-var _ Backend = (*WebDAV)(nil)
+var (
+	_ Backend       = (*WebDAV)(nil)
+	_ RangeUploader = (*WebDAV)(nil)
+)
 
 // sharedTransport 是所有 WebDAV 后端共用的 HTTP 传输层。
 //
@@ -432,7 +435,9 @@ func (b *WebDAV) UploadChunked(
 		return nil
 	}
 
-	buf := make([]byte, chunk)
+	// 与 Local.UploadChunked 同一处理：缓冲取「分块尺寸」与「文件大小」的小者，
+	// 不给小文件白开一个大缓冲（此处 total > 0，前面已短路空文件分支）。
+	buf := make([]byte, min(int64(chunk), total))
 	pos := offset
 	for pos < total {
 		if err := ctx.Err(); err != nil { // 每个分块边界检查取消
@@ -462,6 +467,99 @@ func (b *WebDAV) UploadChunked(
 			return fmt.Errorf("%w: 读取本地源文件 %s 失败: %v", ErrBackend, local, err)
 		}
 		if err == io.EOF || n == 0 {
+			break
+		}
+	}
+	return nil
+}
+
+// UploadRange 把本地文件的 [off, off+length) 上传成一个独立对象（Parted 分卷用）。
+//
+// 与 UploadChunked 同一套分块 PUT 与续传口径，只是把窗口从「整个文件」收成
+// 「本卷」：Content-Range 的分母是本卷长度（服务器据此续传这一卷），
+// 读源位置整体平移 off。重启后续传时只补这一卷缺的部分，前面的卷不动。
+func (b *WebDAV) UploadRange(
+	ctx context.Context, local, remote string, off, length int64, onProgress func(float64),
+) error {
+	if off < 0 || length < 0 {
+		return fmt.Errorf("%w: 分卷窗口 [%d,+%d) 非法", ErrRange, off, length)
+	}
+	emit := func(v float64) {
+		if onProgress != nil {
+			onProgress(v)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if length == 0 {
+		emit(1.0)
+		return nil
+	}
+
+	src, err := os.Open(local)
+	if err != nil {
+		return notFoundOrBackend(err, local)
+	}
+	defer src.Close()
+
+	info, err := src.Stat()
+	if err != nil {
+		return fmt.Errorf("%w: 读取本地源文件 %s 失败: %v", ErrBackend, local, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%w: 本地源不是文件：%s", ErrNotFound, local)
+	}
+	if off > info.Size() {
+		return fmt.Errorf("%w: 分卷起点 %d 超出源文件 %d 字节", ErrRange, off, info.Size())
+	}
+	length = min64(length, info.Size()-off) // 末卷按源文件长度夹一次
+
+	url := b.remoteURL(remote)
+	// 续传基准：本卷目标已存在的字节数
+	var pos int64
+	if head, herr := b.Head(ctx, remote); herr == nil && head <= length {
+		pos = head
+	}
+	if pos >= length {
+		emit(1.0)
+		return nil
+	}
+
+	buf := make([]byte, DefaultChunk)
+	for pos < length {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// **必须按本卷长度夹一次读取量**：ReadAt 会一直读到文件末尾（或填满
+		// buf），不夹就会把本卷之后的字节一起装进这一卷 —— 结果是每一卷都
+		// 比它应有的长，卷与卷内容重叠，逻辑大小被放大好几倍，读出的是
+		// 错位的字节。与 Local.UploadRange 同一写法。
+		want := min64(int64(len(buf)), length-pos)
+		n, rerr := src.ReadAt(buf[:want], off+pos)
+		if n > 0 {
+			end := pos + int64(n) - 1
+			req, rerr2 := b.newRequest(ctx, http.MethodPut, url, bytes.NewReader(buf[:n]))
+			if rerr2 != nil {
+				return rerr2
+			}
+			req.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", pos, end, length))
+			resp, perr := b.client.Do(req)
+			if perr != nil {
+				return fmt.Errorf("%w: PUT 分卷 [%d-%d] 失败: %v", ErrBackend, pos, end, perr)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != 200 && resp.StatusCode != 201 &&
+				resp.StatusCode != 204 && resp.StatusCode != 308 {
+				return statusErr("PUT", url, resp.StatusCode)
+			}
+			pos += int64(n)
+			emit(float64(pos) / float64(length))
+		}
+		if rerr != nil && !errors.Is(rerr, io.EOF) {
+			return fmt.Errorf("%w: 读取本地源文件 %s 失败: %v", ErrBackend, local, rerr)
+		}
+		if rerr == io.EOF || n == 0 {
 			break
 		}
 	}

@@ -34,8 +34,12 @@ import PageHeader from '../components/layout/PageHeader.vue'
 // 与 Go 端 settings 键注释对齐：字号 12/14/16/18 px；主题索引 0=系统 1=深 2=浅
 const FONT_PX = [12, 14, 16, 18]
 const FONT_LABELS = ['小 (12px)', '中 (14px)', '大 (16px)', '特大 (18px)']
-// 分块档位：索引与 Go 端 transfer/chunk_index 一致（0=256KB … 3=4MB）
-const CHUNK_LABELS = ['256 KB', '512 KB', '1 MB', '4 MB']
+// 云端分卷尺寸档位：索引与 Go 端 transfer/chunk_index 一致
+// （0=4MB 1=16MB 2=64MB 3=256MB，默认 2）
+// 注意这是**远端对象**的切分粒度（一个大文件在云上落成几个 .part-N），
+// 与下面「缓存」组里的 cache/chunk_mb（本地分块读缓存的阈值）不是一回事，
+// 两者各有各的卡片，别混。
+const CHUNK_LABELS = ['4 MB', '16 MB', '64 MB', '256 MB']
 // 大文件分块读缓存的分块大小（MB）：与 Go 端 cache/chunk_mb 同值域，
 // 同时充当「是否分块」的阈值（小于它整存为单独文件）
 const CHUNK_SIZE_MB = [8, 16, 32, 50, 64, 128, 256, 512]
@@ -59,7 +63,7 @@ function onErr(e: unknown) {
 const themeIdx = computed(() => num(ui.settings.themeIndex, 0))
 const fontIdx = computed(() => Math.max(0, FONT_PX.indexOf(num(ui.settings.fontSize, 14))))
 const chunkIdx = computed(() => {
-  const i = num(ui.settings.chunkIndex, 1)
+  const i = num(ui.settings.chunkIndex, 2) // 默认 64 MB 档，与 Go 端 DefaultChunkIndex 对齐
   return Math.min(CHUNK_LABELS.length - 1, Math.max(0, i))
 })
 const concurrent = computed(() => num(ui.settings.concurrent, 2))
@@ -109,10 +113,13 @@ async function onFont(i: number) {
   }
 }
 
+/** 修改云端分卷尺寸。只影响后续新上传的大文件：已有分卷按实际列目录结果解析，
+ *  改档位不会让已传的文件读不出来。 */
 async function onChunk(i: number) {
   ui.settings.chunkIndex = i
   try {
     await Settings.SetTransfer(i, concurrent.value)
+    showInfo(`云端分卷尺寸已设为 ${CHUNK_LABELS[i] ?? '64 MB'}（仅对之后上传的大文件生效）`)
   } catch (e) {
     onErr(e)
   }
@@ -555,7 +562,7 @@ function readBuild() {
         <div class="group-title">缓存</div>
         <ComboBoxCard
           icon="library"
-          title="分块大小"
+          title="缓存分块大小"
           content="大于等于该值的文件按块缓存：切成「原名-1 / 原名-2 …」存进同名子文件夹；小于该值的文件整存为单独文件。按块读取，视频无需等整文件下载完即可播放"
           :options="[...CHUNK_SIZE_LABELS]"
           :model-value="chunkSizeIdx"
@@ -609,8 +616,8 @@ function readBuild() {
         <div class="group-title">传输</div>
         <ComboBoxCard
           icon="library"
-          title="分块大小"
-          content="上传 / 下载单次分块尺寸；网络越好可越大，块头开销越小"
+          title="云端分卷尺寸"
+          content="超过该尺寸的文件在云端拆成多个分卷（.part-1 / .part-2 …）分别上传，界面里仍是一个文件。本地文件夹、WebDAV、百度网盘三种后端一致生效。小文件不受影响，仍是单个对象"
           :options="[...CHUNK_LABELS]"
           :model-value="chunkIdx"
           @change="onChunk"

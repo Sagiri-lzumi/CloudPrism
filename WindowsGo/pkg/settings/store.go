@@ -40,7 +40,7 @@ const (
 	KeyCacheChunkMB = "cache/chunk_mb"
 
 	// 传输 / 性能 / 安全
-	KeyChunkIndex       = "transfer/chunk_index"     // 0=256KB 1=512KB 2=1MB 3=4MB
+	KeyChunkIndex       = "transfer/chunk_index"     // 分卷尺寸：0=4MB 1=16MB 2=64MB 3=256MB（默认 2）
 	KeyConcurrent       = "transfer/concurrent"      // 并发任务数（1~4），默认 2
 	KeyPendingTransfers = "transfer/pending"         // 未完成传输 JSON 字符串
 	KeySyncLocalDir     = "sync/local_dir"           // 文件夹同步本地目录
