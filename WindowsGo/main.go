@@ -20,6 +20,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -96,7 +97,7 @@ func main() {
 		"frontend", frontendFingerprint())
 	if srv.LanActive() {
 		for _, u := range app.lan.ShareURLs(port) {
-			app.log.Info("局域网访问地址（含访问令牌，勿外传）", "url", u)
+			app.log.Info("局域网访问地址（带令牌的完整链接见设置页）", "url", sanitizeShareURL(u))
 		}
 	}
 
@@ -164,8 +165,11 @@ func main() {
 }
 
 // detectRunningInstance 探测 basePort..basePort+3 是否已有 CloudPrism 实例：
-// GET /api/app/ping?token=probe（500ms 超时），应答 pong:probe 即认作本程序。
-// 返回其 URL；无则空串。
+// POST /api/app/ping（500ms 超时，body 带 token=probe），应答 pong:probe
+// 即认作本程序。返回其 URL；无则空串。
+//
+// 用 POST 而非 GET：/api/* 现在一律只接受 POST（见 web.apiMethodOK），
+// GET 会被 405 挡下 —— 探测失败会让第二个实例以为端口空着而另起一个服务。
 func detectRunningInstance() string {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	for p := basePort; p < basePort+maxPortOffset; p++ {
@@ -208,6 +212,20 @@ func listenOn(srv *web.Server, host string, token string) (int, error) {
 		return port, nil
 	}
 	return 0, fmt.Errorf("无可绑端口（尝试 %d-%d 均失败）", basePort, basePort+maxPortOffset-1)
+}
+
+// sanitizeShareURL 去掉分享链接里的查询串（即访问令牌）后再写日志。
+//
+// 令牌是局域网访问的唯一凭据，拿到即等于拿到全部界面能力；而日志文件是
+// 明文落盘、还会轮转保留三份 —— 把带 token 的链接写进去等于把凭据持久化
+// 到磁盘。界面里本来就有可一键复制的完整链接，日志留地址即可。
+func sanitizeShareURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	u.RawQuery, u.Fragment = "", ""
+	return u.String()
 }
 
 // fatal 报告致命错误并终止进程。

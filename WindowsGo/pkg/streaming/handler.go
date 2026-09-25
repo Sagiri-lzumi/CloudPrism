@@ -108,7 +108,14 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request, e *Entry) {
 
 	h := w.Header()
 	h.Set("Accept-Ranges", "bytes")
-	h.Set("Content-Type", MIMEForDisplayName(e.DisplayName))
+	// 内联渲染只放行纯媒体/文档白名单（安全模型见 StreamContentType）；
+	// 白名单外的扩展名（.html/.svg/.xml 与所有未知类型）一律按附件下载，
+	// 否则密库里的文件会在应用源上被当页面执行 = 存储型 XSS。
+	cType, inline := StreamContentType(e.DisplayName)
+	h.Set("Content-Type", cType)
+	if !inline {
+		h.Set("Content-Disposition", contentDisposition(e.DisplayName))
+	}
 	h.Set("Cache-Control", "no-store")
 
 	if r.Method == http.MethodHead {

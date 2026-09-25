@@ -618,18 +618,62 @@ func (s *Server) registerStream(mux *http.ServeMux) {
 
 /* ----------------------------------------------------------- API 包装 */
 
+// maxJSONBodyBytes 是 JSON 端点的请求体上限。
+//
+// 这些端点的入参都是几十字节的结构体；此前用无上限的 io.ReadAll 读 body，
+// 意味着任何一个能访问本服务的客户端只要持续发送数据就能把进程内存吃光。
+// 上传端点（multipart）不走这里，故不受此上限影响。
+const maxJSONBodyBytes = 1 << 20
+
+// apiMethodOK 校验 /api 端点的方法：只认 POST。
+//
+// 为什么钉死 POST：状态变更端点若接受 GET，就绕过了 originAllowed 的跨源
+// 校验（该校验只覆盖非 GET 方法），而跨源 GET 恰恰是「简单请求」——不带
+// Origin、不需要预检、响应读不回也不影响副作用。于是本机浏览器里打开的
+// 任意网页都能盲打 /api/vault/lock、/api/app/quit、/api/settings/purgecache、
+// /api/transfer/cancelall …（回环来源本来还免令牌，等于零门槛）。
+// 前端 lib/api.ts 的 call() 本来就全部走 POST，故这里直接收紧到 POST。
+func apiMethodOK(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodPost {
+		return true
+	}
+	w.Header().Set("Allow", "POST")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusMethodNotAllowed)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"code":    "internal",
+		"message": "该接口只接受 POST 请求",
+	})
+	return false
+}
+
 // wrapErr 包装无 body 的 API：取 handler 返回 (any, error)，error 转 JSON。
 func (s *Server) wrapErr(h func(*http.Request) (any, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !apiMethodOK(w, r) {
+			return
+		}
 		v, err := h(r)
 		s.writeJSON(w, v, err)
 	}
 }
 
-// wrapJSON 包装带 body 的 API：读 body → handler → JSON。
+// wrapJSON 包装带 body 的 API：读 body（有上限）→ handler → JSON。
 func (s *Server) wrapJSON(h func(*http.Request, []byte) (any, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
+		if !apiMethodOK(w, r) {
+			return
+		}
+		var body []byte
+		if r.Body != nil {
+			b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxJSONBodyBytes))
+			if err != nil {
+				s.writeJSON(w, nil, fmt.Errorf("请求体读取失败（上限 %d 字节）: %w", maxJSONBodyBytes, err))
+				return
+			}
+			body = b
+		}
 		v, err := h(r, body)
 		s.writeJSON(w, v, err)
 	}
@@ -693,9 +737,15 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	localPaths := make([]string, 0, len(fileHeaders))
 	for i, fh := range fileHeaders {
+		// 原始上报路径（可能不存在：客户端没带 paths 字段）。先取出来再判，
+		// 否则报错分支里写 rels[i] 会在 i 越界时 panic —— 那是不可信输入。
+		rawRel := ""
+		if i < len(rels) {
+			rawRel = rels[i]
+		}
 		rel, err := resolveStageRel(rels, i, fh.Filename)
 		if err != nil {
-			s.writeJSON(w, nil, fmt.Errorf("上传路径非法 %q: %w", rels[i], err))
+			s.writeJSON(w, nil, fmt.Errorf("上传路径非法 %q: %w", rawRel, err))
 			return
 		}
 
