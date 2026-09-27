@@ -666,6 +666,9 @@ func TestUploadSameSizeOverwriteIsNotNoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取首次上传的密文失败: %v", err)
 	}
+	if got := previewBody(t, addr, "same.txt.cpenc", "same.txt"); got != "AAAA" {
+		t.Fatalf("首份预览内容应为 AAAA，实得 %q", got)
+	}
 
 	// 等长（4 字节）但内容不同的第二次上传：必须真的覆盖
 	upload("BBBB")
@@ -676,13 +679,59 @@ func TestUploadSameSizeOverwriteIsNotNoop(t *testing.T) {
 			if int64(len(after)) != first {
 				t.Fatalf("同尺寸覆盖后密文长度应不变（%d），实得 %d", first, len(after))
 			}
-			return // 已重写
+			break // 已重写
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("同尺寸覆盖上传是静默 no-op：远端密文字节未变（新增的 prepareOverwrite 未生效？）")
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+
+	// 派生缓存必须同步失效：两层缓存的键都只是远端路径（分块缓存另加密文
+	// 大小），同尺寸覆盖两者都不变 ⇒ 不显式失效就会继续吐上一版内容。
+	// 实测过的形态：磁盘容器已是新的，但 /s/ 仍返回 AAAA。
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		got := previewBody(t, addr, "same.txt.cpenc", "same.txt")
+		if got == "BBBB" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("覆盖后预览仍返回旧内容（%q）：派生缓存未随上传失效", got)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// previewBody 走「注册流令牌 → GET /s/」读回一份明文，返回响应体。
+//
+// 每次调用都要重新取令牌：流令牌是一次性的（见 streaming.RegisterStream）。
+func previewBody(t *testing.T, addr, remote, display string) string {
+	t.Helper()
+	resp, err := http.Post("http://"+addr+"/api/preview/mediaurl", "application/json",
+		jsonBody(t, map[string]any{"remote": remote, "display": display}))
+	if err != nil {
+		t.Fatalf("取流地址失败: %v", err)
+	}
+	defer resp.Body.Close()
+	var raw []byte
+	if raw, err = io.ReadAll(resp.Body); err != nil {
+		t.Fatalf("读流地址响应失败: %v", err)
+	}
+	var url string
+	if err := json.Unmarshal(raw, &url); err != nil {
+		t.Fatalf("流地址不是 JSON 字符串: %v（%s）", err, raw)
+	}
+	media, err := http.Get("http://" + addr + url)
+	if err != nil {
+		t.Fatalf("读 /s/ 失败: %v", err)
+	}
+	defer media.Body.Close()
+	body, err := io.ReadAll(media.Body)
+	if err != nil {
+		t.Fatalf("读 /s/ 响应体失败: %v", err)
+	}
+	return string(body)
 }
 
 // waitForNoStage 等待暂存目录被任务终态回调回收干净。
