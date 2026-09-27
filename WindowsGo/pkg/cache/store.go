@@ -588,6 +588,20 @@ func (s *Store) removeLocked(e *entry) {
 	delete(s.entries, e.remote)
 }
 
+// Invalidate 丢弃某个远端路径的全部分块缓存（幂等；路径未缓存时无操作）。
+//
+// 为什么必须由写路径显式调用：命中判据是 (远端路径, 密文大小)，**没有内容
+// 校验**。远端对象被同尺寸覆盖（路径不变、大小不变）时旧块会被继续命中，
+// 于是播放/预览读到的是**上一版内容**；更糟的是与新填的块混拼，解出前后
+// 半段来自不同版本的垃圾。上传、重命名、删除成功后都要调用。
+func (s *Store) Invalidate(remote string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e, ok := s.entries[remote]; ok {
+		s.removeLocked(e) // 内部按 Store.mu → entry.mu 取锁（见 removeLocked）
+	}
+}
+
 // Purge 清空本密库的全部缓存（保留作用域目录与占用标记）。
 //
 // 逐个条目「加锁→删除→解锁」，不在两轮之间长持 Store.mu：清一个大缓存

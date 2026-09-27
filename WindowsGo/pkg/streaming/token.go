@@ -188,6 +188,30 @@ func (r *Registry) RevokeAll() {
 	r.byKey = make(map[string]string)
 }
 
+// RevokePath 吊销某个远端路径上的全部条目（三种 Kind 一并扫），幂等。
+//
+// 幂等注册的假设是「注册后文件内容不变」：Entry 里冻结了注册时刻的文件头
+// （salt/iv）、派生密钥与密文大小。远端文件被覆盖后这些全部失效 —— 继续
+// 用旧 Entry 解密既不得到旧内容也不得到新内容，而是一串乱码（实测：4 字节
+// 覆盖上传后 /s/ 吐出 `J1\xb6^`），Range 数学同样失真。写路径（上传/重命名/
+// 删除）完成后必须调用，让下一次预览重新读头注册。
+func (r *Registry) RevokePath(path string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, kind := range []Kind{KindStream, KindThumb, KindDownload} {
+		key := tokenKey(kind, path)
+		tok, ok := r.byKey[key]
+		if !ok {
+			continue
+		}
+		delete(r.byKey, key)
+		if e, ok := r.byToken[tok]; ok {
+			delete(r.byToken, tok)
+			e.dispose()
+		}
+	}
+}
+
 // Len 返回当前令牌数（测试与诊断用）。
 func (r *Registry) Len() int {
 	r.mu.RLock()

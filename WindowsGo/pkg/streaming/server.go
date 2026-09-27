@@ -281,6 +281,12 @@ func (s *Server) BaseURL() string {
 // Revoke 吊销一个令牌。
 func (s *Server) Revoke(token string) { s.reg.Revoke(token) }
 
+// RevokeRemote 吊销某个远端路径上的全部注册（幂等）。
+//
+// 供写路径在「远端内容已变」后调用：幂等注册冻结了注册时刻的文件头与密钥，
+// 覆盖后必须重新注册，否则预览会解出乱码（详见 Registry.RevokePath）。
+func (s *Server) RevokeRemote(remotePath string) { s.reg.RevokePath(remotePath) }
+
 // RevokeAll 清空全部令牌（锁库/切换后端时调用，派生密钥一并清零）。
 func (s *Server) RevokeAll() { s.reg.RevokeAll() }
 

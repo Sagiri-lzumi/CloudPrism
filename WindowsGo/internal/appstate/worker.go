@@ -99,7 +99,13 @@ func (s *State) uploadFileVia(ctx context.Context, conn *connState, local, remot
 	if err := s.prepareOverwrite(ctx, conn, tmpName, remote); err != nil {
 		return err
 	}
-	return conn.backend.UploadChunked(ctx, tmpName, remote, opts.Chunk, report)
+	if err := conn.backend.UploadChunked(ctx, tmpName, remote, opts.Chunk, report); err != nil {
+		return err
+	}
+	// 远端内容已变，派生缓存（分块读 + 缩略图）必须同步失效：它们的键是
+	// 远端路径，同尺寸覆盖既不换路径也不换大小，留着就会继续吐旧内容。
+	invalidateCaches(conn, remote)
+	return nil
 }
 
 // prepareOverwrite 处理「远端已存在同样大小的对象」这一死角。

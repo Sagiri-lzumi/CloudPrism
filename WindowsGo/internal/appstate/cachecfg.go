@@ -112,6 +112,38 @@ func (s *State) CacheInfo() CacheInfo {
 	return info
 }
 
+// invalidateCaches 丢弃若干远端路径上的派生状态：流注册（/s/ /t/ /d/ 的
+// Entry）、媒体分块读缓存、缩略图缓存。
+//
+// 为什么必须由写路径显式失效 —— 三者都以远端路径为键、且都**没有内容校验**：
+//   - 流 Entry 冻结了注册时刻的文件头（salt/iv）、派生密钥与密文大小，
+//     覆盖后继续用旧 Entry 解密得到的是乱码（实测 4 字节覆盖后 /s/ 吐
+//     `J1\xb6^`），Range 数学也失真；
+//   - 分块读缓存以 (路径, 密文大小) 判命中，同尺寸覆盖两者都不变 ⇒ 继续吐
+//     上一版内容；
+//   - 缩略图缓存只以路径为键 ⇒ 显示上一版画面。
+//
+// 调用时机：上传成功、重命名（旧名 + 新名）、删除成功之后。
+func invalidateCaches(conn *connState, remotes ...string) {
+	if conn == nil {
+		return
+	}
+	for _, r := range remotes {
+		if r == "" {
+			continue
+		}
+		if conn.proxy != nil {
+			conn.proxy.RevokeRemote(r)
+		}
+		if conn.mediaCache != nil {
+			conn.mediaCache.Invalidate(r)
+		}
+		if conn.cache != nil {
+			conn.cache.Remove(r)
+		}
+	}
+}
+
 // PurgeCache 清空本地缓存（缩略图 + 媒体分块）。
 //
 // 已连接时清当前密库作用域；未连接时清理 media/ 下所有「带占用标记的」

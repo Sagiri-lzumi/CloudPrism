@@ -183,8 +183,14 @@ func (s *State) RenameRemote(ctx context.Context, remote, newDisplay string) err
 	}
 	opCtx, cancel := contextWithTimeout(ctx, opTimeout)
 	defer cancel()
-	return conn.backend.Rename(opCtx,
-		joinRemote(conn.vaultPath, remote), joinRemote(conn.vaultPath, dest))
+	oldFull := joinRemote(conn.vaultPath, remote)
+	newFull := joinRemote(conn.vaultPath, dest)
+	if err := conn.backend.Rename(opCtx, oldFull, newFull); err != nil {
+		return err
+	}
+	// 旧名已不存在、新名可能是覆盖目标：两边的派生缓存都要丢
+	invalidateCaches(conn, oldFull, newFull)
+	return nil
 }
 
 // DeleteRemote 删除远端文件或目录（目录递归删除：先列后删，
@@ -206,7 +212,11 @@ func deleteRemoteRecursive(ctx context.Context, conn *connState, remote string) 
 	entries, err := conn.backend.ListDir(ctx, full)
 	if err != nil {
 		// 列不出（非目录/不存在/后端故障）→ 按文件直接删，让后端裁决
-		return conn.backend.Delete(ctx, full)
+		if derr := conn.backend.Delete(ctx, full); derr != nil {
+			return derr
+		}
+		invalidateCaches(conn, full)
+		return nil
 	}
 	// 目录：先删内部条目再删自身
 	for _, e := range entries {
@@ -215,7 +225,11 @@ func deleteRemoteRecursive(ctx context.Context, conn *connState, remote string) 
 			return err
 		}
 	}
-	return conn.backend.Delete(ctx, full)
+	if err := conn.backend.Delete(ctx, full); err != nil {
+		return err
+	}
+	invalidateCaches(conn, full)
+	return nil
 }
 
 // ExportRemote 解密导出到本地目录（替代 Python drag-out；文件保留展示名，

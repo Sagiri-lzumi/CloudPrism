@@ -86,6 +86,27 @@ func (c *Cache) Put(remotePath string, data []byte) {
 	c.writeDisk(key, data)
 }
 
+// Remove 丢弃某个远端路径的缩略图缓存（内存 + 磁盘），幂等。
+//
+// 与分块读缓存同一理由：键只是远端路径本身，没有任何内容校验 ⇒ 远端对象被
+// **同尺寸覆盖**（路径不变、大小不变）后，旧缩略图会被继续命中，界面显示的
+// 是上一版画面。上传/重命名/删除成功后必须显式失效。
+func (c *Cache) Remove(remotePath string) {
+	key := KeyFor(remotePath)
+
+	c.mu.Lock()
+	delete(c.mem, key)
+	for i, k := range c.order {
+		if k == key {
+			c.order = append(c.order[:i], c.order[i+1:]...)
+			break
+		}
+	}
+	c.mu.Unlock()
+
+	_ = os.Remove(filepath.Join(c.dir, key+cacheExt))
+}
+
 // ---------------------------------------------------------------------------
 // 内部实现
 // ---------------------------------------------------------------------------
