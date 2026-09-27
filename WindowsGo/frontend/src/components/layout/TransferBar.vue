@@ -18,9 +18,21 @@ const ratio = computed(() => {
 })
 const percent = computed(() => fmtPct(ratio.value))
 
+// 有字节口径才报「X / Y」；队列里只有删除任务时聚合恒为 0 字节，
+// 写成「1 个任务 · 0 B / 0 B」是纯噪音（用户 2026-09-27：删除也要可见，
+// 但别把没有的信息编出来）。此时只报任务数，进度条走 indeterminate。
 const label = computed(() => {
   const s = snap.value!
+  if (!s.transferTotal || s.transferTotal <= 0) return `${s.transferTasks} 个任务`
   return `${s.transferTasks} 个任务 · ${fmtSize(s.transferDone)} / ${fmtSize(s.transferTotal)}`
+})
+
+// 百分比槽**常驻**（.pct 有 min-width 的定宽槽），无字节口径时只清空文字 ——
+// 直接 v-if 摘掉元素会让相邻的进度条与「详情」按钮跳位（本项目的铁律：
+// 条件渲染的元素不许裸参与 flex 排版）。
+const pctText = computed(() => {
+  const t = snap.value?.transferTotal
+  return t && t > 0 ? `${percent.value}%` : ''
 })
 </script>
 
@@ -35,7 +47,7 @@ const label = computed(() => {
           :indeterminate="!snap.transferTotal || snap.transferTotal <= 0"
         />
       </div>
-      <span class="pct">{{ percent }}%</span>
+      <span class="pct">{{ pctText }}</span>
       <Button class="detail" icon="chevron_right_med" @click="navigate('transfers')">
         详情
       </Button>

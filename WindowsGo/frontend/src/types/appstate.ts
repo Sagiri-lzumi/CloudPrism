@@ -69,11 +69,15 @@ export namespace appstate {
   export interface TaskView {
     id: number
     name: string
+    /** 'upload' | 'download' | 'delete' */
     direction: string
     state: string
     progress: number
     totalBytes: number
     doneBytes: number
+    /** 条目口径进度，仅 direction==='delete' 有意义（传输任务恒为 0） */
+    doneItems: number
+    totalItems: number
     errorMsg: string
     remote: string
     remoteDir: string

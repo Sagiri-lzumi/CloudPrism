@@ -169,18 +169,27 @@ function onFrame(payload: unknown) {
     if (ui.remote !== '') resetBrowse()
   }
 
-  // —— 上传完成就刷新（用户 2026-09-21：不要等 5s 空闲轮询）——
+  // —— 上传 / 删除完成就刷新（用户 2026-09-21：不要等 5s 空闲轮询）——
   // 按「任务在本帧刚进入终态」判定（与上一帧同 id 的状态比较），而不是等整队列
-  // 从 active 翻到 idle —— 批量上传时后者要等最后一个文件，先传完的会被压住。
+  // 从 active 翻到 idle —— 批量时后者要等最后一个，先完成的会被压住。
   const prevState = new Map(wasTasks.map((t) => [t.id, t.state]))
   const finishedNames: string[] = []
+  const deletedNames: string[] = []
   for (const t of tasks) {
-    if (t.direction !== 'upload' || !TERMINAL_STATES.has(t.state)) continue
+    if (!TERMINAL_STATES.has(t.state)) continue
     if (prevState.get(t.id) === t.state) continue // 早已终结，不是「刚完成」
-    if (t.remoteDir !== ui.remote) continue // 传的不是当前目录，列表无需刷新
+    if (t.remoteDir !== ui.remote) continue // 动的不是当前目录，列表无需刷新
+    if (t.direction === 'delete') {
+      // 失败/取消也收进来：那时刷新会把仍然存在的条目**带回来**（见
+      // refreshAfterDelete 的注释），与传输页那条失败任务对照着看。
+      deletedNames.push(t.name)
+      continue
+    }
+    if (t.direction !== 'upload') continue
     if (t.state === 'done') finishedNames.push(t.name)
   }
   if (finishedNames.length) scheduleRefreshAfterUpload(finishedNames)
+  if (deletedNames.length) scheduleRefreshAfterDelete(deletedNames)
   reconcileUploads(tasks)
 
   // 兜底：整队列 active→idle 且确实有传向当前目录的上传任务 → 再刷一次。
@@ -193,7 +202,9 @@ function onFrame(payload: unknown) {
   ) {
     const wantRemote = ui.remote
     const hit = wasTasks.some(
-      (t) => t.direction === 'upload' && t.remoteDir === wantRemote,
+      (t) =>
+        t.remoteDir === wantRemote &&
+        (t.direction === 'upload' || t.direction === 'delete'),
     )
     if (hit) refreshSilent()
   }
@@ -266,6 +277,43 @@ async function refreshAfterUpload(want: string[]) {
 
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms))
+}
+
+/* ------------------------------------------------ 删除终结即刷新 */
+
+let delTimer: ReturnType<typeof setTimeout> | null = null
+let delWanted: string[] = []
+
+/** 合并 300ms 内的多次删除终结：批量删 5 项不该发 5 次列表请求。 */
+function scheduleRefreshAfterDelete(names: string[]) {
+  delWanted.push(...names)
+  if (delTimer) clearTimeout(delTimer)
+  delTimer = setTimeout(() => {
+    delTimer = null
+    const want = delWanted
+    delWanted = []
+    void refreshAfterDelete(want)
+  }, 300)
+}
+
+/**
+ * 删除终结后刷新当前目录，判定口径与上传相反 —— 上传等的是「条目**出现**」，
+ * 删除等的是「条目**消失**」（有界重试 0 / 800ms / 2s，不做无限轮询）。
+ *
+ * 失败与取消也会走到这里，且此时被删条目**应该**还在 ⇒ 会老老实实刷满三次。
+ * 这是有意接受的代价：三次轻量列表请求换「只用一个判定分支」，比按状态分叉
+ * 更不容易出错；而用户拿到的结果正是他要的 —— 文件还在，传输页有一条红字
+ * 说明为什么没删掉。
+ */
+async function refreshAfterDelete(want: string[]) {
+  for (const delay of [0, 800, 2000]) {
+    if (delay) await sleep(delay)
+    if (ui.page !== 'files' || !ui.snap?.connected) return
+    const got = await listDir(ui.remote, {silent: true})
+    if (!got) return
+    const names = new Set(got.map((e) => e.display))
+    if (!want.some((n) => names.has(n))) return // 已全部消失
+  }
 }
 
 
@@ -874,20 +922,29 @@ export async function renameSel(newDisplay: string) {
   }
 }
 
-/** 删除条目（目录递归）。多选时批量删除全部选中项。 */
+/** 删除条目（目录递归）。多选时批量删除全部选中项。
+ *
+ *  **入队执行**：删除与上传/下载共用同一条任务队列，所以删完没有、删到第几项、
+ *  失败原因，全都在「传输」页看得见（用户 2026-09-27：「我删东西，不知道删除
+ *  好了没有，改改」）。
+ *
+ *  为什么提交成功就把条目从当前列表里摘掉：接口只保证「已受理」，真正的删除
+ *  在后台跑。若原地不动，用户点完「确定」看到文件还好端端在那儿，第一反应是
+ *  「没生效」—— 那正是这次要消除的体验。摘除是**乐观**的：真失败时 onFrame
+ *  的终态刷新会把条目带回来，同时传输页留着一条失败任务写明原因。
+ */
 export async function deleteSel() {
   const list = opEntries()
   if (!list.length) return
   try {
-    await Files.Delete(list.map((e) => e.remote))
-    if (list.length > 1) {
-      showSuccess(`已删除 ${list.length} 项`)
-    } else {
-      showSuccess(`已删除「${list[0].display}」`)
-    }
+    const {enqueued} = await Files.Delete(list.map((e) => e.remote))
+    // 只摘远端路径命中的那些，不整表清空（后台刷新可能已经换了目录）
+    const gone = new Set(list.map((e) => e.remote))
+    if (ui.entries) ui.entries = ui.entries.filter((e) => !gone.has(e.remote))
     ui.sel = null
     ui.multi = []
-    void reloadDir()
+    const n = enqueued || list.length
+    showInfo(`已开始删除 ${n} 项，可在「传输」页查看进度`)
   } catch (err) {
     showError('删除失败：' + unwrap(err).message)
   }

@@ -34,7 +34,7 @@ const subTitle = computed(() => {
 
 const doneStates = new Set(['done', 'failed', 'cancelled'])
 
-/** 状态徽章文案/语义色（对照 Python transfer 行状态文本）。 */
+/** 纯传输任务的状态文案（删除任务走 chip() 的独立分支）。 */
 const STATE_META: Record<string, {text: string; cls: string}> = {
   waiting: {text: '等待中', cls: 'idle'},
   running: {text: '传输中', cls: 'run'},
@@ -43,7 +43,51 @@ const STATE_META: Record<string, {text: string; cls: string}> = {
   cancelled: {text: '已取消', cls: 'idle'},
 }
 
-const chip = (s: string) => STATE_META[s] ?? {text: s, cls: 'idle'}
+/** 方向元数据：图标 + 悬停说明。删除复用 'delete' 图标。 */
+const DIR_META: Record<string, {icon: string; title: string}> = {
+  upload: {icon: 'send', title: '上传'},
+  download: {icon: 'download', title: '下载'},
+  delete: {icon: 'delete', title: '删除'},
+}
+
+const dirMeta = (t: appstate.TaskView) => DIR_META[t.direction] ?? DIR_META.upload
+
+const isDelete = (t: appstate.TaskView) => t.direction === 'delete'
+
+/**
+ * 状态徽章文案/语义色。
+ *
+ * 删除任务单独一套动词：把「删除中」写成「传输中」、「已删除」写成「已完成」
+ * 会让用户以为自己在传文件 —— 而这正是本次要解决的「不知道到底啥情况」。
+ */
+function chip(t: appstate.TaskView) {
+  if (isDelete(t)) {
+    const DELETE_META: Record<string, {text: string; cls: string}> = {
+      waiting: {text: '等待删除', cls: 'idle'},
+      running: {text: '删除中', cls: 'run'},
+      done: {text: '已删除', cls: 'ok'},
+      failed: {text: '删除失败', cls: 'err'},
+      cancelled: {text: '已取消', cls: 'idle'},
+    }
+    return DELETE_META[t.state] ?? {text: t.state, cls: 'idle'}
+  }
+  return STATE_META[t.state] ?? {text: t.state, cls: 'idle'}
+}
+
+/**
+ * 行内进度摘要。
+ *
+ * 传输任务报「已传 / 总量」字节；删除没有字节口径（目录大小事先不可知），
+ * 报的是**条目数**：进行中显示增量「已删除 N 项」，完成时才把总数补上
+ * （后端在收尾那一刻才拿得到真实总数，见 appstate.runDeleteTask）。
+ */
+function metaText(t: appstate.TaskView): string {
+  if (!isDelete(t)) return `${fmtSize(t.doneBytes)} / ${fmtSize(t.totalBytes)}`
+  const n = t.state === 'done' ? t.totalItems || t.doneItems : t.doneItems
+  if (t.state === 'done') return `${n} 项`
+  if (t.state === 'running' || t.state === 'waiting') return n ? `已删除 ${n} 项` : '正在统计…'
+  return t.totalItems ? `${t.totalItems} 项` : ''
+}
 
 /* ------------------------------------------------------------ 动作 */
 
@@ -166,33 +210,34 @@ const dlg = reactive({open: false})
           :class="'st-' + t.state"
         >
           <Icon
-            :name="t.direction === 'download' ? 'download' : 'send'"
+            :name="dirMeta(t).icon"
             :size="18"
             class="dir-ic"
             :class="t.direction"
-            :title="t.direction === 'download' ? '下载' : '上传'"
+            :title="dirMeta(t).title"
           />
           <div class="t-body">
             <div class="t-line1">
               <span class="t-name" :title="t.name">{{ t.name }}</span>
-              <span class="t-meta">
-                {{ fmtSize(t.doneBytes) }} / {{ fmtSize(t.totalBytes) }}
-              </span>
+              <span class="t-meta">{{ metaText(t) }}</span>
             </div>
             <div class="t-line2">
               <ProgressBar
                 :value="t.state === 'done' ? 100 : fmtPct(t.progress)"
-                :indeterminate="t.state === 'running' && t.totalBytes <= 0"
+                :indeterminate="t.state === 'running' && (isDelete(t) || t.totalBytes <= 0)"
                 :color="t.state === 'done' ? 'ok' : t.state === 'failed' ? 'err' : 'accent'"
               />
-              <span v-if="t.state === 'running'" class="t-pct">{{ fmtPct(t.progress) }}%</span>
+              <!-- 删除没有百分比可言（条目总数事先不可知），不显示百分号 -->
+              <span v-if="t.state === 'running' && !isDelete(t)" class="t-pct">
+                {{ fmtPct(t.progress) }}%
+              </span>
             </div>
             <div v-if="t.state === 'failed' && t.errorMsg" class="t-err" :title="t.errorMsg">
               {{ t.errorMsg }}
             </div>
           </div>
           <div class="t-right">
-            <span class="chip" :class="chip(t.state).cls">{{ chip(t.state).text }}</span>
+            <span class="chip" :class="chip(t).cls">{{ chip(t).text }}</span>
             <Button
               v-if="t.state === 'failed' || t.state === 'cancelled'"
               iconOnly
@@ -208,7 +253,7 @@ const dlg = reactive({open: false})
       <div v-else class="empty-state">
         <span class="plate"><Icon name="sync" :size="32" /></span>
         <p class="lead">暂无任务</p>
-        <p class="sub">上传/下载任务会显示在这里，可重试失败项或在结束后清空列表。</p>
+        <p class="sub">上传 / 下载 / 删除任务都会显示在这里，可重试失败项或在结束后清空列表。</p>
         <Button v-if="connected" icon="send" @click="pickUpload">上传文件…</Button>
         <Button v-else icon="certificate" @click="navigate('vaults')">前往连接</Button>
       </div>
@@ -335,6 +380,12 @@ const dlg = reactive({open: false})
 
 .dir-ic.upload {
   color: var(--ok);
+}
+
+/* 删除是破坏性动作，图标用错误色与「清空」按钮同语义，
+   一眼能从一列传输任务里分辨出来。 */
+.dir-ic.delete {
+  color: var(--err);
 }
 
 .t-body {

@@ -169,7 +169,9 @@ export const Files = {
   List: (remote: string) => call<appstate.FileEntry[]>('/files/list', {remote}),
   NewFolder: (parent: string, name: string) => call<void>('/files/newfolder', {parent, name}),
   Rename: (remote: string, name: string) => call<void>('/files/rename', {remote, name}),
-  Delete: (remotes: string[]) => call<void>('/files/delete', {remotes}),
+  // 删除为**异步**：返回入队任务数（enqueued），真正的进度与成败在传输任务
+  // 列表里（用户要求「删除也要能在传输中看到」）。调用方提示「已开始删除」。
+  Delete: (remotes: string[]) => call<{enqueued: number}>('/files/delete', {remotes}),
   // dir 由网页版目录选择器给出（后端不再弹原生框）；返回落盘路径。
   Export: (remote: string, dir: string) => call<string>('/files/export', {remote, dir}),
 }
