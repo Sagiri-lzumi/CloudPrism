@@ -30,6 +30,12 @@ type localListing struct {
 		Path   string `json:"path"`
 		Hidden bool   `json:"hidden"`
 	} `json:"dirs"`
+	Files []struct {
+		Name   string `json:"name"`
+		Path   string `json:"path"`
+		Size   int64  `json:"size"`
+		Hidden bool   `json:"hidden"`
+	} `json:"files"`
 }
 
 func postJSON(t *testing.T, url string, body any) (*http.Response, []byte) {
@@ -95,6 +101,32 @@ func TestLocalFSEndpoints(t *testing.T) {
 	}
 	if len(listing.Dirs) != 1 || listing.Dirs[0].Name != "sub-a" {
 		t.Fatalf("应只列出 1 个目录 sub-a，got %+v", listing.Dirs)
+	}
+	if len(listing.Files) != 0 {
+		t.Errorf("默认（目录模式）不该返回文件，got %+v", listing.Files)
+	}
+
+	// --- 文件模式：「上传文件」选择器要选文件，多传一个 files 开关 ---
+	// f.txt 在上面已建好（1 字节）。字段名/大小/隐藏标记都是前端直接消费的契约。
+	resp, body = postJSON(t, base+"/fs/dirs", map[string]any{"path": dir, "files": true})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("文件模式列目录应 200，got %d: %s", resp.StatusCode, body)
+	}
+	var withFiles localListing
+	if err := json.Unmarshal(body, &withFiles); err != nil {
+		t.Fatalf("文件模式响应不是合法 JSON: %v (%s)", err, body)
+	}
+	if len(withFiles.Dirs) != 1 || withFiles.Dirs[0].Name != "sub-a" {
+		t.Errorf("文件模式下目录项不应变化，got %+v", withFiles.Dirs)
+	}
+	if len(withFiles.Files) != 1 || withFiles.Files[0].Name != "f.txt" {
+		t.Fatalf("文件模式应列出 f.txt，got %+v", withFiles.Files)
+	}
+	if withFiles.Files[0].Size != 1 {
+		t.Errorf("文件大小 = %d，期望 1（选择器要靠它算「共 X MB」）", withFiles.Files[0].Size)
+	}
+	if !strings.HasPrefix(withFiles.Files[0].Path, withFiles.Path) {
+		t.Errorf("文件路径 %q 不在 %q 之下", withFiles.Files[0].Path, withFiles.Path)
 	}
 
 	// --- 新建目录并进入 ---

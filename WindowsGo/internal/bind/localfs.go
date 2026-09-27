@@ -18,13 +18,16 @@ func NewLocalFS() *LocalFS { return &LocalFS{} }
 
 // Drives 列出本机盘符（选择器的「此电脑」视图）。
 func (l *LocalFS) Drives() (win.LocalListing, error) {
-	res, err := win.ListLocalDirs("")
+	res, err := win.ListLocalDirs("", false)
 	return res, Wrap(err)
 }
 
 // ListDir 列出 path 下的子目录；path 为空串等价于 Drives。
-func (l *LocalFS) ListDir(path string) (win.LocalListing, error) {
-	res, err := win.ListLocalDirs(path)
+//
+// includeFiles 为真时一并列本层文件 —— 供「上传文件」选择器用（它要选的是
+// 文件而不是目录）。别的调用点保持 false，不为无用的 stat 买单。
+func (l *LocalFS) ListDir(path string, includeFiles bool) (win.LocalListing, error) {
+	res, err := win.ListLocalDirs(path, includeFiles)
 	return res, Wrap(err)
 }
 

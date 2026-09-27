@@ -31,7 +31,11 @@ import (
 
 // localDirMax 单层目录项返回上限：超大目录（如临时目录、node_modules 的父级）
 // 不该把 JSON 响应撑到几 MB。超出时置 Truncated 由前端如实提示。
-const localDirMax = 2000
+//
+// 刻意用 var 而非 const：仅为了让测试能把它临时调小，从而在**不真造 2000 个
+// 文件**的前提下验证「截断预算」的语义（真造一次要跑几十秒，会拖垮整个门禁）。
+// 生产代码只读它，不写。
+var localDirMax = 2000
 
 // LocalDrive 是一个可选盘符。
 type LocalDrive struct {
@@ -40,7 +44,7 @@ type LocalDrive struct {
 	Kind  string `json:"kind"`  // fixed/removable/remote/cdrom/ramdisk/other
 }
 
-// LocalDirEntry 是一个子目录（只列目录，不列文件）。
+// LocalDirEntry 是一个子目录。
 type LocalDirEntry struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
@@ -48,6 +52,18 @@ type LocalDirEntry struct {
 	// 交前端默认折叠而不是后端丢弃：否则用户找不到自己的隐藏文件夹时，
 	// 界面上没有任何线索说明「它们被过滤了」。
 	Hidden bool `json:"hidden"`
+}
+
+// LocalFileEntry 是一个文件（仅在 includeFiles 模式下返回）。
+//
+// 为什么默认不列文件：目录选择器（密库存放目录 / 缓存目录 / 导出位置）只需要
+// 目录，列文件既无用、又要为每一项多付一次 stat（大目录下是实打实的开销）。
+// 「上传文件」按钮需要选文件，才由前端显式打开该开关。
+type LocalFileEntry struct {
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	Hidden bool   `json:"hidden"`
 }
 
 // LocalListing 是一次目录浏览的结果。
@@ -61,12 +77,18 @@ type LocalListing struct {
 	Drives []LocalDrive `json:"drives,omitempty"`
 	// Dirs 是全部子目录（含隐藏项，由 Hidden 标记），已按名称排序。
 	Dirs []LocalDirEntry `json:"dirs"`
-	// Truncated 表示该层目录项超过 localDirMax，已截断。
+	// Files 仅在 includeFiles 模式下有值，同样已按名称排序。
+	Files []LocalFileEntry `json:"files,omitempty"`
+	// Truncated 表示该层条目超过 localDirMax，已截断。
 	Truncated bool `json:"truncated,omitempty"`
 }
 
 // ListLocalDirs 列出 path 下的子目录；path 为空串时返回盘符列表。
-func ListLocalDirs(path string) (LocalListing, error) {
+//
+// includeFiles 为真时一并返回本层文件（「上传文件」选择器用）。截断预算
+// localDirMax 在**两种模式下都只按实际返回的条目计**：目录选择器不会因为
+// 同层文件多而被挤掉目录（不列文件就不计入）。
+func ListLocalDirs(path string, includeFiles bool) (LocalListing, error) {
 	if strings.TrimSpace(path) == "" {
 		return LocalListing{Path: "", Drives: listDrives(), Dirs: []LocalDirEntry{}}, nil
 	}
@@ -82,44 +104,66 @@ func ListLocalDirs(path string) (LocalListing, error) {
 		Path:   dir,
 		Parent: parentLocalDir(dir),
 		Dirs:   make([]LocalDirEntry, 0, len(entries)),
+		Files:  make([]LocalFileEntry, 0),
 	}
+	// 已返回条目数（截断预算）。软链接/权限异常的项不计入 —— 它们不出现在列表里。
+	listed := 0
 	for _, e := range entries {
+		if listed >= localDirMax {
+			out.Truncated = true
+			break
+		}
 		full := filepath.Join(dir, e.Name())
 		info, err := e.Info()
 		if err != nil {
 			continue // 竞态/权限：跳过单项，不让整轮目录浏览失败
 		}
-		if !info.IsDir() {
+		isDir := info.IsDir()
+		if !isDir && info.Mode()&os.ModeSymlink != 0 {
 			// 软链接与 junction 在 Windows 上很常见（如用户目录里的兼容链接），
-			// lstat 看不出它们是目录；只在必要时补一次 stat 跟随，避免
-			// 「目录明明在那儿却列不出来」。
-			if info.Mode()&os.ModeSymlink == 0 {
+			// lstat 看不出它们指向目录还是文件；跟随一次拿到真实类型。
+			// 断链一律不列：选它必然失败，列出来只会制造一次无谓的报错。
+			fi, sErr := os.Stat(full)
+			if sErr != nil {
 				continue
 			}
-			fi, err := os.Stat(full)
-			if err != nil || !fi.IsDir() {
-				continue
-			}
-			info = fi
+			info, isDir = fi, fi.IsDir()
 		}
-		out.Dirs = append(out.Dirs, LocalDirEntry{
+		if isDir {
+			out.Dirs = append(out.Dirs, LocalDirEntry{
+				Name:   e.Name(),
+				Path:   full,
+				Hidden: isHiddenAttr(info),
+			})
+			listed++
+			continue
+		}
+		// 目录选择器到此为止（文件既无用、也不该占截断预算）。
+		if !includeFiles {
+			continue
+		}
+		out.Files = append(out.Files, LocalFileEntry{
 			Name:   e.Name(),
 			Path:   full,
+			Size:   info.Size(),
 			Hidden: isHiddenAttr(info),
 		})
-		if len(out.Dirs) >= localDirMax {
-			out.Truncated = true
-			break
-		}
+		listed++
 	}
-	sort.Slice(out.Dirs, func(i, j int) bool {
-		a, b := strings.ToLower(out.Dirs[i].Name), strings.ToLower(out.Dirs[j].Name)
-		if a != b {
-			return a < b // 大小写不敏感（Windows 语义），同序时再按原名稳定排序
-		}
-		return out.Dirs[i].Name < out.Dirs[j].Name
-	})
+	sortEntries(out.Dirs, func(d LocalDirEntry) string { return d.Name })
+	sortEntries(out.Files, func(f LocalFileEntry) string { return f.Name })
 	return out, nil
+}
+
+// sortEntries 按 Windows 语义（大小写不敏感）排序，同序时按原名稳定收尾。
+func sortEntries[T any](list []T, name func(T) string) {
+	sort.Slice(list, func(i, j int) bool {
+		a, b := strings.ToLower(name(list[i])), strings.ToLower(name(list[j]))
+		if a != b {
+			return a < b
+		}
+		return name(list[i]) < name(list[j])
+	})
 }
 
 // CreateLocalDir 在 parent 下新建名为 name 的目录，返回新目录的绝对路径。

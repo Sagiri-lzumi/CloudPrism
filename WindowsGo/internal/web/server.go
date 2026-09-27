@@ -330,9 +330,12 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 		return s.localfs.Drives()
 	}))
 	mux.HandleFunc("/api/fs/dirs", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
-		var req struct{ Path string }
+		var req struct {
+			Path  string
+			Files bool // 「上传文件」选择器要选文件；其余调用点保持 false
+		}
 		json.Unmarshal(body, &req)
-		return s.localfs.ListDir(req.Path)
+		return s.localfs.ListDir(req.Path, req.Files)
 	}))
 	mux.HandleFunc("/api/fs/mkdir", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
 		var req struct{ Parent, Name string }
@@ -447,6 +450,41 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 
 	// Transfer 域
 	mux.HandleFunc("/api/transfer/upload", s.handleUpload)
+
+	// 直读本机路径上传（按钮通路）。网页版路径选择器给出**绝对路径**，
+	// 后端自己打开这些文件，内容完全不经过浏览器 —— 因此不在 C 盘留一份
+	// 等大的暂存副本（用户 2026-09-27 的诉求：导入文件夹不该吃浏览器缓存）。
+	//
+	// 两个端点都登记在 auth.go 的 localOnlyPaths：它们比 /api/fs/*（只泄露
+	// 目录名）更硬 —— 能让后端读取主机上**任意路径的文件内容**。远端即便
+	// 持有访问令牌也必须拒绝，否则等于把主机文件系统交给整个局域网。
+	//
+	// 为什么分两个端点：/scanpaths 只扫描、不入队，给用户一份「待上传清单」
+	// 确认（误选整个盘符的代价太大）；确认后才由 /uploadpaths 真正入队。
+	// 扫描与入队同源于 appstate.expandLocalPaths，清单与实际传输不会不一致。
+	mux.HandleFunc("/api/transfer/scanpaths", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
+		var req struct{ Paths []string }
+		json.Unmarshal(body, &req)
+		if len(req.Paths) == 0 {
+			return nil, fmt.Errorf("未选择任何文件或文件夹")
+		}
+		return appstate.ScanUploadPaths(req.Paths)
+	}))
+	mux.HandleFunc("/api/transfer/uploadpaths", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
+		var req struct {
+			Paths     []string
+			RemoteDir string
+		}
+		json.Unmarshal(body, &req)
+		if len(req.Paths) == 0 {
+			return nil, fmt.Errorf("未选择任何文件或文件夹")
+		}
+		if err := s.st.UploadPaths(r.Context(), req.Paths, req.RemoteDir); err != nil {
+			return nil, err
+		}
+		return map[string]any{"enqueued": len(req.Paths)}, nil
+	}))
+
 	mux.HandleFunc("/api/transfer/download", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
 		var req struct {
 			Entries  []appstate.FileEntry

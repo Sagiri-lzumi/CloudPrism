@@ -52,11 +52,18 @@ const tokenCookieName = "cp_lan_token"
 // /api/fs/* 是本机目录浏览（网页版目录选择器的数据源）：它能读出主机任意
 // 目录的名字。登记在这里，与「只有本机能弹原生选择框」的原能力边界一致 ——
 // 远端即使令牌正确也只能手输路径，不能让界面去枚举主机目录。
+//
+// /api/transfer/{scanpaths,uploadpaths} 是本机路径**直读上传**：它们比
+// /api/fs/* 更强 —— 后者只泄露目录名，这两个能让后端打开主机上任意路径的
+// 文件并上传。**必须留在这里**：一旦放开，同网段任何拿到令牌的人都能把
+// 宿主机的文件搬到远端存储上（等于远程文件窃取），这是本程序最硬的一道边界。
 var localOnlyPaths = map[string]string{
-	"/api/app/quit":  "退出程序",
-	"/api/fs/drives": "本机目录浏览",
-	"/api/fs/dirs":   "本机目录浏览",
-	"/api/fs/mkdir":  "本机目录浏览",
+	"/api/app/quit":             "退出程序",
+	"/api/fs/drives":            "本机目录浏览",
+	"/api/fs/dirs":              "本机目录浏览",
+	"/api/fs/mkdir":             "本机目录浏览",
+	"/api/transfer/scanpaths":   "本机路径直读",
+	"/api/transfer/uploadpaths": "本机路径直读",
 }
 
 // guard 实现访问闸门。

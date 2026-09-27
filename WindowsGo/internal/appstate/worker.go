@@ -3,7 +3,6 @@ package appstate
 import (
 	"context"
 	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,46 +155,20 @@ func (s *State) enqueueTasks(conn *connState, tasks []*transfer.Task) error {
 // 展开在调用方 goroutine 同步完成（本地 walk，快）：目录先幂等 Mkdir，
 // 随后构造任务整体入队。远端文件名按加密配置变换，目录结构保留明文
 // 逻辑名（对照 app.py _upload_paths / _expand_dir_tasks）。
+//
+// 这是**唯一的两条上传通路共用的终点**：浏览器 multipart 那条先落暂存目录
+// 再把暂存根交进来，直读那条直接把用户选的绝对路径交进来。展开规则同源于
+// expandLocalPaths，两条通路保留目录结构的行为因此必然一致。
 func (s *State) UploadPaths(ctx context.Context, localPaths []string, remoteDir string) error {
 	conn, err := s.requireConn()
 	if err != nil {
 		return err
 	}
 
-	type pending struct{ local, rel string } // rel = 相对 remoteDir 的逻辑路径
-	var files []pending
-	var dirs []string
-	for _, p := range localPaths {
-		st, err := os.Stat(p)
-		if err != nil {
-			return err
-		}
-		if !st.IsDir() {
-			files = append(files, pending{p, filepath.Base(p)})
-			continue
-		}
-		root := filepath.Clean(p)
-		walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			rel, rErr := filepath.Rel(root, path)
-			if rErr != nil {
-				return rErr
-			}
-			rel = filepath.ToSlash(rel)
-			if d.IsDir() {
-				if path != root {
-					dirs = append(dirs, rel)
-				}
-				return nil
-			}
-			files = append(files, pending{path, rel})
-			return nil
-		})
-		if walkErr != nil {
-			return walkErr
-		}
+	// maxFiles=0：真正入队不截断（清单预览才需要上限）。
+	files, dirs, _, err := expandLocalPaths(localPaths, 0)
+	if err != nil {
+		return err
 	}
 
 	opCtx, cancel := contextWithTimeout(ctx, opTimeout)
