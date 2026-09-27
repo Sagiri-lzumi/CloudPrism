@@ -574,3 +574,67 @@ func TestAggregateDoneFull(t *testing.T) {
 		t.Errorf("完成后 UnfinishedTasks 应为空，实得 %d 项", len(u))
 	}
 }
+
+// TestDeleteTaskUsesItemProgressNotBytes 删除任务走**条目口径**，不碰字节。
+//
+// 回归背景（2026-09-27）：prepare 原先只特判 DirUpload，其余方向一律落到下载
+// 分支的「远端大小 - 头估算」。删除任务一旦被当成远端文件，单文件会得到一个
+// 永远走不完的字节分母（DoneBytes 恒 0），底部聚合进度条就此挂死在那个假数字上。
+// 本用例用一个**确实存在、GetSize 会返回正数**的远端对象来逼出这条路径。
+func TestDeleteTaskUsesItemProgressNotBytes(t *testing.T) {
+	root := t.TempDir()
+	// 真造一个「远端对象」，让 GetSize 有值可返回（否则用例对旧实现无区分力）
+	target := "victim.cpenc"
+	if err := os.WriteFile(filepath.Join(root, target), make([]byte, 4096), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b, err := storage.NewLocal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := bindQueue(t, b)
+
+	seen := make(chan [2]int, 4)
+	q.SetRunner(func(ctx context.Context, task *Task, report func(float64)) error {
+		// 模拟删除执行器：逐条目上报（总数未知时传 -1）
+		q.ReportItems(task, 1, -1)
+		q.ReportItems(task, 2, -1)
+		q.ReportItems(task, 2, 2) // 收尾补总数
+		seen <- [2]int{task.Snapshot().DoneItems, task.Snapshot().TotalItems}
+		return nil
+	})
+	q.Enqueue([]*Task{NewTask("", target, DirDelete)})
+	waitIdle(t, q, 3*time.Second)
+
+	got := <-seen
+	if got != [2]int{2, 2} {
+		t.Errorf("条目进度应为 2/2，实得 %v", got)
+	}
+	// 核心：字节聚合必须仍为 (0,0) —— 说明 prepare 没有给删除任务编造字节分母
+	if done, total := q.Aggregate(); done != 0 || total != 0 {
+		t.Errorf("删除任务的字节聚合应为 (0,0)，实得 (%d,%d)", done, total)
+	}
+
+	all := q.AllTasks()
+	if len(all) != 1 {
+		t.Fatalf("应有 1 个任务，实得 %d", len(all))
+	}
+	snap := all[0].Snapshot()
+	if snap.State != StateDone {
+		t.Errorf("任务终态应为 done，实得 %q", snap.State)
+	}
+	if snap.TotalBytes != 0 || snap.DoneBytes != 0 {
+		t.Errorf("删除任务不该有字节口径，实得 total=%d done=%d", snap.TotalBytes, snap.DoneBytes)
+	}
+
+	// 重试必须复位条目计数，否则界面会显示上一轮的「已删 N 项」
+	all[0].lock()
+	all[0].State = StateFailed
+	all[0].unlock()
+	if !q.Retry(all[0]) {
+		t.Fatal("failed 任务应可重试")
+	}
+	if r := all[0].Snapshot(); r.DoneItems != 0 || r.TotalItems != 0 {
+		t.Errorf("重试应复位条目计数，实得 %d/%d", r.DoneItems, r.TotalItems)
+	}
+}

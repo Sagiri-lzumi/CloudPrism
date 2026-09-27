@@ -36,10 +36,22 @@ const (
 )
 
 // 任务方向。
+//
+// DirDelete 复用同一队列（而非另起一套进度上报）：删除与传输共享同一个
+// 「等待→进行→终态」状态机、同一个并发上限、同一份取消/清空语义，也因此
+// 天然出现在传输任务列表与底部聚合栏里 —— 用户 2026-09-27 的诉求正是
+// 「删除也要能在传输中看到、知道删好没删好」。
+//
+// 删除任务与传输任务的唯一差别是**进度口径**：它没有字节进度（目录大小
+// 事先不可知），只有**条目数**，见 DoneItems/TotalItems。
 const (
 	DirUpload   = "upload"
 	DirDownload = "download"
+	DirDelete   = "delete"
 )
+
+// IsDirDelete 判方向是否为删除（供上层免字节口径分支使用）。
+func IsDirDelete(direction string) bool { return direction == DirDelete }
 
 // AutoRetries 失败后自动重试次数（网络容错；超出置 failed 供手动重试）。
 // 对照 transfer_queue.py:38。
@@ -65,19 +77,25 @@ var nextTaskID atomic.Int64
 // mu 为指针字段是有意设计：队列需要跨 goroutine 锁任务，快照拷贝时
 // 不想连带锁对象（快照不可变，无人加锁）；指针化后值拷贝对调用方透明。
 type Task struct {
-	ID            int64   // 进程内稳定标识（NewTask 时分配，不参与持久化）
-	LocalPath     string  // 本地文件路径
-	RemotePath    string  // 后端上的目标路径（含 .cpenc）
-	RemoteDir     string  // 目标父目录（上传任务：UI 目录 remote，根为空串；下载任务为空）
-	DisplayName   string  // 界面显示名；空时取本地文件名
-	Direction     string  // "upload" / "download"
-	State         string  // 状态机取值（见上）
-	Progress      float64 // 0.0~1.0
-	TotalBytes    int64   // 总字节（上传=本地大小；下载=远端大小-头估算）
-	DoneBytes     int64   // 已完成字节（progress × total 的整数投影）
-	Retries       int     // 已自动重试次数
-	ErrorMsg      string  // 最近一次错误信息（failed 时展示）
-	ExpectedSize  *int64  // 续传记录快照（可选）
+	ID          int64   // 进程内稳定标识（NewTask 时分配，不参与持久化）
+	LocalPath   string  // 本地文件路径
+	RemotePath  string  // 后端上的目标路径（含 .cpenc）
+	RemoteDir   string  // 目标父目录（上传任务：UI 目录 remote，根为空串；下载任务为空）
+	DisplayName string  // 界面显示名；空时取本地文件名
+	Direction   string  // "upload" / "download" / "delete"
+	State       string  // 状态机取值（见上）
+	Progress    float64 // 0.0~1.0
+	TotalBytes  int64   // 总字节（上传=本地大小；下载=远端大小-头估算；删除恒为 0）
+	DoneBytes   int64   // 已完成字节（progress × total 的整数投影）
+	// DoneItems/TotalItems 是**条目型任务（删除）**的进度口径：目录的字节数
+	// 与条目总数事先都不可知（预遍历一遍等于把工作量翻倍），所以 TotalItems
+	// 在过程中为 0（前端按「已删 N 项」展示），任务成功收尾时才由执行器补上
+	// 真实值。传输任务恒为 0，互不干扰。
+	DoneItems     int
+	TotalItems    int
+	Retries       int    // 已自动重试次数
+	ErrorMsg      string // 最近一次错误信息（failed 时展示）
+	ExpectedSize  *int64 // 续传记录快照（可选）
 	ExpectedMtime *float64
 
 	mu *sync.Mutex // 保护上述可变字段；队列回调在锁外执行（NewTask 初始化）
@@ -110,6 +128,8 @@ func (t *Task) Snapshot() Task {
 		Progress:      t.Progress,
 		TotalBytes:    t.TotalBytes,
 		DoneBytes:     t.DoneBytes,
+		DoneItems:     t.DoneItems,
+		TotalItems:    t.TotalItems,
 		Retries:       t.Retries,
 		ErrorMsg:      t.ErrorMsg,
 		ExpectedSize:  t.ExpectedSize,
@@ -283,6 +303,8 @@ func (q *Queue) Retry(task *Task) bool {
 	task.State = StateWaiting
 	task.Progress = 0
 	task.DoneBytes = 0
+	task.DoneItems = 0
+	task.TotalItems = 0
 	task.Retries = 0
 	task.ErrorMsg = ""
 	task.unlock()
@@ -608,6 +630,18 @@ func (q *Queue) prepare(ctx context.Context, task *Task) error {
 		return nil
 	}
 
+	// 删除：**必须显式短路**。此前这里直接落到下面的下载分支，删除任务会被
+	// 当成「远端文件」算 TotalBytes = size - HeaderEstimate ⇒ 目录全 0、单文件
+	// 得到一个永远走不完的字节总数（DoneBytes 恒 0）⇒ 底部聚合进度条会挂死在
+	// 那个虚假分母上。删除没有字节进度，一律 0，进度走条目口径（ReportItems）。
+	if task.Direction == DirDelete {
+		task.lock()
+		task.TotalBytes = 0
+		task.DoneBytes = 0
+		task.unlock()
+		return nil
+	}
+
 	// 下载：远端大小 - 头估算；取不到时置 0（运行中 runner 会报真实错误）
 	q.mu.Lock()
 	backend := q.Backend
@@ -686,6 +720,28 @@ func (q *Queue) report(task *Task, p float64) {
 	q.emitAggregate()
 }
 
+// ReportItems 更新条目型任务（删除）的已处理条目数并回调进度。
+//
+// total 传负数表示「总数仍未知」（过程中一直如此），传非负值则一并落定
+// （执行器在成功收尾时把真实的 1:1 总数补上，界面才能从「已删 12 项」变成
+// 「12 / 12 项」）。
+//
+// 不触发 emitAggregate：聚合是以字节为口径的，删除任务字节恒为 0，
+// 每删一个条目就重算一遍全队列纯属浪费。
+func (q *Queue) ReportItems(task *Task, done, total int) {
+	task.lock()
+	if task.State != StateRunning {
+		task.unlock()
+		return // 终态后的迟到进度忽略
+	}
+	task.DoneItems = done
+	if total >= 0 {
+		task.TotalItems = total
+	}
+	task.unlock()
+	q.notifyProgress(task)
+}
+
 // notifyProgress 回调包装（draining 时不发）。
 func (q *Queue) notifyProgress(task *Task) {
 	q.mu.Lock()
@@ -721,6 +777,9 @@ func (q *Queue) emitAggregate() {
 	}
 }
 
+// computeAggregateLocked 按字节聚合。删除任务 TotalBytes 恒为 0（见 prepare），
+// 对分子分母都不贡献 —— 所以「只有删除任务在跑」时聚合为 (0,0)，此时
+// TransferActive 的判定不能再依赖字节，见 appstate.Snapshot。
 func (q *Queue) computeAggregateLocked() (done, total int64) {
 	for _, t := range q.tasks {
 		t.lock()
