@@ -194,10 +194,13 @@ type TaskView struct {
 	Progress    float64 `json:"progress"`
 	TotalBytes  int64   `json:"totalBytes"`
 	DoneBytes   int64   `json:"doneBytes"`
-	ErrorMsg    string  `json:"errorMsg"`
-	RemotePath  string  `json:"remote"`
-	RemoteDir   string  `json:"remoteDir"` // 上传任务的目标父目录 remote（前端按此判定「上传到当前目录」）
-	LocalPath   string  `json:"local"`
+	// DoneItems/TotalItems 仅删除任务有意义（条目口径）；传输任务恒为 0。
+	DoneItems  int    `json:"doneItems"`
+	TotalItems int    `json:"totalItems"`
+	ErrorMsg   string `json:"errorMsg"`
+	RemotePath string `json:"remote"`
+	RemoteDir  string `json:"remoteDir"` // 上传任务的目标父目录 remote；删除任务=被删条目的父目录
+	LocalPath  string `json:"local"`
 }
 
 // Snapshot 是前端订阅的全局状态帧（10Hz 合帧器每帧取一次）。
@@ -250,11 +253,17 @@ func (s *State) Snapshot() Snapshot {
 		snap.HasRecovery = c.meta.HasRecovery
 		snap.ConnectedSec = int64(time.Since(c.connected).Seconds())
 	}
-	if done, total := s.cfg.Queue.Aggregate(); total > 0 {
-		snap.TransferActive = done < total || s.cfg.Queue.HasActive()
+	// 活动态**不能**被字节总数门禁（此前 `total > 0` 是唯一入口）：删除任务的
+	// TotalBytes 恒为 0，只要队列里全是删除任务，聚合就是 (0,0)，一旦用它做
+	// 开关，删除期间 TransferTasks 恒为 0 ⇒ 侧栏角标消失、底部传输栏不出现，
+	// 正好把用户最想看到的「正在删除」藏起来。
+	done, total := s.cfg.Queue.Aggregate()
+	unfinished := len(s.cfg.Queue.UnfinishedTasks())
+	snap.TransferActive = unfinished > 0 || (total > 0 && done < total)
+	snap.TransferTasks = unfinished
+	if total > 0 {
 		snap.TransferDone = done
 		snap.TransferTotal = total
-		snap.TransferTasks = len(s.cfg.Queue.UnfinishedTasks())
 	}
 	return snap
 }

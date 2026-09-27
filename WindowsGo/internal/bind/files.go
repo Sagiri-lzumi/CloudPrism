@@ -48,15 +48,19 @@ func (f *Files) Rename(remote, newDisplay string) error {
 	return nil
 }
 
-// Delete 批量删除远端条目（含目录时递归）；任一失败立即中止并返回。
-func (f *Files) Delete(remotes []string) error {
+// Delete 批量删除远端条目（含目录时递归），返回**入队的删除任务数**。
+//
+// 注意这是「已受理」而不是「已删完」：删除在传输队列里异步执行，进度与
+// 成败要去看传输页的任务列表（用户 2026-09-27 的要求：删除也要在传输中
+// 可见，否则不知道删好没删好）。前端据此给出「已开始删除 N 项」而不是
+// 「已删除 N 项」。
+func (f *Files) Delete(remotes []string) (int, error) {
 	f.st.Activity()
-	for _, r := range remotes {
-		if err := f.st.DeleteRemote(f.ctx.Context(), r); err != nil {
-			return Wrap(err)
-		}
+	n, err := f.st.DeleteRemotes(f.ctx.Context(), remotes)
+	if err != nil {
+		return 0, Wrap(err)
 	}
-	return nil
+	return n, nil
 }
 
 // Export 解密导出单个远端条目到 dir，返回落盘路径。

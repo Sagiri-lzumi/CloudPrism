@@ -362,7 +362,13 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/files/delete", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
 		var req struct{ Remotes []string }
 		json.Unmarshal(body, &req)
-		return nil, s.files.Delete(req.Remotes)
+		// 返回入队任务数：删除是**异步**的（进传输队列），调用方据此提示
+		// 「已开始删除 N 项」，真正的成败去传输任务列表看。
+		n, err := s.files.Delete(req.Remotes)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"enqueued": n}, nil
 	}))
 	mux.HandleFunc("/api/files/export", s.wrapJSON(func(r *http.Request, body []byte) (any, error) {
 		// Dir 由前端选定（网页版目录选择器），后端不再弹原生对话框。

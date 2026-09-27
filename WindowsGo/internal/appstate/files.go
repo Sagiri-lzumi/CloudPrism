@@ -13,6 +13,7 @@ import (
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/pipeline"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/protocol"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/thumb"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/transfer"
 )
 
 // FileEntry 是目录列表条目（前端直接展示与操作）。
@@ -193,22 +194,72 @@ func (s *State) RenameRemote(ctx context.Context, remote, newDisplay string) err
 	return nil
 }
 
-// DeleteRemote 删除远端文件或目录（目录递归删除：先列后删，
-// 规避三后端目录删除语义差异）。对照 app.py _delete_remote。
-func (s *State) DeleteRemote(ctx context.Context, remote string) error {
+// DeleteRemotes 把一批远端条目转成**删除任务**入队，返回入队任务数。
+//
+// 为什么是入队而不是同步删（用户 2026-09-27 的原话：「我删东西，不知道删除
+// 好了没有」）：同步接口在整棵目录删完之前不给任何信号，大目录要等几十秒，
+// 期间界面既无进度也无凭据。入队后删除与上传/下载共享同一套状态机与任务
+// 列表，等待/进行/完成/失败/取消五种状态全部可见，还能取消与重试。
+//
+// 每**个选中项**一个任务（不是每个文件一个）：用户心智里的「一笔删除」就是
+// 他勾的那几项；任务内部自行递归，条目数作为进度上报（见 runDeleteTask）。
+// 所以 M 个文件的目录是 1 个任务，而不是 M 个任务刷屏。
+func (s *State) DeleteRemotes(ctx context.Context, remotes []string) (int, error) {
 	conn, err := s.requireConn()
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return deleteRemoteRecursive(ctx, conn, trimSlash(remote))
+
+	// 归一 + 排序 + 去重 + 丢掉被子项包含的项。
+	//
+	// 「丢掉被包含项」不是洁癖：多选里若同时选中 a 与 a/b，删完 a 之后 a/b
+	// 已经不存在，第二个任务只会白跑一趟并报「找不到」—— 用户看到的是
+	// 一条莫名其妙的失败任务。排序后祖先必然紧邻其后代之前，一趟前缀比较
+	// 即可同时完成去重（child == parent）与包含判定（child 以 parent+"/" 开头）。
+	cleaned := make([]string, 0, len(remotes))
+	for _, r := range remotes {
+		if r = trimSlash(r); r != "" {
+			cleaned = append(cleaned, r)
+		}
+	}
+	sort.Strings(cleaned)
+	roots := cleaned[:0]
+	for _, r := range cleaned {
+		if n := len(roots); n > 0 {
+			if last := roots[n-1]; r == last || strings.HasPrefix(r, last+"/") {
+				continue
+			}
+		}
+		roots = append(roots, r)
+	}
+	if len(roots) == 0 {
+		return 0, nil
+	}
+
+	tasks := make([]*transfer.Task, 0, len(roots))
+	for _, r := range roots {
+		// RemotePath 存**含密库前缀的完整路径**（与 UploadPaths/DownloadFiles
+		// 的约定一致），执行器直接照用，不再二次拼前缀。
+		t := transfer.NewTask("", joinRemote(conn.vaultPath, r), transfer.DirDelete)
+		t.DisplayName = s.displayNameOf(conn, r)
+		t.RemoteDir = parentRemote(r) // 前端按此判定「删的是不是当前浏览目录」
+		tasks = append(tasks, t)
+	}
+	if err := s.enqueueTasks(conn, tasks); err != nil {
+		return 0, err
+	}
+	return len(tasks), nil
 }
 
-// deleteRemoteRecursive 递归删除：目录深度优先删文件后删目录。
-func deleteRemoteRecursive(ctx context.Context, conn *connState, remote string) error {
+// deleteRemoteFull 递归删除**完整远端路径**（含 vaultPath 前缀）。
+//
+// onItem 每成功删掉一个节点（文件或目录各算一个）回调一次，可为 nil；
+// 删除任务据此上报条目进度。**先列后删**是为了规避三后端目录删除语义差异
+// （有的后端删非空目录直接报错）。
+func deleteRemoteFull(ctx context.Context, conn *connState, full string, onItem func()) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
 	}
-	full := joinRemote(conn.vaultPath, remote)
 	entries, err := conn.backend.ListDir(ctx, full)
 	if err != nil {
 		// 列不出（非目录/不存在/后端故障）→ 按文件直接删，让后端裁决
@@ -216,12 +267,17 @@ func deleteRemoteRecursive(ctx context.Context, conn *connState, remote string) 
 			return derr
 		}
 		invalidateCaches(conn, full)
+		onItemDone(onItem)
 		return nil
 	}
-	// 目录：先删内部条目再删自身
+	// 目录：先删内部条目再删自身。逐节点检查取消 —— 大目录递归可能跑很久，
+	// 取消（CancelAll / 锁库 Clear）必须在条目边界就能生效，只在入口查一次
+	// 会让「取消」对一棵大树形同虚设。
 	for _, e := range entries {
-		child := joinRemote(remote, e.Name)
-		if err := deleteRemoteRecursive(ctx, conn, child); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if err := deleteRemoteFull(ctx, conn, joinRemote(full, e.Name), onItem); err != nil {
 			return err
 		}
 	}
@@ -229,7 +285,38 @@ func deleteRemoteRecursive(ctx context.Context, conn *connState, remote string) 
 		return err
 	}
 	invalidateCaches(conn, full)
+	onItemDone(onItem)
 	return nil
+}
+
+// onItemDone 回调的空安全包装。
+func onItemDone(onItem func()) {
+	if onItem != nil {
+		onItem()
+	}
+}
+
+// displayNameOf 取远端条目的解密展示名（只解末段；文件先去掉 .cpenc 后缀）。
+//
+// 判据与 ListDir 同源（后缀即文件）——不另做一次后端探测：目录名恰好以
+// .cpenc 结尾属于病态情形，两处保持同一规则即可，不会自相矛盾。
+func (s *State) displayNameOf(conn *connState, remote string) string {
+	base := remote
+	if i := strings.LastIndex(remote, "/"); i >= 0 {
+		base = remote[i+1:]
+	}
+	if strings.HasSuffix(base, protocol.FileExtension) {
+		return s.decryptName(conn, strings.TrimSuffix(base, protocol.FileExtension))
+	}
+	return s.decryptName(conn, base)
+}
+
+// parentRemote 取远端路径的父目录（根级条目返回空串）。
+func parentRemote(remote string) string {
+	if i := strings.LastIndex(remote, "/"); i >= 0 {
+		return remote[:i]
+	}
+	return ""
 }
 
 // ExportRemote 解密导出到本地目录（替代 Python drag-out；文件保留展示名，

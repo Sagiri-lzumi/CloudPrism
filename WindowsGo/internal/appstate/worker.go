@@ -18,9 +18,9 @@ import (
 //   - bindTaskCallbacks：装配队列终态回调（New 时调用一次）——任务终态
 //     即同步续传记录与横幅计数；进度与聚合不进回调，由状态帧按 10Hz 汇总
 //     （差异清单 #7，避免逐任务 IPC 风暴）；
-//   - makeRunner：按连接构造执行器（上传=加密→分块上传；下载=解密落盘），
-//     Runner 在队列调度 goroutine 中执行；
-//   - UploadPaths / DownloadFiles：本地/远端路径展开成任务集合。
+//   - makeRunner：按连接构造执行器（上传=加密→分块上传；下载=解密落盘；
+//     删除=递归删除），Runner 在队列调度 goroutine 中执行；
+//   - UploadPaths / DownloadFiles / DeleteRemotes：本地/远端路径展开成任务集合。
 //
 // 进度口径：Runner 只 report 0.0~1.0，队列负责映射到 Task 的
 // DoneBytes（Task.TotalBytes 在 prepare 阶段已预统计）。
@@ -43,11 +43,34 @@ func (s *State) bindTaskCallbacks() {
 // 锁库 Clear 使在飞任务取消后不会再启动新任务，故闭包捕获安全。
 func (s *State) makeRunner(conn *connState) transfer.Runner {
 	return func(ctx context.Context, task *transfer.Task, report func(float64)) error {
-		if task.Direction == transfer.DirDownload {
+		switch task.Direction {
+		case transfer.DirDownload:
 			return s.runDownloadTask(ctx, conn, task, report)
+		case transfer.DirDelete:
+			return s.runDeleteTask(ctx, conn, task)
+		default:
+			return s.runUploadTask(ctx, conn, task, report)
 		}
-		return s.runUploadTask(ctx, conn, task, report)
 	}
+}
+
+// runDeleteTask 删除执行：递归删掉 task.RemotePath（含密库前缀的完整路径）。
+//
+// 进度口径是**条目数**而非字节：目录的总字节要预遍历才知道，等于把工作量
+// 翻倍，而用户真正想知道的是「还在删 / 删完了」以及「删掉多少项了」。
+// 过程中 TotalItems 恒为 0（前端显示「已删除 N 项」），成功收尾时才补上
+// 真实总数（此时 N:N 一定成立），界面随之变成「N / N 项」。
+func (s *State) runDeleteTask(ctx context.Context, conn *connState, task *transfer.Task) error {
+	done := 0
+	err := deleteRemoteFull(ctx, conn, task.RemotePath, func() {
+		done++
+		s.cfg.Queue.ReportItems(task, done, -1) // -1 = 总数仍未知
+	})
+	if err != nil {
+		return err
+	}
+	s.cfg.Queue.ReportItems(task, done, done) // 收尾补上总数
+	return nil
 }
 
 // runDownloadTask 下载执行：整文件解密落盘（头解析/分片并行/进度在
@@ -365,6 +388,8 @@ func (s *State) Tasks() []TaskView {
 			Progress:    snap.Progress,
 			TotalBytes:  snap.TotalBytes,
 			DoneBytes:   snap.DoneBytes,
+			DoneItems:   snap.DoneItems,
+			TotalItems:  snap.TotalItems,
 			ErrorMsg:    snap.ErrorMsg,
 			RemotePath:  snap.RemotePath,
 			RemoteDir:   snap.RemoteDir,

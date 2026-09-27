@@ -374,6 +374,13 @@ func (s *State) persistPending() {
 
 	var records []map[string]any
 	for _, t := range s.cfg.Queue.UnfinishedTasks() {
+		// 删除任务**不写续传记录**：删除是一次性动作，「恢复」它没有意义也
+		// 不安全（用户下次进来看见横幅写着「有 1 个任务未完成，可恢复」而点下去
+		// 是在删东西，语义完全出乎意料）。锁库打断的删除只留下一批已删/未删的
+		// 现状，用户重连后看列表即可，不需要「恢复」。
+		if transfer.IsDirDelete(t.Direction) {
+			continue
+		}
 		rec := map[string]any{
 			"local":     t.LocalPath,
 			"remote":    t.RemotePath,
@@ -413,6 +420,11 @@ func (s *State) ResumePending() (int, error) {
 		direction := strOf(rec["direction"])
 		if direction == "" {
 			direction = transfer.DirUpload
+		}
+		// 防御性跳过：删除任务从不写续传记录，这里再挡一次，防的是被手工
+		// 改过的 settings 或更早版本留下的记录把删除塞进「恢复上传」。
+		if transfer.IsDirDelete(direction) {
+			continue
 		}
 		if direction == transfer.DirUpload {
 			if st, err := os.Stat(local); err != nil || !st.Mode().IsRegular() {
