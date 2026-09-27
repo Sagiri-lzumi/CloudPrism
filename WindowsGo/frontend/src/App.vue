@@ -24,12 +24,12 @@ import {
   reloadDir,
   lockVault,
   quitApp,
-  uploadFromFileList,
   onDropFiles,
+  pickUploadFiles,
   downloadSel,
   clearRecovery,
-  localDirPick,
-  settleLocalDir,
+  localPick,
+  settleLocalPick,
   type PageId,
 } from './lib/store'
 import FilesView from './views/FilesView.vue'
@@ -40,6 +40,7 @@ import RecoveryCodeDlg from './views/wizard/RecoveryCodeDlg.vue'
 import TransferBar from './components/layout/TransferBar.vue'
 import StatusBar from './components/layout/StatusBar.vue'
 import FolderPicker from './components/layout/FolderPicker.vue'
+import UploadPlan from './components/layout/UploadPlan.vue'
 import DirTree from './components/DirTree.vue'
 import InfoBar from './components/fluent/InfoBar.vue'
 import Icon from './components/fluent/Icon.vue'
@@ -117,21 +118,10 @@ function onGlobalKey(e: KeyboardEvent) {
   if (k === 'l') {
     if (connected.value) void lockVault()
   } else if (k === 'u') {
-    if (connected.value && isFilePage.value) void pickUpload()
+    if (connected.value && isFilePage.value) void pickUploadFiles()
   } else if (k === 'd') {
     if (connected.value && isFilePage.value && ui.sel) void downloadSel()
   }
-}
-
-/** 快捷键 Ctrl+U 共用：浏览器文件选择框入队上传。 */
-async function pickUpload() {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.multiple = true
-  input.onchange = () => {
-    if (input.files?.length) void uploadFromFileList(input.files)
-  }
-  input.click()
 }
 
 /* -------------------------------------- 全窗口拖放（拖入即加密上传） */
@@ -302,16 +292,21 @@ async function onDrop(e: DragEvent) {
       @close="clearRecovery"
     />
 
-    <!-- 全局目录选择器：向导/设置页/密库页/导出共用的本机目录选择（网页版，
-         取代原先会跑到浏览器窗口后面的原生 IFileOpenDialog）。挂在全局是为了
-         同一时刻只有一个实例，天然复用 ModalShell 的模态栈（Esc 只关最上层）。 -->
+    <!-- 全局路径选择器（目录 / 文件双模式）：向导、设置页、密库页、导出、
+         上传文件、导入文件夹共用。挂在全局是为了同一时刻只有一个实例，
+         天然复用 ModalShell 的模态栈（Esc 只关最上层）。 -->
     <FolderPicker
-      :open="localDirPick.open"
-      :title="localDirPick.title"
-      :start="localDirPick.start"
-      @confirm="settleLocalDir"
-      @cancel="settleLocalDir(null)"
+      :open="localPick.open"
+      :mode="localPick.mode"
+      :title="localPick.title"
+      :start="localPick.start"
+      @confirm="(p) => settleLocalPick({dir: p})"
+      @confirm-files="(ps) => settleLocalPick({files: ps})"
+      @cancel="settleLocalPick(null)"
     />
+
+    <!-- 直读本机路径上传的确认清单（只对「按钮」通路生效；拖放保持选完即传）。 -->
+    <UploadPlan />
 
     <!-- 全窗口拖放遮罩：拖入文件时铺满视口，明确告知「松开即加密上传」。
          pointer-events: none 保证它不抢 drop 目标（否则遮罩自己成为落点）。 -->
@@ -327,6 +322,10 @@ async function onDrop(e: DragEvent) {
           }}
         </p>
         <p v-if="!dropBusy" class="drop-dest">目标位置：{{ ui.remote || '密库根目录' }}</p>
+        <p v-if="!dropBusy" class="drop-hint">
+          拖放需先经浏览器读取内容；文件夹较大时，用工具栏的「上传文件夹…」
+          更快，它由本程序直接读本地文件，不占用浏览器缓存。
+        </p>
       </div>
     </div>
   </div>
@@ -712,6 +711,17 @@ async function onDrop(e: DragEvent) {
   margin: 2px 0 0;
   color: var(--accent);
   font-size: .8rem;
+}
+
+/* 如实告知两条通路的差别：拖放受限于浏览器（只给 File 对象），必须先经浏览器
+   读一遍；主动点按钮则是后端直读本机文件。不写这句，用户会以为「拖进来也一样」。 */
+.drop-hint {
+  margin: 6px 0 0;
+  max-width: 30em;
+  color: var(--text2);
+  font-size: .78rem;
+  line-height: 1.5;
+  opacity: .85;
 }
 
 /* 读取文件夹期间让图标持续旋转，表明后台在枚举目录而不是卡住 */

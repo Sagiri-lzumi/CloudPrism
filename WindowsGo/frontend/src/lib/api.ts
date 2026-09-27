@@ -138,17 +138,29 @@ export interface LocalDirEntry {
   hidden: boolean // 隐藏或系统属性，选择器默认折叠
 }
 
+/** 一个本机文件（仅在 includeFiles 模式下返回，「上传文件」选择器用）。 */
+export interface LocalFileEntry {
+  name: string
+  path: string
+  size: number
+  hidden: boolean
+}
+
 export interface LocalListing {
   path: string // 当前目录；空串 = 「此电脑」视图（只列盘符）
   parent: string // 上一级；空串 = 已在最上层
   drives?: LocalDrive[]
   dirs: LocalDirEntry[]
+  files?: LocalFileEntry[] // 仅 includeFiles 时有值
   truncated?: boolean
 }
 
 export const LocalFS = {
   Drives: () => call<LocalListing>('/fs/drives'),
-  ListDir: (path: string) => call<LocalListing>('/fs/dirs', {path}),
+  // includeFiles：目录选择器一律不传（列文件既无用、又要为每项多付一次 stat）；
+  // 只有「上传文件」选择器需要它。
+  ListDir: (path: string, includeFiles = false) =>
+    call<LocalListing>('/fs/dirs', {path, files: includeFiles}),
   MakeDir: (parent: string, name: string) => call<string>('/fs/mkdir', {parent, name}),
 }
 
@@ -191,6 +203,26 @@ export const Settings = {
   SyncNow: () => call<number>('/settings/syncnow'),
 }
 
+/** 一个待上传条目（清单预览用；rel 是相对目标目录的逻辑路径）。 */
+export interface UploadPlanItem {
+  rel: string
+  size: number
+}
+
+/**
+ * 上传前清单（镜像 appstate.UploadPlan）。
+ *
+ * 直读本机路径上传前的「确认」依据：这些文件全部来自用户在本机选的路径，
+ * 前端拿不到（也不该拿）它们的清单，只能让后端扫一遍报回来。
+ */
+export interface UploadPlan {
+  items: UploadPlanItem[] // 明细，最多若干条（见后端 scanMaxDetail）
+  totalFiles: number
+  totalDirs: number
+  totalBytes: number
+  truncated: boolean // 已达后端扫描上限，统计不完整（必须如实告知用户）
+}
+
 /** Transfer 域：上传/下载/任务管理。 */
 export const Transfer = {
   // 浏览器 multipart 流上传：items 为「File + 相对路径」（见 lib/upload.ts），
@@ -198,6 +230,10 @@ export const Transfer = {
   //
   // paths 与 files 是**同序平行数组**：第 i 个文件的相对路径即 paths[i]。
   // 旧客户端不带 paths 时后端退化为按文件名平铺上传。
+  //
+  // ⚠️ 这条通路**只能**用于拖放：浏览器拖放只给 File 对象，没有绝对路径，
+  // 内容必须经浏览器读一遍并落到后端暂存目录（在用户机器上就是 C 盘）。
+  // 主动点按钮选文件/文件夹请走下面的 UploadPaths。
   Upload: async (items: UploadItem[], remoteDir: string): Promise<void> => {
     const fd = new FormData()
     for (const it of items) fd.append('files', it.file, it.file.name)
@@ -214,6 +250,14 @@ export const Transfer = {
       throw unwrap(err)
     }
   },
+  // 直读本机路径：后端自己打开这些文件，内容**完全不经过浏览器**，
+  // 因此不在 C 盘留一份等大的暂存副本（用户 2026-09-27 的诉求）。
+  //
+  // 两个端点在后端都登记为「仅限本机」—— 它们能读主机任意路径的内容，
+  // 远端调用会被 403 挡下。
+  ScanPaths: (paths: string[]) => call<UploadPlan>('/transfer/scanpaths', {paths}),
+  UploadPaths: (paths: string[], remoteDir: string) =>
+    call<{enqueued: number}>('/transfer/uploadpaths', {paths, remoteDir}),
   // 下载端点 URL：浏览器 <a download> 触发保存（后端 /d/ 流式解密）。
   DownloadURL: (remote: string, display: string) =>
     call<{url: string}>('/transfer/downloadurl', {remote, display}),

@@ -1,19 +1,28 @@
 <!--
-  FolderPicker.vue —— 网页版本机目录选择器（替代主机原生 IFileOpenDialog）。
+  FolderPicker.vue —— 网页版本机「目录 / 文件」选择器（替代主机原生 IFileOpenDialog）。
 
   为什么不是浏览器原生选择器：`<input type="file" webkitdirectory>` 只提供
   `webkitRelativePath`（所选根目录**之下**的相对路径），File 对象也没有任何
   路径属性 —— 浏览器出于安全刻意不暴露绝对路径。而密库存放目录 / 同步目录 /
-  缓存目录 / 导出位置要的恰恰是绝对路径。所以改成：后端列目录（/api/fs/*，
-  见 lib/api.ts 的 LocalFS 域），网页渲染选择器，选完把绝对路径回传。
+  缓存目录 / 导出位置要的恰恰是绝对路径；「上传文件 / 导入文件夹」按钮也同样
+  需要绝对路径（详见 mode 说明）。所以改成：后端列目录（/api/fs/*，见
+  lib/api.ts 的 LocalFS 域），网页渲染选择器，选完把绝对路径回传。
 
   为什么必须替换掉原生对话框：旧的 win.PickFolder 走 IFileOpenDialog，而
   Show(owner=0) 没有属主窗口，对话框会跑到浏览器窗口后面 —— 用户看到的是
   「后台莫名跳出个框」，点不到、也关不掉。
 
+  ⚠️ 文件名保留 FolderPicker 是历史原因（引用点散落在向导/设置页/密库页/文件页），
+  它现在是一个双模式选择器：
+    · mode='dir'（默认）  —— 选一个目录，emit('confirm', 绝对路径)；
+    · mode='files'        —— 选若干文件（可跨目录累计），emit('confirmFiles', 路径数组)。
+  后者的存在理由：让「上传文件」按钮把**绝对路径**交给后端直读，从而不经过
+  浏览器、不在 C 盘留一份暂存副本（用户 2026-09-27 的诉求）。
+
   交互约定（对齐资源管理器直觉，但只保留必要动作）：
     · 单击文件夹 = 进入（没有「选中但不进入」的中间态，页脚始终显示真正会被
       回传的那个目录，不会出现「看着选 A、其实回传 B」）；
+    · 文件模式下单击文件 = 切换选中（可跨目录累计，页脚显示已选数量与总大小）；
     · 路径框可直接输入并回车跳转（网络路径 \\NAS\share 也能直接进）；
     · 隐藏/系统目录默认折叠（$RECYCLE.BIN 这类），可勾选展开；
     · 新建文件夹在当前位置创建并进入（用 LineEdit 自带的 enter 事件，Esc 只
@@ -21,25 +30,41 @@
 -->
 <script setup lang="ts">
 import {computed, ref, watch} from 'vue'
-import {LocalFS, unwrap, type LocalDirEntry, type LocalDrive, type LocalListing} from '../../lib/api'
+import {
+  LocalFS,
+  unwrap,
+  type LocalDirEntry,
+  type LocalDrive,
+  type LocalFileEntry,
+  type LocalListing,
+} from '../../lib/api'
 import ModalShell from './ModalShell.vue'
 import Button from '../fluent/Button.vue'
 import PrimaryButton from '../fluent/PrimaryButton.vue'
 import Icon from '../fluent/Icon.vue'
 import LineEdit from '../fluent/LineEdit.vue'
 import Checkbox from '../fluent/Checkbox.vue'
+import {fmtSize} from '../../lib/format'
 
-const props = defineProps<{
-  open: boolean
-  title: string
-  /** 起始目录；空串 = 从「此电脑」（盘符列表）开始 */
-  start?: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    open: boolean
+    title: string
+    /** 'dir' = 选目录（默认）；'files' = 多选文件 */
+    mode?: 'dir' | 'files'
+    /** 起始目录；空串 = 从「此电脑」（盘符列表）开始 */
+    start?: string
+  }>(),
+  {mode: 'dir'},
+)
 
 const emit = defineEmits<{
   confirm: [path: string]
+  confirmFiles: [paths: string[]]
   cancel: []
 }>()
+
+const filesMode = computed(() => props.mode === 'files')
 
 /* --------------------------------------------------------------- 状态 */
 
@@ -53,15 +78,37 @@ const err = ref('')
 
 const showHidden = ref(false)
 
+/**
+ * 已选文件（绝对路径）。用 Set 而不是数组：切换选中要 O(1) 判存在。
+ * **刻意跨目录累计** —— 用户常需要从几个相邻目录里各挑几个文件，
+ * 每点一次「上一级」就清空会让这个选择器没法用。
+ */
+const picked = ref<Set<string>>(new Set())
+/** 已选文件的字节合计（页脚显示「共 X MB」，让用户对大目录有预期）。 */
+const pickedBytes = ref(0)
+const pickedSizes = ref<Map<string, number>>(new Map())
+
 /** 进入根视图（此电脑）的语义：path === '' */
 const atRoot = computed(() => !listing.value?.path)
 const visibleDirs = computed<LocalDirEntry[]>(() =>
   (listing.value?.dirs ?? []).filter((d) => showHidden.value || !d.hidden),
 )
-const hiddenCount = computed(() => (listing.value?.dirs ?? []).filter((d) => d.hidden).length)
+const visibleFiles = computed<LocalFileEntry[]>(() =>
+  filesMode.value ? (listing.value?.files ?? []).filter((f) => showHidden.value || !f.hidden) : [],
+)
+const hiddenCount = computed(
+  () =>
+    (listing.value?.dirs ?? []).filter((d) => d.hidden).length +
+    (filesMode.value ? (listing.value?.files ?? []).filter((f) => f.hidden).length : 0),
+)
 
-/** 只有确认存在过的目录才可回传（输入框里的草稿不算）。 */
-const canConfirm = computed(() => !!listing.value && !!listing.value.path && !busy.value)
+/** 目录模式：只有确认存在过的目录才可回传（输入框里的草稿不算）。 */
+const canConfirmDir = computed(() => !!listing.value && !!listing.value.path && !busy.value)
+/** 文件模式：至少选了一个文件（否则按钮点了也没意义）。 */
+const canConfirmFiles = computed(() => picked.value.size > 0 && !busy.value)
+const canConfirm = computed(() => (filesMode.value ? canConfirmFiles.value : canConfirmDir.value))
+
+const pickedList = computed(() => Array.from(picked.value))
 
 /* ------------------------------------------------------------- 加载 */
 
@@ -70,7 +117,9 @@ async function load(path: string) {
   busy.value = true
   err.value = ''
   try {
-    listing.value = path ? await LocalFS.ListDir(path) : await LocalFS.Drives()
+    listing.value = path
+      ? await LocalFS.ListDir(path, filesMode.value)
+      : await LocalFS.Drives()
     cur.value = listing.value.path
   } catch (e) {
     const msg = unwrap(e).message
@@ -91,15 +140,43 @@ async function load(path: string) {
 }
 
 // 打开即加载起始目录。用 immediate 无意义（组件常驻，靠 open 变化驱动）。
+// 每次打开都清空已选 —— 上一次的勾选不该悄悄带进这一次操作。
 watch(
   () => props.open,
   (v) => {
     if (!v) return
     showHidden.value = false
     mkdirOpen.value = false
+    picked.value = new Set()
+    pickedBytes.value = 0
+    pickedSizes.value = new Map()
     void load(props.start ?? '')
   },
 )
+
+/* --------------------------------------------------------- 文件勾选 */
+
+function toggleFile(f: LocalFileEntry) {
+  const next = new Set(picked.value)
+  const sizes = new Map(pickedSizes.value)
+  if (next.has(f.path)) {
+    next.delete(f.path)
+    sizes.delete(f.path)
+    pickedBytes.value -= f.size
+  } else {
+    next.add(f.path)
+    sizes.set(f.path, f.size)
+    pickedBytes.value += f.size
+  }
+  picked.value = next
+  pickedSizes.value = sizes
+}
+
+function clearPicked() {
+  picked.value = new Set()
+  pickedSizes.value = new Map()
+  pickedBytes.value = 0
+}
 
 /* --------------------------------------------------------- 新建文件夹 */
 
@@ -146,6 +223,10 @@ function driveText(d: LocalDrive): string {
 
 function confirm() {
   if (!canConfirm.value) return
+  if (filesMode.value) {
+    emit('confirmFiles', pickedList.value)
+    return
+  }
   emit('confirm', listing.value!.path)
 }
 </script>
@@ -234,8 +315,8 @@ function confirm() {
       </template>
 
       <template v-else>
-        <p v-if="!visibleDirs.length" class="lp-hint">
-          此目录下没有子文件夹。可直接点「选择此文件夹」。
+        <p v-if="!visibleDirs.length && !visibleFiles.length" class="lp-hint">
+          {{ filesMode ? '此目录下没有可选内容。' : '此目录下没有子文件夹。可直接点「选择此文件夹」。' }}
         </p>
         <button
           v-for="d in visibleDirs"
@@ -250,24 +331,53 @@ function confirm() {
           <span v-if="d.hidden" class="lp-tag">隐藏</span>
           <Icon name="chevron_right_med" :size="15" class="lp-go" />
         </button>
-        <p v-if="listing?.truncated" class="lp-hint">目录项过多，仅显示前 2000 项。</p>
+
+        <!-- 文件行：单击切换选中（可跨目录累计），不进入任何层级 -->
+        <button
+          v-for="f in visibleFiles"
+          :key="f.path"
+          type="button"
+          class="lp-row lp-file"
+          :class="{on: picked.has(f.path)}"
+          :title="f.path"
+          @click="toggleFile(f)"
+        >
+          <span class="lp-box" :class="{on: picked.has(f.path)}">
+            <Icon v-if="picked.has(f.path)" name="check" :size="12" />
+          </span>
+          <span class="lp-name" :class="{dim: f.hidden}">{{ f.name }}</span>
+          <span class="lp-tag">{{ fmtSize(f.size) }}</span>
+        </button>
+
+        <p v-if="listing?.truncated" class="lp-hint">
+          目录项过多，仅显示前 2000 项。可用路径框直接跳转，或分批选择。
+        </p>
       </template>
     </div>
 
-    <!-- 页脚：左侧如实展示「会回传哪个目录」（草稿输入不算数），右侧取消/确定 -->
+    <!-- 页脚：左侧如实展示「会回传什么」（草稿输入不算数），右侧取消/确定 -->
     <template #foot-lead>
       <div class="lp-foot">
         <Checkbox v-if="hiddenCount" v-model="showHidden">
-          显示隐藏文件夹（{{ hiddenCount }}）
+          显示隐藏项（{{ hiddenCount }}）
         </Checkbox>
-        <span v-if="canConfirm" class="lp-sel" :title="listing?.path">
+        <template v-if="filesMode">
+          <span v-if="picked.size" class="lp-sel">
+            已选 {{ picked.size }} 个文件 · 共 {{ fmtSize(pickedBytes) }}
+            <button type="button" class="lp-clear" @click="clearPicked">清空</button>
+          </span>
+          <span v-else class="lp-sel">单击文件即可选中，可跨目录累计</span>
+        </template>
+        <span v-else-if="canConfirmDir" class="lp-sel" :title="listing?.path">
           将选择：{{ listing?.path }}
         </span>
       </div>
     </template>
     <template #actions>
       <Button @click="emit('cancel')">取消</Button>
-      <PrimaryButton :disabled="!canConfirm" @click="confirm">选择此文件夹</PrimaryButton>
+      <PrimaryButton :disabled="!canConfirm" @click="confirm">
+        {{ filesMode ? `选择 ${picked.size} 个文件` : '选择此文件夹' }}
+      </PrimaryButton>
     </template>
   </ModalShell>
 </template>
@@ -354,6 +464,48 @@ function confirm() {
 
 .lp-row:hover {
   background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+/* 文件行：勾选态用既有的选中底色 token，不新造颜色 */
+.lp-row.lp-file.on {
+  background: var(--accent-soft);
+}
+
+/* 勾选方块：**定宽槽**，无论勾没勾都占同样的宽度 ——
+   否则未选中的行会把文件名整体左移，列表看着是锯齿状的。
+   （这是本项目反复踩过的一类问题：条件渲染的元素不许裸参与 flex 排版。） */
+.lp-box {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid color-mix(in srgb, var(--text) 28%, transparent);
+  border-radius: 4px;
+  color: var(--text-on-accent);
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.lp-box.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* 页脚「清空」：内联小按钮，只做撤销勾选这一件事 */
+.lp-clear {
+  margin-left: 8px;
+  padding: 0;
+  font: inherit;
+  font-size: 0.786rem;
+  color: var(--accent);
+  background: none;
+  border: none;
+  text-decoration: underline;
+}
+
+.lp-clear:hover {
+  opacity: 0.75;
 }
 
 .lp-ic {

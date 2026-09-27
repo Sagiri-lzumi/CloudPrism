@@ -12,7 +12,17 @@
 
 import {reactive} from 'vue'
 import type {appstate} from '../types/appstate'
-import {ApiCode, App, Files, Preview, Settings, Transfer, Vault, unwrap} from './api'
+import {
+  ApiCode,
+  App,
+  Files,
+  Preview,
+  Settings,
+  Transfer,
+  Vault,
+  unwrap,
+  type UploadPlan,
+} from './api'
 import * as evt from './events'
 import {applyThemeIndex} from './theme'
 import {showError, showInfo, showSuccess} from './toast'
@@ -598,6 +608,149 @@ export async function uploadFromFileList(
   await uploadFiles(items, remoteDir)
 }
 
+/* --------------------------------------------- 直读本机路径上传（按钮通路） */
+
+/**
+ * 「待上传清单」确认框的状态（App.vue 挂 UploadPlan，页面只调下面三个函数）。
+ *
+ * 为什么需要它：直读通路的文件清单只有后端知道（它 walk 的是本机路径），
+ * 前端在扫描回来之前给不出任何预览；而误选一个占空间的目录代价很大
+ * （几十 GB 直接进队列）。所以选完先扫描、给一份清单，确认后再入队。
+ */
+export interface UploadPlanState {
+  open: boolean
+  /** 扫描在途：后端正在 walk 本地目录，大目录可能要几秒 */
+  scanning: boolean
+  /** 入队在途 */
+  uploading: boolean
+  /** 扫描失败的原因（就地展示在确认框里，不另弹 toast） */
+  error: string
+  remoteDir: string
+  /** 用户选中的本机绝对路径（目录或文件），确认时原样回传后端 */
+  paths: string[]
+  plan: UploadPlan | null
+}
+
+export const uploadPlan = reactive<UploadPlanState>({
+  open: false,
+  scanning: false,
+  uploading: false,
+  error: '',
+  remoteDir: '',
+  paths: [],
+  plan: null,
+})
+
+/**
+ * 扫描本机路径并弹出「待上传清单」。
+ *
+ * 这是「按钮通路」与「拖放通路」的分岔点：拖放只能拿到 File 对象（没有绝对
+ * 路径），必须经浏览器读一遍；而按钮选出来的是**绝对路径**，后端可以直接打开
+ * 这些文件 —— 于是整个文件夹不再先落到 C 盘的暂存目录。
+ */
+export async function requestUploadByPaths(
+  paths: string[],
+  remoteDir: string = ui.remote,
+): Promise<void> {
+  if (!paths.length) {
+    showInfo('没有选择任何文件或文件夹')
+    return
+  }
+  uploadPlan.open = true
+  uploadPlan.scanning = true
+  uploadPlan.uploading = false
+  uploadPlan.error = ''
+  uploadPlan.plan = null
+  uploadPlan.paths = paths
+  uploadPlan.remoteDir = remoteDir
+  try {
+    uploadPlan.plan = await Transfer.ScanPaths(paths)
+  } catch (e) {
+    uploadPlan.error = unwrap(e).message
+  } finally {
+    uploadPlan.scanning = false
+  }
+}
+
+/** 确认清单：真正入队（并照旧挂上「投递即占位」的条目）。 */
+export async function confirmUploadByPaths(): Promise<void> {
+  const st = uploadPlan
+  if (!st.plan || st.scanning || st.uploading || !st.plan.totalFiles) return
+  st.uploading = true
+  st.error = ''
+
+  // 占位规则与拖放通路完全一致：只给**直接落在目标目录**的文件占位
+  // （rel 带 '/' 的会进子目录，占在当前目录是错位）。清单正好提供了名字与大小。
+  const stamp = Date.now()
+  const batch: UploadPlaceholder[] = (st.plan.items ?? [])
+    .filter((it) => !it.rel.includes('/'))
+    .map((it, i) => ({
+      key: `${stamp}-${i}-${it.rel}`,
+      name: it.rel,
+      size: it.size,
+      dir: st.remoteDir,
+      at: stamp,
+      taskId: 0,
+      progress: null,
+      state: '',
+    }))
+  if (batch.length) ui.uploads.push(...batch)
+
+  try {
+    await Transfer.UploadPaths(st.paths, st.remoteDir)
+    // 明文不由浏览器经手，后端边读边加密；净效果与拖放一致。
+    const scope = st.plan.totalDirs ? '（含文件夹，保留目录结构）' : ''
+    showInfo(`已加入加密上传队列：${st.plan.totalFiles} 个文件${scope}`)
+    closeUploadPlan()
+  } catch (e) {
+    // 请求失败 → 不会产生任务，占位必须立刻撤掉（否则成幽灵条目）
+    const keys = new Set(batch.map((b) => b.key))
+    ui.uploads = ui.uploads.filter((u) => !keys.has(u.key))
+    st.error = unwrap(e).message
+  } finally {
+    st.uploading = false
+  }
+}
+
+/** 取消清单（扫描/入队在途也允许 —— 用户不该被一次误选困住）。 */
+export function cancelUploadPlan(): void {
+  closeUploadPlan()
+}
+
+function closeUploadPlan() {
+  uploadPlan.open = false
+  uploadPlan.scanning = false
+  uploadPlan.uploading = false
+  uploadPlan.error = ''
+  uploadPlan.paths = []
+  uploadPlan.plan = null
+}
+
+/**
+ * 「上传文件」按钮的统一入口（文件页菜单、Ctrl+U、传输页空态快捷入口共用）。
+ *
+ * 与拖放的分工：**按钮一律直读本机路径**，拖放一律走浏览器通路。用户
+ * 2026-09-27 明确要求如此 —— 按钮是他主动发起的、可以走更省事的路子；
+ * 拖放受限于浏览器只给 File 对象，只能经一遍浏览器缓存。
+ */
+export async function pickUploadFiles(remoteDir: string = ui.remote): Promise<void> {
+  const paths = await pickLocalFiles({
+    title: '选择要上传的文件（可多选，可跨文件夹累计）',
+    start: lastUploadDir(),
+  })
+  if (!paths?.length) return
+  rememberUploadDir(dirOfFile(paths[0]))
+  await requestUploadByPaths(paths, remoteDir)
+}
+
+/** 「上传文件夹」按钮的统一入口：选一个本机目录，后端递归展开后直读上传。 */
+export async function pickUploadFolder(remoteDir: string = ui.remote): Promise<void> {
+  const dir = await pickLocalDir({title: '选择要导入的文件夹', start: lastUploadDir()})
+  if (!dir) return
+  rememberUploadDir(dir)
+  await requestUploadByPaths([dir], remoteDir)
+}
+
 /** 取当前生效的操作集合：多选 >1 用 multi，否则回退主条目。 */
 function opEntries(): appstate.FileEntry[] {
   return ui.multi.length > 1 ? ui.multi : ui.sel ? [ui.sel] : []
@@ -740,55 +893,87 @@ export async function deleteSel() {
   }
 }
 
-/* ------------------------------------------------------- 全局目录选择器 */
+/* ------------------------------------------------------- 全局路径选择器 */
 
 /**
- * 网页版本机目录选择器的全局单例状态（App.vue 挂载 FolderPicker，其余页面只调
- * pickLocalDir）。
+ * 网页版本机「目录 / 文件」选择器的全局单例状态（App.vue 挂载 FolderPicker，
+ * 其余页面只调 pickLocalDir / pickLocalFiles）。
  *
  * 为什么做成全局单例：调用点分散在向导 / 设置页（同步目录 + 缓存目录）/ 密库页 /
- * 文件页（导出）四处，其中向导自身就在模态里。全局一份既省掉四份重复浮层，
- * 又天然复用 ModalShell 的模态栈（Esc 只关最上层那个，不会连关两层）。
+ * 文件页（导出、上传文件、导入文件夹）多处，其中向导自身就在模态里。全局一份
+ * 既省掉多份重复浮层，又天然复用 ModalShell 的模态栈（Esc 只关最上层那个）。
  *
  * 为什么不用主机原生对话框：IFileOpenDialog 以 owner=0 弹出、没有属主窗口，
  * 会跑到浏览器窗口后面 —— 用户看到的是「后台莫名跳出个框」。
  */
-export interface LocalDirPick {
+export interface LocalPick {
   open: boolean
+  /** 'dir' = 选一个目录；'files' = 多选文件（「上传文件」按钮用） */
+  mode: 'dir' | 'files'
   title: string
   /** 起始目录；空串 = 从「此电脑」开始 */
   start: string
 }
 
-export const localDirPick = reactive<LocalDirPick>({open: false, title: '', start: ''})
+export const localPick = reactive<LocalPick>({open: false, mode: 'dir', title: '', start: ''})
 
-/** 在途选择的兑现函数；null = 当前没有请求。 */
-let pickSettle: ((dir: string | null) => void) | null = null
+/** 在途请求的兑现函数；null = 当前没有请求。两条通路互斥（同时只开一个选择器）。 */
+let pickDirSettle: ((dir: string | null) => void) | null = null
+let pickFilesSettle: ((files: string[] | null) => void) | null = null
 
 /**
  * 打开目录选择器并等待用户选择。
- * @param opts.title 选择器标题（说清「在选什么目录」，四处语义各不相同）
+ * @param opts.title 选择器标题（说清「在选什么目录」，各处语义各不相同）
  * @param opts.start 起始目录（一般为当前已配置的值）
  * @returns 选中的绝对路径；用户取消返回 null。
  */
 export function pickLocalDir(opts: {title: string; start?: string}): Promise<string | null> {
-  // 极端情况下（前一次选择器未结清）先兑现旧的，避免 Promise 悬空。
-  pickSettle?.(null)
-  pickSettle = null
-  localDirPick.title = opts.title
-  localDirPick.start = opts.start ?? ''
-  localDirPick.open = true
+  clearPickSettle()
+  localPick.mode = 'dir'
+  localPick.title = opts.title
+  localPick.start = opts.start ?? ''
+  localPick.open = true
   return new Promise<string | null>((resolve) => {
-    pickSettle = resolve
+    pickDirSettle = resolve
   })
 }
 
-/** 结清一次选择（由 FolderPicker 调用）：dir 为 null 表示取消。 */
-export function settleLocalDir(dir: string | null) {
-  localDirPick.open = false
-  const done = pickSettle
-  pickSettle = null
-  done?.(dir)
+/**
+ * 打开文件选择器（可多选、可跨目录累计）并等待用户选择。
+ *
+ * 用途单一但关键：把**绝对路径**交给后端直读上传，避免整个文件夹先经浏览器
+ * 缓存到 C 盘（用户 2026-09-27 的诉求）。
+ *
+ * @returns 选中的绝对路径数组；用户取消返回 null。
+ */
+export function pickLocalFiles(opts: {title: string; start?: string}): Promise<string[] | null> {
+  clearPickSettle()
+  localPick.mode = 'files'
+  localPick.title = opts.title
+  localPick.start = opts.start ?? ''
+  localPick.open = true
+  return new Promise<string[] | null>((resolve) => {
+    pickFilesSettle = resolve
+  })
+}
+
+/** 结清一次选择（由 FolderPicker 调用）：两者都不给 = 取消。 */
+export function settleLocalPick(payload: {dir?: string; files?: string[]} | null) {
+  localPick.open = false
+  const dir = pickDirSettle
+  const files = pickFilesSettle
+  pickDirSettle = null
+  pickFilesSettle = null
+  if (dir) dir(payload?.dir ?? null)
+  if (files) files(payload?.files ?? null)
+}
+
+/** 结清在途请求（前一次未结清时先兑现 null，避免 Promise 悬空）。 */
+function clearPickSettle() {
+  pickDirSettle?.(null)
+  pickFilesSettle?.(null)
+  pickDirSettle = null
+  pickFilesSettle = null
 }
 
 /** 最近一次导出位置的记忆键（同一会话内连续导出多半落在同一处）。 */
@@ -801,6 +986,44 @@ function lastExportDir(): string {
   } catch {
     return ''
   }
+}
+
+/** 最近一次「上传文件 / 导入文件夹」的选择位置（同一会话内多半连着传同一处）。 */
+const LAST_UPLOAD_KEY = 'cp-upload-dir'
+
+/** 上次上传位置；无记录或读取失败（隐私模式）时返回空串 = 从「此电脑」开始。 */
+export function lastUploadDir(): string {
+  try {
+    return localStorage.getItem(LAST_UPLOAD_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/** 记住上传位置（选择器要的是**目录**，调用方负责传目录）。 */
+export function rememberUploadDir(dir: string): void {
+  if (!dir) return
+  try {
+    localStorage.setItem(LAST_UPLOAD_KEY, dir)
+  } catch {
+    /* 隐私模式下写不了，忽略：只是少一次便利 */
+  }
+}
+
+/**
+ * 从文件绝对路径推出它所在的目录（文件选择器要的起始位置）。
+ *
+ * 取不到像样目录时返回空串（= 从「此电脑」开始），而不是把半截路径塞进去 ——
+ * 后者会让下次打开选择器时先报一次「目录不存在」，看着像程序坏了。
+ */
+export function dirOfFile(path: string): string {
+  const sep = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'))
+  if (sep <= 0) return ''
+  const dir = path.slice(0, sep)
+  // 盘符根 `D:` 补上分隔符；UNC 只到服务器名（`\\NAS`）则视为无效
+  if (dir.length === 2 && dir[1] === ':') return dir + '\\'
+  if (dir.startsWith('\\\\') && dir.indexOf('\\', 2) === -1) return ''
+  return dir
 }
 
 /** 导出（解密到本地）：单条先选目录再落盘（网页版选择器）；

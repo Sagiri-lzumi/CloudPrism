@@ -9,7 +9,7 @@
 import {computed, reactive, ref} from 'vue'
 import type {appstate} from '../types/appstate'
 import {Transfer, Vault, unwrap} from '../lib/api'
-import {ui, navigate, uploadFromFileList} from '../lib/store'
+import {ui, navigate, pickUploadFiles} from '../lib/store'
 import {fmtSize, fmtPct} from '../lib/format'
 import {showError, showInfo, showSuccess, showWarning} from '../lib/toast'
 import Button from '../components/fluent/Button.vue'
@@ -99,15 +99,12 @@ async function retryOne(id: number) {
   }
 }
 
-/** 选择本地文件上传（空态快捷入口，浏览器 file input）。 */
+/** 选择本地文件上传（空态快捷入口）。
+ *
+ *  走 store 的统一入口 —— 与文件页按钮一致：把**绝对路径**交给后端直读，
+ *  内容不经过浏览器、不在 C 盘留暂存副本。 */
 async function pickUpload() {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.multiple = true
-  input.onchange = () => {
-    if (input.files?.length) void uploadFromFileList(input.files)
-  }
-  input.click()
+  await pickUploadFiles()
 }
 
 /* ---------------------------------------------------- 清空确认模态 */

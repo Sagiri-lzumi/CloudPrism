@@ -20,7 +20,8 @@ import {
   newFolder,
   renameSel,
   deleteSel,
-  uploadFromFileList,
+  pickUploadFiles,
+  pickUploadFolder,
   navigate,
   toggleMulti,
   rangeMulti,
@@ -358,10 +359,10 @@ async function onCtx(action: CtxAction) {
       openMsg('newSubFolder')
       return
     case 'uploadFiles':
-      await pickUpload(e?.remote ?? ui.remote, false)
+      await pickUploadFiles(e?.remote ?? ui.remote)
       return
     case 'uploadFolder':
-      await pickUpload(e?.remote ?? ui.remote, true)
+      await pickUploadFolder(e?.remote ?? ui.remote)
       return
     case 'download':
       void downloadSel()
@@ -390,31 +391,13 @@ async function onCtx(action: CtxAction) {
   }
 }
 
-/* ------------------------------------------------- 上传对话框（浏览器 file input） */
+/* ---------------------------------------- 上传（直读本机路径，不经浏览器） */
 
-/**
- * 打开系统选择器并上传。
- *
- * @param remoteDir 目标远端目录
- * @param directory true = 选文件夹（webkitdirectory，目录结构随 webkitRelativePath
- *   一路带到后端）；false = 选多个文件（平铺到当前目录）
- *
- * 用 `document.createElement('input')` 而非模板里的隐藏 input：每次点击都是
- * 全新元素，天然规避「选同一批文件不触发 change」的老问题。
- */
-async function pickUpload(remoteDir: string = ui.remote, directory = false) {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.multiple = true
-  if (directory) {
-    // 非标准但 Chromium 全系支持；Web 模式下界面始终跑在浏览器里，可用
-    input.webkitdirectory = true
-  }
-  input.onchange = () => {
-    if (input.files?.length) void uploadFromFileList(input.files, remoteDir)
-  }
-  input.click()
-}
+// 两个按钮都走 store 的统一入口：选**绝对路径**交给后端直读，内容不经过
+// 浏览器、不在 C 盘留暂存副本（用户 2026-09-27 的诉求）。
+//
+// 拖放仍是浏览器通路（浏览器只给 File 对象，拿不到绝对路径），由 App.vue 的
+// 全窗口拖放调用 store 的 onDropFiles，与本视图无关。
 
 /* ------------------------------------------------- 模态对话框队列 */
 
