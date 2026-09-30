@@ -18,9 +18,11 @@ const emit = defineEmits<{click: []}>()
 </script>
 
 <template>
+  <!-- padding 只有 md/none 两档：此前模板只处理 none，默认的 md 类从未
+       被应用（.md 是死代码），所有默认卡片渲染成零内边距 -->
   <div
     class="cp-card"
-    :class="[clickable && 'clickable', padding === 'none' && 'no-pad']"
+    :class="[clickable && 'clickable', padding === 'none' ? 'no-pad' : 'md']"
     @click="emit('click')"
   >
     <slot />
