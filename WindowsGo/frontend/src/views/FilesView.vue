@@ -218,7 +218,8 @@ const barItems = computed<CtxItem[]>(() => {
 /** 打开顶栏菜单：用触发按钮自身作锚点（按钮在顶栏里，位置天然正确）。 */
 function openBar(which: Exclude<BarMenu, 'none'>, ev: MouseEvent) {
   barAnchor.value = (ev.currentTarget ?? ev.target) as HTMLElement | null
-  barMenu.value = 'none'
+  // RoundMenu 已盯 open+anchor 变化自动重定位，无需 false→true 连写
+  // （同步连写在同一 tick 内不触发 watcher，本来就是死代码）
   barMenu.value = which
 }
 
@@ -351,7 +352,8 @@ function openCtx(ev: MouseEvent, entry?: appstate.FileEntry | null) {
   ctxPos.value = {x: ev.clientX, y: ev.clientY}
   const el = (ev.currentTarget ?? ev.target) as HTMLElement | null
   ctxAnchor.value = el
-  ctxOpen.value = false
+  // RoundMenu 盯 open+position 变化：已打开状态下在新位置右键会平滑重定位，
+  // 无需 false→true 连写（同步连写不触发 watcher，是死代码）
   ctxOpen.value = true
 }
 

@@ -39,10 +39,13 @@ const emit = defineEmits<{
 const pos = ref({left: 0, top: 0})
 const menu = ref<HTMLElement>()
 
-// 打开瞬间测量定位；菜单先渲染再量（v-if + nextTick 由 watch 保证）
+// 定位是 open + anchor + position 的派生状态，三者任何一个变都要重算：
+// 只盯 open 的话，「菜单已打开时在另一处右键/点另一个下拉钮」位置不跟随
+// （调用方曾试图用 open=false;open=true 同步连写强制重弹，同一 tick 内的
+// 中间值不会触发 watcher，是死代码）。菜单先渲染再量（v-if + nextTick 保证）。
 watch(
-  () => props.open,
-  async (open) => {
+  () => [props.open, props.position, props.anchor] as const,
+  async ([open]) => {
     if (!open) return
     await nextTick()
     const el = menu.value!
