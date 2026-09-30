@@ -6,7 +6,7 @@
   右键目标条弹动作菜单；工具栏模式钮切换 list/grid（qfw 双视图语义）。
 -->
 <script setup lang="ts">
-import {computed, reactive, ref} from 'vue'
+import {computed, onBeforeUnmount, reactive, ref} from 'vue'
 import type {appstate} from '../types/appstate'
 import {
   ui,
@@ -158,7 +158,12 @@ function splitDown(e: PointerEvent) {
 }
 
 function splitMove(e: PointerEvent) {
-  const box = viewEl.value!.getBoundingClientRect()
+  // 兜底：拖动中视图被卸载（锁库/切页）时 window 上的 pointermove 仍会被
+  // 派发直到用户松手，此时 viewEl 已空 —— 非空断言会每次 mousemove 抛
+  // TypeError（onBeforeUnmount 里已尽量摘除，这里是双保险）
+  const el = viewEl.value
+  if (!el) return
+  const box = el.getBoundingClientRect()
   // 钳制跟 CSS 同一套约束（两侧都写是有原因的，见 .files-shell.insp 注释）：
   //   下限 = 容器宽 60%（预览是重点，用户 2026-09-21 明确要求）
   //   上限 = 容器宽 − 244px（列表保底 240px + 4px 拖柄）
@@ -173,6 +178,14 @@ function splitEnd() {
   window.removeEventListener('pointermove', splitMove)
   localStorage.setItem(INSP_W_KEY, String(inspW.value))
 }
+
+// 卸载兜底：拖动途中视图被卸载（锁库/切页）时，pointerup 可能永远不来
+// （once 监听挂在 window 上，等的是「下一次松手」而非本组件生命周期），
+// 不主动摘掉的话 splitMove 会一直挂在 window 上对每个 mousemove 空跑
+onBeforeUnmount(() => {
+  window.removeEventListener('pointermove', splitMove)
+  window.removeEventListener('pointerup', splitEnd)
+})
 
 /* --------------------------------------------------- 顶栏下拉菜单（上传/更多） */
 
