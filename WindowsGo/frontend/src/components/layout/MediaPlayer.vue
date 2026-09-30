@@ -27,6 +27,9 @@ const props = defineProps<{
 }>()
 
 const v = ref<HTMLVideoElement | null>(null)
+// 续播 seek 监听器的摘除钩子：切源/卸载时必须能撤销未触发的监听，
+// 防止旧闭包持有已废弃的 video 元素
+let seekCleanup: (() => void) | null = null
 
 const playing = ref(false)
 const muted = ref(false)
@@ -198,8 +201,10 @@ function onEnded() {
 watch(
   () => props.url,
   async (url) => {
-    // 切源前 flush 旧源记忆
+    // 切源前 flush 旧源记忆、撤销旧源未触发的续播监听
     flushResume()
+    seekCleanup?.()
+    seekCleanup = null
     // load()/换 src 只发 emptied 不发 pause（spec），playing 必须手动复位，
     // 否则「播放中切到下一个视频」后底条仍显示暂停态、中央大钮被 !playing 挡住
     playing.value = false
@@ -214,16 +219,20 @@ watch(
     const el = v.value
     if (!el) return
     el.load()
-    // 有记忆则 seek 到该位置；不自动 play（保持手动）
+    // 有记忆则 seek 到该位置；不自动 play（保持手动）。
+    // 用一次性 loadedmetadata 事件而不是轮询：事件就是「元数据就绪」的
+    // 精确信号；此前的 setTimeout 自递归在元数据永不到达（解码失败）时
+    // 会在组件卸载后无限空转，且多源连切时多个轮询并存竞争 currentTime。
     if (last != null) {
-      const seekWhenReady = () => {
-        if (el.readyState >= 1 && el.duration > 0) {
-          el.currentTime = Math.min(last, Math.max(0, el.duration - 0.5))
-        } else {
-          setTimeout(seekWhenReady, 120)
-        }
+      const doSeek = () => {
+        if (el.duration > 0) el.currentTime = Math.min(last, Math.max(0, el.duration - 0.5))
       }
-      seekWhenReady()
+      if (el.readyState >= 1 && el.duration > 0) {
+        doSeek() // 缓存命中时元数据可能已就绪
+      } else {
+        el.addEventListener('loadedmetadata', doSeek, {once: true})
+        seekCleanup = () => el.removeEventListener('loadedmetadata', doSeek)
+      }
     }
   },
   {immediate: true},
@@ -231,6 +240,8 @@ watch(
 
 onBeforeUnmount(() => {
   flushResume()
+  seekCleanup?.()
+  seekCleanup = null
   v.value?.pause()
   if (ctrlTimer) {
     clearTimeout(ctrlTimer)
