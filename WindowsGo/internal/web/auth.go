@@ -73,6 +73,11 @@ type guard struct {
 	port  int  // 实际监听端口（端口顺延后可能与配置不同；Host/Origin 端口匹配基准）
 	lan   bool // 局域网档：Host 白名单额外纳入本机全部接口地址
 
+	// devOrigin 是开发模式额外放行的回环前端源（如 Vite 的
+	// http://127.0.0.1:5173）。仅由 scripts/dev.bat 经 CP_DEV_ORIGIN 显式启用；
+	// 空串 = 不启用，线上/正常启动行为完全不变。
+	devOrigin string
+
 	mu    sync.Mutex
 	fails map[string]*failRecord // key = 客户端 IP
 
@@ -110,6 +115,13 @@ func newGuard(token string, port int, lan bool, log *slog.Logger) *guard {
 		log = slog.Default()
 	}
 	return &guard{token: token, port: port, lan: lan, log: log, fails: map[string]*failRecord{}}
+}
+
+// allowDevOrigin 额外放行一个回环前端源（开发脚本用）。origin 必须完整
+// 匹配（含协议/主机/端口），且只允许 localhost/回环地址，避免把状态变更
+// 接口暴露给任意网页源。
+func (g *guard) allowDevOrigin(origin string) {
+	g.devOrigin = origin
 }
 
 // wrap 把闸门套在业务 handler 外面。
@@ -313,6 +325,17 @@ func (g *guard) originAllowed(r *http.Request) bool {
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" {
 		return false // "null" 或畸形 Origin 一律拒绝（fail-closed）
+	}
+	// 开发模式：scripts/dev.bat 通过 CP_DEV_ORIGIN 显式放行 Vite 前端源；
+	// 仍限定为 localhost/回环地址，正常启动（未设置）不受影响。
+	if g.devOrigin != "" && origin == g.devOrigin {
+		host := strings.ToLower(strings.Trim(u.Hostname(), "[]"))
+		if host == "localhost" {
+			return true
+		}
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			return true
+		}
 	}
 	// Origin 与 Host 同口径校验：主机在白名单且端口等于监听端口
 	return g.hostAllowed(u.Host)

@@ -101,8 +101,11 @@ func main() {
 		}
 	}
 
-	// 打开默认浏览器到 Web 界面。
-	if err := win.OpenURL(url); err != nil {
+	// 打开默认浏览器到 Web 界面。开发脚本（CP_NO_BROWSER=1）会禁止这一步，
+	// 避免后端把浏览器带到内嵌旧 dist；开发时应访问 Vite 前端地址。
+	if os.Getenv("CP_NO_BROWSER") == "1" {
+		app.log.Info("开发模式：不自动打开后端界面", "url", url)
+	} else if err := win.OpenURL(url); err != nil {
 		app.log.Warn("打开浏览器失败，请手动访问", "url", url, "err", err)
 	}
 
