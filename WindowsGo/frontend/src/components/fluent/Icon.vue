@@ -25,12 +25,16 @@ const props = withDefaults(
 const isStroke = computed(() => STROKE_NAMES.has(props.name))
 
 // 剥掉 license 注释与 svg 标签上的固定 width/height/style（保留 viewBox），
-// 使内层 svg 自适应宿主尺寸并按其坐标系等比缩放
+// 使内层 svg 自适应宿主尺寸并按其坐标系等比缩放。
+// 注意：必须先隔离 <svg> 开标签再在标签内全局剥属性。此前的
+// /(<svg[^>]*?)\s(width|height)="[^"]*"/g 写法因 <svg 锚点在首个匹配后
+// 无法回溯，每个图标只剥掉了第一个 width/height，第二个残留在内层 svg 上
+// （lucide 残留 height="24" → 图标下移约 1/4 盒高；fluent 残留 width="16" →
+// 非 16px 尺寸时左偏），是全站图标偏移的根因。
 function normalize(svg: string): string {
   return svg
     .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/(<svg[^>]*?)\s(width|height)="[^"]*"/g, '$1')
-    .replace(/(<svg[^>]*?)\sstyle="[^"]*"/g, '$1')
+    .replace(/<svg\b[^>]*>/, (tag) => tag.replace(/\s(width|height|style)="[^"]*"/g, ''))
     .trim()
 }
 
@@ -74,13 +78,21 @@ const inner = computed(() => {
 }
 
 /* 宿主与内层 svg 均撑满，内层按自身 viewBox 等比缩放；
-   overflow: visible 防 stroke 描边/边缘在浏览器缩放时被裁切 */
+   overflow: visible 防 stroke 描边/边缘在浏览器缩放时被裁切。
+   注意：scoped 样式下普通后代选择器打不中 v-html 注入的内层 svg
+   （没有 data-v 属性），必须用 :deep()，否则内层尺寸只能靠浏览器默认值。 */
 .fluent-icon svg,
-.icon-svg,
-.icon-svg svg {
+.icon-svg {
   width: 100%;
   height: 100%;
   overflow: visible;
+}
+
+.icon-svg :deep(svg) {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  display: block;
 }
 
 /* Fluent fill 源：图形内 fill 属性被 CSS 覆盖为 currentColor（author style
