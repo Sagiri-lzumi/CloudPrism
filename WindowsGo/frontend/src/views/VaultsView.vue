@@ -9,7 +9,7 @@
   快照由 10Hz 帧驱动（ui.snap），无需本地定时器。
 -->
 <script setup lang="ts">
-import {computed, onMounted, reactive, ref} from 'vue'
+import {computed, onMounted, reactive, ref, watch} from 'vue'
 import {ui, openVault, navigate, lockVault, endOp, pickLocalDir} from '../lib/store'
 import {Settings, Vault, unwrap} from '../lib/api'
 import {fmtSize, fmtConnectSec} from '../lib/format'
@@ -106,6 +106,20 @@ const qc = reactive({
   busy: false,
   status: '',
 })
+
+// 敏感字段的生命周期 = 对话框 open：任何途径关闭（连接成功/取消/Esc/遮罩）
+// 都必须清掉主密码、WebDAV 密码、恢复码的明文 —— 占位符承诺「仅本次驻
+// 内存使用」，此前只在下次打开对话框时才清，实际是「驻留到下次打开」，
+// 锁库/切页路径上明文一直留在 reactive 状态里
+watch(
+  () => qc.open,
+  (open) => {
+    if (open) return
+    qc.webdavPass = ''
+    qc.master = ''
+    qc.recovery = ''
+  },
+)
 
 function openQuickConnect(r: Record<string, any>) {
   qc.record = r
