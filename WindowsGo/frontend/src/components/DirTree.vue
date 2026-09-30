@@ -78,21 +78,26 @@ async function open(node: TreeNode) {
   // 独立 chunk（vite 会告警 "dynamic import will not move module into another
   // chunk"），又会把该告警写到 stderr 上，导致 release.ps1 的 npm run build 被
   // PowerShell 判成 NativeCommandError 而中断打包。
+  // 先列目录成功再改面包屑：反过来（先改 crumbs 再 await）时若 listDir 失败，
+  // 面包屑指向新目录而文件区还是旧目录，两者错位（listDir 内部捕获异常返回
+  // null，代际过期也返回 null —— 那意味着更新的 listDir 已接管，同样不该写）
+  const res = await listDir(node.remote)
+  if (res === null) return
   ui.crumbs = buildCrumbs(root.value, node.remote)
-  await listDir(node.remote)
 }
 
 function buildCrumbs(node: TreeNode, target: string): Array<{label: string; remote: string}> {
   const chain: Array<{label: string; remote: string}> = []
   findPath(node, target, chain)
-  return chain.slice(1) // 去掉根节点「我的密库」
+  // findPath 在递归回退（unwind）时压栈，chain 是「目标 → … → 根」逆序，
+  // 翻回来才是面包屑的正序。根节点（我的密库）天然不入链，无需 slice。
+  return chain.reverse()
 }
 
 function findPath(node: TreeNode, target: string, acc: Array<{label: string; remote: string}>): boolean {
-  if (node.remote === target) {
-    acc.push({label: node.label, remote: node.remote})
-    return true
-  }
+  // 命中时**不** push 自身 —— 每个节点由它的父层在 unwind 时统一 push，
+  // 否则目标会被 push 两次（自身命中一次 + 父层回退一次）
+  if (node.remote === target) return true
   if (node.children) {
     for (const child of node.children) {
       if (findPath(child, target, acc)) {
