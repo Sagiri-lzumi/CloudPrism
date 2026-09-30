@@ -177,11 +177,17 @@ function onTimeUpdate() {
 }
 
 function onPause() {
+  // 必须复位 playing：底条图标、中央大钮显隐、scheduleSave 都以它为准。
+  // （此前只 flushResume，暂停后 playing 恒为 true —— 图标停在「暂停」态、
+  // 中央大钮 v-if="showCtrl && !playing" 永不出现。）
+  playing.value = false
   // 暂停立即落盘（用户主动停的，记忆有意义）
   flushResume()
 }
 
 function onEnded() {
+  // ended 也会触发 pause（spec 行为），此处复位只是幂等兜底
+  playing.value = false
   // 播放结束清记忆（避免下次从末尾进入）
   const remote = currentRemote.value
   if (remote) clearResume(remote)
@@ -194,6 +200,9 @@ watch(
   async (url) => {
     // 切源前 flush 旧源记忆
     flushResume()
+    // load()/换 src 只发 emptied 不发 pause（spec），playing 必须手动复位，
+    // 否则「播放中切到下一个视频」后底条仍显示暂停态、中央大钮被 !playing 挡住
+    playing.value = false
     failed.value = false
     ready.value = false
     duration.value = 0
