@@ -206,12 +206,14 @@ const canNext = computed(() => {
   )
 })
 
-const stepTitles = [
+// 必须是 computed：第 3/4 步标题依赖 form.kind/mode/baidu.authorized，
+// 普通常量数组在 setup 时就按初始值固化（选百度后标题仍显示「配置密库位置」）
+const stepTitles = computed(() => [
   {n: 1, title: '新建还是连接？'},
   {n: 2, title: '选择密库位置'},
   {n: 3, title: form.kind === 'baidu' && !form.baidu.authorized ? '百度网盘授权' : '配置密库位置'},
   {n: 4, title: form.mode === 'new' ? '设置主密码' : '验证主密码'},
-]
+])
 
 const pwdHint = computed(() =>
   form.master !== form.master2 ? '两次输入的主密码不一致' : '',
