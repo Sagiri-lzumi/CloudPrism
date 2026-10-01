@@ -209,8 +209,14 @@ function onVol(e: Event) {
   el.muted = muted.value
 }
 
+// 续播 seek 门闩：el.load() 后、续播 seek 完成前，浏览器会以 currentTime=0
+// 触发 timeupdate —— 不设门闩的话 onTimeUpdate 会把已初始化为记忆位置的
+// current 改回 0，进度条「先回最左、seek 完再跳到中间」
+let resumeSeekPending = false
+
 function onTimeUpdate() {
   if (dragPos.value != null) return
+  if (resumeSeekPending) return
   const el = v.value
   if (!el) return
   current.value = el.currentTime
@@ -273,8 +279,13 @@ watch(
     // 精确信号；此前的 setTimeout 自递归在元数据永不到达（解码失败）时
     // 会在组件卸载后无限空转，且多源连切时多个轮询并存竞争 currentTime。
     if (last != null) {
+      resumeSeekPending = true
       const doSeek = () => {
-        if (el.duration > 0) el.currentTime = Math.min(last.sec, Math.max(0, el.duration - 0.5))
+        if (el.duration > 0) {
+          el.currentTime = Math.min(last.sec, Math.max(0, el.duration - 0.5))
+          current.value = el.currentTime // 与真实落点对齐（钳制后可能与记忆不同）
+        }
+        resumeSeekPending = false
       }
       if (el.readyState >= 1 && el.duration > 0) {
         doSeek() // 缓存命中时元数据可能已就绪
@@ -321,7 +332,10 @@ onBeforeUnmount(() => {
         @play="playing = true"
         @pause="onPause"
         @ended="onEnded"
-        @error="failed = true"
+        @error="
+          failed = true
+          resumeSeekPending = false
+        "
         @click="togglePlay"
       ></video>
 
