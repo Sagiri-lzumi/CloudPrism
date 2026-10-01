@@ -143,25 +143,34 @@ async function onCacheLimit(mb: number) {
   }
 }
 
+/** 缓存目录操作防重入（此前两个按钮错绑 baiduBusy，且本身无守卫可连点重入） */
+const cacheDirBusy = ref(false)
+
 /** 浏览选择新缓存目录（保持上限不变）。选在网页里完成，不再弹主机原生框。 */
 async function browseCacheDir() {
-  const dir = await pickLocalDir({
-    title: '选择缓存目录（建议避开系统盘的用户目录）',
-    start: cachePath.value,
-  })
-  if (!dir) return // 用户取消
+  if (cacheDirBusy.value) return
+  cacheDirBusy.value = true
   try {
+    const dir = await pickLocalDir({
+      title: '选择缓存目录（建议避开系统盘的用户目录）',
+      start: cachePath.value,
+    })
+    if (!dir) return // 用户取消
     ui.settings.cachePath = dir
     await Settings.SetCache(cacheLimit.value, dir)
     showSuccess('缓存目录已更新')
     await refreshCacheInfo()
   } catch (e) {
     onErr(e)
+  } finally {
+    cacheDirBusy.value = false
   }
 }
 
 /** 清除自定义缓存目录（回退程序目录旁的默认位置）。 */
 async function resetCacheDir() {
+  if (cacheDirBusy.value) return
+  cacheDirBusy.value = true
   ui.settings.cachePath = ''
   try {
     await Settings.SetCache(cacheLimit.value, '')
@@ -169,6 +178,8 @@ async function resetCacheDir() {
     await refreshCacheInfo()
   } catch (e) {
     onErr(e)
+  } finally {
+    cacheDirBusy.value = false
   }
 }
 
@@ -582,10 +593,10 @@ function readBuild() {
               icon="cancel"
               iconOnly
               title="恢复默认目录"
-              :disabled="baiduBusy"
+              :disabled="cacheDirBusy"
               @click="resetCacheDir"
             />
-            <Button icon="folder_add" :disabled="baiduBusy" @click="browseCacheDir">浏览…</Button>
+            <Button icon="folder_add" :disabled="cacheDirBusy" @click="browseCacheDir">浏览…</Button>
           </div>
         </div>
         <div class="set-card">
