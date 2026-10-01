@@ -245,6 +245,11 @@ function onEnded() {
   if (remote) clearResume(remote)
 }
 
+function onError() {
+  failed.value = true
+  resumeSeekPending = false // 解码失败时续播 seek 永不到达，门闩必须解除
+}
+
 /* ----------------------------------------------- 切源：预载 + 记忆续播 seek（不自动播） */
 
 watch(
@@ -332,10 +337,7 @@ onBeforeUnmount(() => {
         @play="playing = true"
         @pause="onPause"
         @ended="onEnded"
-        @error="
-          failed = true
-          resumeSeekPending = false
-        "
+        @error="onError"
         @click="togglePlay"
       ></video>
 
