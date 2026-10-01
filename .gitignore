@@ -274,3 +274,4 @@ WindowsGo/frontend/package.json.md5
 # 开发脚本沙箱产物：npm 缓存与开发态数据目录（scripts/dev.ps1）
 .npm-cache/
 .devdata/
+.dsh-vision-router/
