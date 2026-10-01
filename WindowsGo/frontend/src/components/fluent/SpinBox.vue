@@ -66,6 +66,11 @@ function normalize() {
   commit(Number.isFinite(n) ? n : props.modelValue)
 }
 
+function onBlur() {
+  focused.value = false
+  normalize()
+}
+
 function onWheel(e: WheelEvent) {
   if (props.disabled) return
   e.preventDefault() // 防页面滚动（设置页滚动容器）
@@ -85,10 +90,7 @@ defineExpose({commit})
       @input="onInput"
       @keydown.enter.prevent="normalize"
       @focus="focused = true"
-      @blur="
-        focused = false
-        normalize()
-      "
+      @blur="onBlur"
     />
     <span v-if="suffix" class="suffix">{{ suffix }}</span>
     <span class="steppers">
