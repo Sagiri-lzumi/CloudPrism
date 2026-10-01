@@ -496,15 +496,20 @@ export function refreshSilent() {
   void listDir(ui.remote, {silent: true})
 }
 
-/** 浅比较：条目集合变化（数量/remote 集合）时返回 false。 */
+/** 浅比较：条目集合变化（数量/remote 集合/大小）时返回 false。
+ *  size 必须参与比较：同名文件内容变化后 remote 不变，只比 remote 会让
+ *  列表里的尺寸长期停留在旧值（静默刷新的意义就是追上这种变化）。 */
 function entriesEqual(
   a: appstate.FileEntry[] | null,
   b: appstate.FileEntry[],
 ): boolean {
   if (a === null) return false
   if (a.length !== b.length) return false
-  const set = new Set(a.map((e) => e.remote))
-  for (const e of b) if (!set.has(e.remote)) return false
+  const map = new Map(a.map((e) => [e.remote, e.size]))
+  for (const e of b) {
+    const size = map.get(e.remote)
+    if (size === undefined || size !== e.size) return false
+  }
   return true
 }
 
