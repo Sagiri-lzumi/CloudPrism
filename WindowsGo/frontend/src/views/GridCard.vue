@@ -119,6 +119,14 @@ async function loadCover() {
   }
 }
 
+function onThumbErr() {
+  // 缩略图解码失败：吊销令牌并清空 URL，让错误图标分支接管 —— 此前只置
+  // fail，但 img 分支条件（thumb 非空）仍成立，红色错误图标永远走不到
+  if (thumb.value) void revoke(thumb.value).catch(() => {})
+  thumb.value = ''
+  fail.value = true
+}
+
 onBeforeUnmount(() => {
   disposed = true
   coverTask?.cancel()
@@ -196,7 +204,7 @@ const multiMode = computed(() => ui.multi.length > 1)
         alt=""
         draggable="false"
         @load="imgLoaded = true"
-        @error="fail = true"
+        @error="onThumbErr"
       />
       <!-- 视频封面（抽中心帧）：与图片同用 .img，但 object-fit 换 cover。
            解码失败就当没有封面（清空 src 落到下面的占位图标分支），
