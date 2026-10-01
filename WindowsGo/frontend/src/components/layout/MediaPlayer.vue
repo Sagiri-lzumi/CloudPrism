@@ -110,22 +110,33 @@ const RESUME_MIN = 2
 /** 进度写盘节流 5s（timeupdate 频繁，只节流落盘，不影响 UI 进度） */
 const RESUME_FLUSH_MS = 5000
 
-function loadResume(remote: string): number | null {
+/** 续播记忆：位置 + 时长。时长一并存是因为进度条的 max 由 duration 决定，
+ *  只存位置的话元数据就绪前滑块仍会被 max=0 钳到最左（「先左后跳」没根治）。
+ *  存储格式 "sec|dur"；旧格式纯数字按 dur=0 兼容解析。 */
+interface ResumePoint {
+  sec: number
+  dur: number
+}
+
+function loadResume(remote: string): ResumePoint | null {
   if (!remote) return null
   try {
     const raw = localStorage.getItem(RESUME_PREFIX + remote)
     if (!raw) return null
-    const sec = Number(raw)
-    return Number.isFinite(sec) && sec >= RESUME_MIN ? sec : null
+    const [s, d] = raw.split('|')
+    const sec = Number(s)
+    const dur = Number(d ?? 0)
+    if (!Number.isFinite(sec) || sec < RESUME_MIN) return null
+    return {sec, dur: Number.isFinite(dur) && dur > 0 ? dur : 0}
   } catch {
     return null
   }
 }
 
-function saveResume(remote: string, sec: number) {
+function saveResume(remote: string, sec: number, dur: number) {
   if (!remote) return
   try {
-    localStorage.setItem(RESUME_PREFIX + remote, String(sec))
+    localStorage.setItem(RESUME_PREFIX + remote, sec + '|' + dur)
   } catch {
     /* 隐私模式/已满：忽略 */
   }
@@ -149,7 +160,7 @@ function flushResume() {
   const el = v.value
   const remote = currentRemote.value
   if (!el || !remote) return
-  saveResume(remote, el.currentTime)
+  saveResume(remote, el.currentTime, el.duration)
 }
 function scheduleSave() {
   if (resumeTimer) return
@@ -159,7 +170,7 @@ function scheduleSave() {
     const remote = currentRemote.value
     if (!el || !remote) return
     // 暂停态/失败态不写记忆（用户可能不再继续看）
-    if (playing.value) saveResume(remote, el.currentTime)
+    if (playing.value) saveResume(remote, el.currentTime, el.duration)
   }, RESUME_FLUSH_MS)
 }
 
@@ -243,10 +254,16 @@ watch(
     failed.value = false
     ready.value = false
     duration.value = 0
-    current.value = 0
     dragPos.value = null
-    if (!url) return
+    if (!url) {
+      current.value = 0
+      return
+    }
     const last = loadResume(currentRemote.value)
+    // 有续播记忆时进度条立即落在记忆位置（位置与**时长**都从记忆恢复，
+    // 滑块的 max 立刻正确），而不是先从 0 显示、等元数据就绪 seek 完再跳
+    current.value = last?.sec ?? 0
+    if (last?.dur) duration.value = last.dur
     await nextTick()
     const el = v.value
     if (!el) return
@@ -257,7 +274,7 @@ watch(
     // 会在组件卸载后无限空转，且多源连切时多个轮询并存竞争 currentTime。
     if (last != null) {
       const doSeek = () => {
-        if (el.duration > 0) el.currentTime = Math.min(last, Math.max(0, el.duration - 0.5))
+        if (el.duration > 0) el.currentTime = Math.min(last.sec, Math.max(0, el.duration - 0.5))
       }
       if (el.readyState >= 1 && el.duration > 0) {
         doSeek() // 缓存命中时元数据可能已就绪
