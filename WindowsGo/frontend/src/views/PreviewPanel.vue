@@ -213,7 +213,10 @@ onBeforeUnmount(() => {
 const title = computed(() => sel.value?.display ?? '')
 const metaKind = computed(() => (isDir.value ? '目录' : {video: '视频', audio: '音频', image: '图片', text: '文本', pdf: 'PDF', other: '文件'}[kind.value]))
 const meta = computed(() => {
-  const e = sel.value!
+  // 不靠非空断言：当前靠模板分支惰性求值兜底，但任何在分支外引用 meta
+  // 的改动都会运行时炸 —— 空值守卫只花一行
+  const e = sel.value
+  if (!e) return ''
   const size = isDir.value ? '' : fmtSize(e.size)
   return [metaKind.value, size, e.remote].filter(Boolean).join(' · ')
 })
