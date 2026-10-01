@@ -115,31 +115,45 @@ async function resumePending() {
 
 /** 取消全部未完成任务（等待+传输中；终态不受影响）。 */
 async function cancelAll() {
+  if (busy.value) return
+  busy.value = true
   try {
     await Transfer.CancelAll()
     showInfo('已请求取消全部任务')
   } catch (e) {
     showError('取消失败：' + unwrap(e).message)
+  } finally {
+    busy.value = false
   }
 }
 
 /** 清空已结束任务（done/failed/cancelled 从列表移除）。 */
 async function clearFinished() {
+  if (busy.value) return
+  busy.value = true
   try {
     await Transfer.ClearFinished()
     showInfo('已清空已结束任务')
   } catch (e) {
     showError('清空失败：' + unwrap(e).message)
+  } finally {
+    busy.value = false
   }
 }
 
-/** 重试单个失败/已取消任务。 */
+/** 重试单个失败/已取消任务。按任务 id 记 pending：连点同一任务只发一次。
+ *  reactive Set：模板里的 :disabled 绑定需要响应式追踪 */
+const retrying = reactive(new Set<number>())
 async function retryOne(id: number) {
+  if (retrying.has(id)) return
+  retrying.add(id)
   try {
     await Transfer.Retry(id)
     showInfo('已重新入队')
   } catch (e) {
     showError('重试失败：' + unwrap(e).message)
+  } finally {
+    retrying.delete(id)
   }
 }
 
@@ -166,7 +180,7 @@ const dlg = reactive({open: false})
       <template #actions>
         <Button
           icon="cancel"
-          :disabled="!tasks.length || !unfinished"
+          :disabled="!tasks.length || !unfinished || busy"
           title="取消所有等待中与传输中的任务"
           @click="cancelAll"
         >
@@ -243,6 +257,7 @@ const dlg = reactive({open: false})
               iconOnly
               icon="update"
               title="重试"
+              :disabled="retrying.has(t.id)"
               @click="retryOne(t.id)"
             />
           </div>
