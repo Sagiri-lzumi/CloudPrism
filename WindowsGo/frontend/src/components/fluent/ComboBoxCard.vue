@@ -44,6 +44,24 @@ function pick(i: number) {
   emit('update:modelValue', i)
   emit('change', i)
 }
+
+// 触发钮与 RoundMenu 的「点外部关闭」存在事件顺序冲突：菜单打开时点按钮，
+// window capture 阶段的 pointerdown 先把菜单关了，随后的 click 又把它打开
+// —— 按钮永远收不起菜单。记录收起时刻，同一手势（pointerdown→click 通常
+// <100ms）内的 click 不再重开。
+let closedAt = 0
+function onMenuClose() {
+  closedAt = Date.now()
+  open.value = false
+}
+function onBtnClick() {
+  if (open.value) {
+    open.value = false
+    return
+  }
+  if (Date.now() - closedAt < 150) return // 刚被 pointerdown 收起的同一次点击
+  open.value = true
+}
 </script>
 
 <template>
@@ -61,7 +79,7 @@ function pick(i: number) {
         type="button"
         class="set-combo"
         :disabled="disabled"
-        @click="open = !open"
+        @click="onBtnClick"
       >
         <span class="combo-text">{{ current }}</span>
         <span class="combo-chev" aria-hidden="true">
@@ -71,7 +89,7 @@ function pick(i: number) {
         </span>
       </button>
     </div>
-    <RoundMenu :open="open" :anchor="btn ?? null" :items="items" @select="pick" @close="open = false" />
+    <RoundMenu :open="open" :anchor="btn ?? null" :items="items" @select="pick" @close="onMenuClose" />
   </div>
 </template>
 
