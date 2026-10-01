@@ -4,7 +4,7 @@
   clamp 到 [min,max]；滚轮在容器上悬停时可步进。
 -->
 <script setup lang="ts">
-import {ref} from 'vue'
+import {ref, watch} from 'vue'
 
 const props = withDefaults(
   defineProps<{
@@ -28,11 +28,24 @@ const emit = defineEmits<{
 }>()
 
 const dirty = ref(String(props.modelValue))
+const focused = ref(false)
+
+// 外部（父级重置/配置重载）改值时同步进输入框；正在输入时不抢，
+// 失焦 normalize 会自行收敛
+watch(
+  () => props.modelValue,
+  (v) => {
+    if (!focused.value) dirty.value = String(v)
+  },
+)
 
 // clamp 后上抛；返回值供 change 用
 function commit(raw: number): number {
   const v = Math.min(props.max, Math.max(props.min, raw))
   dirty.value = String(v)
+  // 值没变就不发事件：change 的语义是「值稳定且变了」，调用方按它落盘，
+  // 同值重发等于写两遍（此前的 @change+@blur 双触发同病）
+  if (v === props.modelValue) return v
   emit('update:modelValue', v)
   emit('change', v)
   return v
@@ -70,9 +83,12 @@ defineExpose({commit})
       :disabled="disabled"
       inputmode="numeric"
       @input="onInput"
-      @change="normalize"
       @keydown.enter.prevent="normalize"
-      @blur="normalize"
+      @focus="focused = true"
+      @blur="
+        focused = false
+        normalize()
+      "
     />
     <span v-if="suffix" class="suffix">{{ suffix }}</span>
     <span class="steppers">
