@@ -64,13 +64,40 @@ function onMediaLeave() {
 
 // 播放中不显示中央钮；播放状态翻转时立即隐藏并清计时
 watch(playing, (p) => {
-  if (!p) return
-  showCtrl.value = false
-  if (ctrlTimer) {
-    clearTimeout(ctrlTimer)
-    ctrlTimer = null
+  if (p) {
+    showCtrl.value = false
+    if (ctrlTimer) {
+      clearTimeout(ctrlTimer)
+      ctrlTimer = null
+    }
+    startPosLoop()
+  } else {
+    stopPosLoop()
+    // 暂停时 timeupdate 不一定再触发，手动对齐一次最终位置
+    const el = v.value
+    if (el && dragPos.value == null) current.value = el.currentTime
   }
 })
+
+// 播放中的进度刷新：timeupdate 只有约 4Hz（250ms 一跳），进度条肉眼可见
+// 卡顿；播放期间改用 rAF 逐帧读 currentTime（与渲染帧对齐，开销可忽略）。
+// timeupdate 保留：暂停/末尾清记忆等路径仍走它（见 onTimeUpdate）。
+let rafId = 0
+function tickPos() {
+  rafId = 0
+  const el = v.value
+  if (el && dragPos.value == null) current.value = el.currentTime
+  if (playing.value) rafId = requestAnimationFrame(tickPos)
+}
+function startPosLoop() {
+  if (!rafId) rafId = requestAnimationFrame(tickPos)
+}
+function stopPosLoop() {
+  if (rafId) {
+    cancelAnimationFrame(rafId)
+    rafId = 0
+  }
+}
 
 const shownPos = computed(() => dragPos.value ?? current.value)
 const currentRemote = computed(() => props.remote ?? '')
@@ -147,7 +174,12 @@ function togglePlay() {
 
 function seekCommit() {
   if (dragPos.value == null || !v.value) return
-  v.value.currentTime = dragPos.value
+  const t = dragPos.value
+  v.value.currentTime = t
+  // 立即把显示进度对齐到目标位：否则 dragPos 清空后 shownPos 回落到
+  // current（seek 前的旧值），要等下一个 timeupdate 才追上来 —— 肉眼可见
+  // 「到目标 → 弹回 → 再跳过去」
+  current.value = t
   dragPos.value = null
 }
 
@@ -242,6 +274,7 @@ onBeforeUnmount(() => {
   flushResume()
   seekCleanup?.()
   seekCleanup = null
+  stopPosLoop()
   v.value?.pause()
   if (ctrlTimer) {
     clearTimeout(ctrlTimer)
