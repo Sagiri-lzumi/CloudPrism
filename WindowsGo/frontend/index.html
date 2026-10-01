@@ -19,23 +19,32 @@
                 }
             } catch (e) { /* localStorage 不可用（隐私模式）时保持默认浅色 */ }
         })();
-        // JS 错误兜底：Vue 挂载失败时显示错误而非空白页
-        window.addEventListener('error', function (e) {
+        // JS 错误兜底：仅在「启动阶段」显示红屏 —— Vue 挂载成功后由
+        // main.ts 调 window.__cpBootDone() 摘除监听，运行期错误交回
+        // 控制台/应用内提示（运行期任何资源/脚本错误都弹整屏红屏是不可接受的）
+        function onBootError(e) {
             var box = document.getElementById('boot-err');
             if (box) {
                 box.style.display = 'block';
                 var msg = box.querySelector('.boot-err-msg');
                 if (msg) msg.textContent = (e.message || '未知错误') + (e.error ? '\n' + (e.error.stack || '') : '');
             }
-        });
-        window.addEventListener('unhandledrejection', function (e) {
+        }
+        function onBootRejection(e) {
             var box = document.getElementById('boot-err');
             if (box) {
                 box.style.display = 'block';
                 var msg = box.querySelector('.boot-err-msg');
                 if (msg) msg.textContent = 'Promise 未捕获: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason));
             }
-        });
+        }
+        window.addEventListener('error', onBootError);
+        window.addEventListener('unhandledrejection', onBootRejection);
+        window.__cpBootDone = function () {
+            window.removeEventListener('error', onBootError);
+            window.removeEventListener('unhandledrejection', onBootRejection);
+            delete window.__cpBootDone;
+        };
     </script>
     <style>
         #boot-loading{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#f3f3f3;color:#616161;font-family:"Segoe UI","Microsoft YaHei",sans-serif;z-index:50}

@@ -18,3 +18,6 @@ app.mount('#app')
 // 挂载成功后隐藏加载占位（index.html 的 #boot-loading）
 const loading = document.getElementById('boot-loading')
 if (loading) loading.remove()
+
+// 启动阶段结束：摘掉 index.html 的崩溃红屏监听，运行期错误不再触发整屏遮挡
+;(window as {__cpBootDone?: () => void}).__cpBootDone?.()
