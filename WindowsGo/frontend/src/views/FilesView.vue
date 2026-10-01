@@ -6,7 +6,7 @@
   右键目标条弹动作菜单；工具栏模式钮切换 list/grid（qfw 双视图语义）。
 -->
 <script setup lang="ts">
-import {computed, onBeforeUnmount, reactive, ref} from 'vue'
+import {computed, onBeforeUnmount, reactive, ref, watch} from 'vue'
 import type {appstate} from '../types/appstate'
 import {
   ui,
@@ -50,6 +50,23 @@ import PreviewPanel from './PreviewPanel.vue'
 const connected = computed(() => !!ui.snap?.connected)
 const crumbs = computed(() => ui.crumbs)
 const entries = computed(() => ui.entries ?? [])
+
+/** 大目录渲染上限：超出部分截断，底部给「显示全部」入口。数千条目一次全建
+ *  DOM 会长时间卡帧，且每张网格卡挂载即发缩略图令牌请求，会把后端令牌注册表
+ *  顶到 ErrTooManyTokens 连带挤掉正常缩略图。500 以内体验无损；超限一键展开。 */
+const RENDER_CAP = 500
+const showAll = ref(false)
+// 换目录即复位（上限是针对「单个目录」的渲染保护）
+watch(
+  () => ui.remote,
+  () => {
+    showAll.value = false
+  },
+)
+const visibleEntries = computed(() =>
+  showAll.value ? entries.value : entries.value.slice(0, RENDER_CAP),
+)
+const hiddenEntries = computed(() => Math.max(0, entries.value.length - RENDER_CAP))
 const multiSel = computed(() => ui.multi)
 const hasMulti = computed(() => ui.multi.length > 1)
 
@@ -649,7 +666,7 @@ function confirmDlg(payload: string | boolean) {
                   :style="{'--i': pi}"
                 />
                 <GridCard
-                  v-for="(e, i) in entries"
+                  v-for="(e, i) in visibleEntries"
                   :key="e.remote"
                   :entry="e"
                   :style="{'--i': i}"
@@ -657,6 +674,9 @@ function confirmDlg(payload: string | boolean) {
                   @open="enterDir"
                   @ctx="onCardCtx"
                 />
+                <div v-if="hiddenEntries && !showAll" class="cap-note">
+                  <Button @click="showAll = true">还有 {{ hiddenEntries }} 项，显示全部</Button>
+                </div>
               </div>
 
               <!-- 列表：行式（目录行尾提供直达钮） -->
@@ -684,7 +704,7 @@ function confirmDlg(payload: string | boolean) {
               <!-- 行右键要 .stop：祖先 .zone 也挂 contextmenu（空白区菜单），
                    不阻止冒泡会被它覆盖成空白菜单（详见 GridCard.vue 顶部注释）。 -->
               <div
-                v-for="(e, i) in entries"
+                v-for="(e, i) in visibleEntries"
                 :key="e.remote"
                 class="row"
                 :class="{sel: isSel(e)}"
@@ -724,6 +744,9 @@ function confirmDlg(payload: string | boolean) {
                     <Icon name="more" :size="16" />
                   </button>
                 </span>
+              </div>
+              <div v-if="hiddenEntries && !showAll" class="cap-note">
+                <Button @click="showAll = true">还有 {{ hiddenEntries }} 项，显示全部</Button>
               </div>
               </div>
             </Transition>
@@ -787,6 +810,13 @@ function confirmDlg(payload: string | boolean) {
   height: 100%;
   /* 浮层页头的定位上下文（PageHeader 绝对定位在本视图顶缘） */
   position: relative;
+}
+
+/* 大目录截断提示（渲染上限保护，见 script 的 RENDER_CAP 注释） */
+.cap-note {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 4px;
 }
 
 /* 文件列表 + （可选）拖柄 + 预览检查器。
