@@ -27,6 +27,7 @@ import * as evt from './events'
 import {applyThemeIndex} from './theme'
 import {showError, showInfo, showSuccess} from './toast'
 import {collectDropped, collectFromFileList, type UploadItem} from './upload'
+import {clearCoverCache} from './videoCover'
 
 export type PageId = 'files' | 'transfers' | 'vaults' | 'settings'
 
@@ -167,6 +168,8 @@ function onFrame(payload: unknown) {
   if (!f.snap.connected) {
     ui.uploads = [] // 断开后任务没了对账依据，占位一并清掉
     if (ui.remote !== '') resetBrowse()
+    // 视频封面缓存是解密流抽出的明文帧，锁库语义下属于敏感态，一并清
+    clearCoverCache()
   }
 
   // —— 上传 / 删除完成就刷新（用户 2026-09-21：不要等 5s 空闲轮询）——

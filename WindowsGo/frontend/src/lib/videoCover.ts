@@ -55,6 +55,13 @@ const CACHE_MAX = 80
 
 const cache = new Map<string, VideoCover>()
 
+/** 清空封面缓存。缓存内容是从解密流里抽出的明文帧 —— 锁库/断开连接时
+ *  必须随其它敏感态一起清（store 的 onFrame 断连分支调用），否则锁库后
+ *  内存里仍残留可还原成画面的 JPEG。 */
+export function clearCoverCache() {
+  cache.clear()
+}
+
 function cacheGet(key: string): VideoCover | undefined {
   const hit = cache.get(key)
   if (hit) {
