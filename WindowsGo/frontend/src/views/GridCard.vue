@@ -23,7 +23,7 @@
 <script setup lang="ts">
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import type {appstate} from '../types/appstate'
-import {thumbUrl, revoke, ui} from '../lib/store'
+import {thumbUrl, revoke, ui, multiRemotes} from '../lib/store'
 import {kindOf, KIND_ICON} from '../lib/media'
 import {requestVideoCover, type CoverHandle} from '../lib/videoCover'
 import Icon from '../components/fluent/Icon.vue'
@@ -154,7 +154,7 @@ const placeholderIcon = computed(() =>
 
 // 是否处于选择集（多选成员或当前单选，决定整卡高亮）
 function isSel(e: appstate.FileEntry): boolean {
-  return ui.multi.some((x) => x.remote === e.remote)
+  return multiRemotes.value.has(e.remote) // O(1)：每张卡渲染都查，不能 some
 }
 
 // 多选批量态（≥2 项）：此时勾选角标才出现；单选仅靠 .gc.sel 整卡高亮

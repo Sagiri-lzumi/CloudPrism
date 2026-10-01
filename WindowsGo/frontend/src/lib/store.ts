@@ -10,7 +10,7 @@
 //
 // 模块单例：App.vue onMounted 调 start()，onBeforeUnmount 调 stop()。
 
-import {reactive} from 'vue'
+import {computed, reactive} from 'vue'
 import type {appstate} from '../types/appstate'
 import {
   ApiCode,
@@ -562,6 +562,10 @@ export function rangeMulti(e: appstate.FileEntry, anchorRemote: string | null, e
   ui.multi = [...set.values()]
   ui.sel = ui.multi.length ? ui.multi[ui.multi.length - 1] : null
 }
+
+/** 多选集合的 remote 索引（O(1) 命中）：列表行/网格卡每次渲染都查选中态，
+ *  直接 ui.multi.some 的话每次重渲染都是 O(条目数×选中数)。 */
+export const multiRemotes = computed(() => new Set(ui.multi.map((x) => x.remote)))
 
 /** 清空选择（切换目录/全不选时）。 */
 export function clearMulti() {

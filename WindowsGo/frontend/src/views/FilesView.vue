@@ -10,6 +10,7 @@ import {computed, onBeforeUnmount, reactive, ref} from 'vue'
 import type {appstate} from '../types/appstate'
 import {
   ui,
+  multiRemotes,
   selectEntry,
   enterDir,
   reloadDir,
@@ -79,7 +80,7 @@ function ringFor(p: UploadPlaceholder): {ratio: number | null; showRing: boolean
 
 
 function isSel(e: appstate.FileEntry): boolean {
-  return ui.multi.some((x) => x.remote === e.remote)
+  return multiRemotes.value.has(e.remote) // O(1)：每条目渲染都查，不能 some
 }
 
 function kindOfRow(e: appstate.FileEntry): string {
