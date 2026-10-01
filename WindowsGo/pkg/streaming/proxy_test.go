@@ -162,15 +162,20 @@ func TestParseRangeHeader(t *testing.T) {
 // 代理集成（镜像 Python TestProxyIntegration）
 // ---------------------------------------------------------------------------
 
-func TestGetFullFile206(t *testing.T) {
+// 无 Range 的直读（<img>/fetch/PDFium，不续请的客户端）→ 200 全量；
+// 若回 206 截断段，这类客户端会把前半段当完整文件（>2MiB 图片被截）。
+func TestGetFullFile200(t *testing.T) {
 	plain := testPlain(20) // 5120 B
 	e := newEnv(t, plain)
 	status, data, h := get(t, e.url(), nil)
-	if status != http.StatusPartialContent {
-		t.Fatalf("状态应为 206，实得 %d", status)
+	if status != http.StatusOK {
+		t.Fatalf("状态应为 200，实得 %d", status)
 	}
 	if string(data) != string(plain) {
 		t.Fatal("全文件响应与明文不一致")
+	}
+	if cr := h.Get("Content-Range"); cr != "" {
+		t.Errorf("无 Range 请求不应带 Content-Range，实得 %q", cr)
 	}
 	if h.Get("Content-Length") != fmt.Sprint(len(plain)) {
 		t.Errorf("Content-Length = %q", h.Get("Content-Length"))

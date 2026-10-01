@@ -95,7 +95,11 @@ func (s *Server) serveThumb(w http.ResponseWriter, r *http.Request, e *Entry) {
 //	HEAD            → 200 + Content-Length=明文总量（播放器探时长用）
 //	空文件          → 206 + Content-Range: bytes 0-0/0
 //	Range 越界      → 416 + Content-Range: bytes */total（不回退整文件）
-//	正常            → 206 + 明文段（受 MaxResponseBytes 截断）
+//	带 Range        → 206 + 明文段（受 MaxResponseBytes 截断，播放器按 Content-Range 续请）
+//	无 Range        → 200 + 全量（仍按 256KiB 窗口边解边发，内存有界）：
+//	                  <img>/fetch 整读/PDFium 这类客户端**不会**发 Range，若按旧行为
+//	                  对无 Range 请求也回 206 截断段，超过 2MiB 的图片会被当成完整响应
+//	                  解码 —— 底部数据缺失，表现为「图被截了一部分」（实测 2.4MB PNG）。
 //	后端故障        → 首窗口前 502；头已发后断流（见下）
 //
 // 与 Python 的差异（有意）：Python 先全量下载解密再一次性响应，任何失败
@@ -131,15 +135,22 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request, e *Entry) {
 		return
 	}
 
-	rng, ok := ParseRangeHeader(r.Header.Get("Range"), total)
+	rangeHeader := r.Header.Get("Range")
+	rng, ok := ParseRangeHeader(rangeHeader, total)
 	if !ok {
 		writeError(w, http.StatusRequestedRangeNotSatisfiable, "",
 			"Content-Range", "bytes */"+strconv.FormatInt(total, 10))
 		return
 	}
-	// 截断到单次响应上限；Content-Range 反映实际发送段，总长不变，
-	// 播放器按续请拼接（proxy_server.py:216 同因）
-	end := min(rng.End, rng.Start+MaxResponseBytes-1)
+	// MaxResponseBytes 截断只作用于**带 Range 的播放器请求**（它们会按
+	// Content-Range 续请拼接，proxy_server.py:216 同因）；无 Range 的直读
+	// 请求回 200 全量 —— 这类客户端（<img>/fetch/PDFium）不会续请，
+	// 截断对它们就是「文件被截了一部分」
+	hasRange := rangeHeader != ""
+	end := rng.End
+	if hasRange {
+		end = min(rng.End, rng.Start+MaxResponseBytes-1)
+	}
 
 	ctr, err := cryptox.NewCTR(e.Key[:], e.Header.IV)
 	if err != nil {
@@ -155,9 +166,13 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request, e *Entry) {
 		writeError(w, http.StatusBadGateway, "backend error")
 		return
 	}
-	h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", rng.Start, end, total))
 	h.Set("Content-Length", strconv.FormatInt(end-rng.Start+1, 10))
-	w.WriteHeader(http.StatusPartialContent)
+	if hasRange {
+		h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", rng.Start, end, total))
+		w.WriteHeader(http.StatusPartialContent)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
 	if !writeScrubbed(w, ct, part) {
 		return // 客户端中断：静默
 	}
