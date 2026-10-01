@@ -545,10 +545,13 @@ export function toggleMulti(e: appstate.FileEntry) {
 export function rangeMulti(e: appstate.FileEntry, anchorRemote: string | null, entries: appstate.FileEntry[]) {
   const a = anchorRemote ? entries.findIndex((x) => x.remote === anchorRemote) : -1
   const b = entries.findIndex((x) => x.remote === e.remote)
-  const lo = a >= 0 && a < b ? a : b
-  const hi = a >= 0 && a > b ? a : b === a ? (b < entries.length - 1 ? b + 1 : b) : b
+  if (b < 0) return // 目标不在当前列表（理论不可达；旧代码此时会用 entries[-1] 崩掉）
+  // 区间就是 [min(a,b), max(a,b)]：锚点缺失时退化为单选 b；
+  // 旧实现里 a===b（Shift 点锚点自身）会把 hi 顶到 b+1，白多选一项
+  const lo = a >= 0 ? Math.min(a, b) : b
+  const hi = a >= 0 ? Math.max(a, b) : b
   const set = new Map(ui.multi.map((x) => [x.remote, x]))
-  for (let i = Math.min(lo, hi); i <= Math.max(lo, hi); i++) {
+  for (let i = lo; i <= hi; i++) {
     set.set(entries[i].remote, entries[i])
   }
   ui.multi = [...set.values()]
