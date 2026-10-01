@@ -25,8 +25,8 @@ import {
 } from './api'
 import * as evt from './events'
 import {applyThemeIndex} from './theme'
-import {showError, showInfo, showSuccess} from './toast'
-import {collectDropped, collectFromFileList, type UploadItem} from './upload'
+import {showError, showInfo, showSuccess, showWarning} from './toast'
+import {collectDropped, collectFromFileList, MAX_ITEMS, type UploadItem} from './upload'
 import {clearCoverCache} from './videoCover'
 
 export type PageId = 'files' | 'transfers' | 'vaults' | 'settings'
@@ -645,7 +645,9 @@ export async function uploadFiles(items: UploadItem[], remoteDir: string = ui.re
 
 /** 全窗口拖放入口：DataTransfer → 条目列表（文件夹递归展开）→ 上传。 */
 export async function onDropFiles(dt: DataTransfer) {
-  const items = await collectDropped(dt)
+  const {items, truncated} = await collectDropped(dt)
+  // 触顶截断必须显式告知：静默丢文件在用户视角是「传了但少了」的数据事故
+  if (truncated) showWarning(`单次最多上传 ${MAX_ITEMS} 个条目，超出的部分未被加入队列`)
   await uploadFiles(items)
 }
 

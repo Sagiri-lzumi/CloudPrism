@@ -22,7 +22,14 @@ export interface UploadItem {
 }
 
 /** 单次拖放的条目上限。误拖整个盘符时及时止损，避免浏览器卡死。 */
-const MAX_ITEMS = 5000
+export const MAX_ITEMS = 5000
+
+/** 拖放收集结果：条目 + 是否触顶截断（触顶必须让用户知道，静默丢文件
+ *  在用户视角是「上传了但少文件」的数据事故）。 */
+export interface CollectResult {
+  items: UploadItem[]
+  truncated: boolean
+}
 
 /**
  * 读取拖放内容（含文件夹递归展开）。
@@ -31,7 +38,7 @@ const MAX_ITEMS = 5000
  * 或拿不到 entry，退化为 `dataTransfer.files` 平铺（此时文件夹仍会丢内容，
  * 但至少文件不丢）。
  */
-export async function collectDropped(dt: DataTransfer): Promise<UploadItem[]> {
+export async function collectDropped(dt: DataTransfer): Promise<CollectResult> {
   const entries: FileSystemEntry[] = []
   const items = dt.items
   for (let i = 0; i < items.length; i++) {
@@ -44,10 +51,11 @@ export async function collectDropped(dt: DataTransfer): Promise<UploadItem[]> {
 
   if (entries.length) {
     const out: UploadItem[] = []
-    for (const entry of entries) await walkEntry(entry, '', out)
-    if (out.length) return out
+    const state = {truncated: false}
+    for (const entry of entries) await walkEntry(entry, '', out, state)
+    if (out.length) return {items: out, truncated: state.truncated}
   }
-  return collectFromFileList(dt.files)
+  return {items: collectFromFileList(dt.files), truncated: false}
 }
 
 /**
@@ -64,8 +72,16 @@ export function collectFromFileList(files: FileList | File[]): UploadItem[] {
 }
 
 /** 递归展开一个 FileSystemEntry；目录只贡献路径前缀，不产生条目。 */
-async function walkEntry(entry: FileSystemEntry, prefix: string, out: UploadItem[]): Promise<void> {
-  if (out.length >= MAX_ITEMS) return
+async function walkEntry(
+  entry: FileSystemEntry,
+  prefix: string,
+  out: UploadItem[],
+  state: {truncated: boolean},
+): Promise<void> {
+  if (out.length >= MAX_ITEMS) {
+    state.truncated = true
+    return
+  }
 
   if (entry.isFile) {
     const file = await readFileEntry(entry as FileSystemFileEntry)
@@ -78,7 +94,7 @@ async function walkEntry(entry: FileSystemEntry, prefix: string, out: UploadItem
   const dir = entry as FileSystemDirectoryEntry
   const children = await readAllEntries(dir.createReader())
   const next = prefix ? `${prefix}/${entry.name}` : entry.name
-  for (const child of children) await walkEntry(child, next, out)
+  for (const child of children) await walkEntry(child, next, out, state)
 }
 
 /** `FileSystemFileEntry.file()` 的 Promise 化；失败返回 null 由调用方跳过。 */
