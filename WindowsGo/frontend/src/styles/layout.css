@@ -49,6 +49,8 @@
   min-width: 0;
   min-height: 0; /* 允许内部滚动区收缩 */
   overflow: hidden;
+  /* 页面过渡默认模式下，离场页以它为定位基准（见 base.css .page-leave-active） */
+  position: relative;
 }
 
 /* 底栏：整窗唯一的底部区域。毛玻璃与侧栏同族（同一 chrome 档 token + 同一模糊口径），

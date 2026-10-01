@@ -166,6 +166,11 @@ a:hover,
 
 .page-leave-active {
     transition: opacity calc(var(--dur) / 2) var(--ease);
+    /* 页面过渡为默认模式（新旧页同屏），离场页必须脱离文档流绝对定位，
+       否则两页在 .app-main 里纵向堆叠、入场页被推下又跳回（out-in 曾因
+       dev 卡死被移除，见 App.vue 注释） */
+    position: absolute;
+    inset: 0;
 }
 
 .page-enter-from {

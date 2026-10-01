@@ -267,7 +267,11 @@ async function onDrop(e: DragEvent) {
          Comment vnode 混进 Transition 子节点，out-in 切换时新子节点被解析成
          空注释 → 页面空白（prod 构建剥离注释故不复发）。 -->
     <main class="app-main">
-      <Transition name="page" mode="out-in">
+      <!-- 页面过渡用默认模式（新旧页同时淡入淡出），不用 mode="out-in"：
+           out-in 的「等旧页退完再挂新页」状态机在 dev 下会被 10Hz 状态帧
+           触发的过渡中途更新卡死（新视图永不挂载，.app-main 只剩注释占位）。
+           默认模式无等待状态机，结构上免疫此类卡死。 -->
+      <Transition name="page">
         <FilesView v-if="ui.page === 'files'" key="files" class="page-fill" />
         <TransfersView v-else-if="ui.page === 'transfers'" key="transfers" class="page-fill" />
         <VaultsView v-else-if="ui.page === 'vaults'" key="vaults" class="page-fill" />
