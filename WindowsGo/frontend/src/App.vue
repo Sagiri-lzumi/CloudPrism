@@ -260,18 +260,17 @@ async function onDrop(e: DragEvent) {
       </div>
     </nav>
 
-    <!-- 页面区 -->
+    <!-- 页面区（四个子页：files=文件；transfers=任务列表+续传/重试/清空；
+         vaults=未连接显示欢迎+最近记录、已连接显示库信息/同步/恢复码；
+         settings=外观/缓存/传输/安全/百度凭证/性能/关于）
+         注意：分支之间严禁夹 HTML 注释 —— dev 模式（vite dev）注释会保留为
+         Comment vnode 混进 Transition 子节点，out-in 切换时新子节点被解析成
+         空注释 → 页面空白（prod 构建剥离注释故不复发）。 -->
     <main class="app-main">
       <Transition name="page" mode="out-in">
         <FilesView v-if="ui.page === 'files'" key="files" class="page-fill" />
-
-        <!-- 传输页：任务列表 + 续传/重试/清空 -->
         <TransfersView v-else-if="ui.page === 'transfers'" key="transfers" class="page-fill" />
-
-        <!-- 密库页：未连接=欢迎+最近记录；已连接=库信息/同步/恢复码 -->
         <VaultsView v-else-if="ui.page === 'vaults'" key="vaults" class="page-fill" />
-
-        <!-- 设置页：外观/缓存/传输/安全/百度凭证/性能/关于 -->
         <SettingsView v-else key="settings" class="page-fill" />
       </Transition>
     </main>
