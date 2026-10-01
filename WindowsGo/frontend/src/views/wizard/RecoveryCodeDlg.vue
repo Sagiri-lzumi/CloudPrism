@@ -28,19 +28,24 @@ const segments = () => {
 // 必须是 ref：原先写成普通 let，模板读的是非响应式绑定，
 // 于是「已复制」这个反馈永远不变 —— 点了复制却像没反应。
 const copied = ref(false)
+/** 剪贴板不可用的兜底态：文本已被选中，需用户手动 Ctrl+C */
+const copyFallback = ref(false)
+const codeEl = ref<HTMLElement>()
 watch(
   () => props.open,
   (v) => {
-    if (v) copied.value = false
+    if (v) {
+      copied.value = false
+      copyFallback.value = false
+    }
   },
 )
 
-function onCopy() {
+async function onCopy() {
   // 剪贴板不可用时退化为「选中文本」，用户手动 Ctrl+C。
-  // writeText 是异步的：同步 try/catch 兜不住它的 reject，
-  // 不接 catch 会变成 unhandled rejection（实测会在控制台留下 pageerror）。
+  // writeText 是异步的：同步 try/catch 兜不住它的 reject，必须 await/catch。
   const selectFallback = () => {
-    const el = document.querySelector<HTMLElement>('.rc-code')
+    const el = codeEl.value // 本组件内的 .rc-code，不用全局 querySelector
     if (!el) return
     const range = document.createRange()
     range.selectNodeContents(el)
@@ -48,12 +53,20 @@ function onCopy() {
     sel?.removeAllRanges()
     sel?.addRange(range)
   }
+  copied.value = false
+  copyFallback.value = false
   if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(props.code.trim()).catch(selectFallback)
-  } else {
-    selectFallback()
+    try {
+      await navigator.clipboard.writeText(props.code.trim())
+      copied.value = true
+      return
+    } catch {
+      /* 落入兜底 */
+    }
   }
-  copied.value = true
+  // 兜底只是「选中文本」，没进剪贴板 —— 文案必须区分，不能说「已复制」
+  selectFallback()
+  copyFallback.value = true
 }
 </script>
 
@@ -71,14 +84,16 @@ function onCopy() {
       恢复码一旦丢失将无法找回。此码只显示这一次，不会写入云端。
     </p>
 
-    <div class="rc-code" dir="ltr" aria-label="恢复码内容">
+    <div ref="codeEl" class="rc-code" dir="ltr" aria-label="恢复码内容">
       <span v-for="(s, i) in segments()" :key="i" class="rc-seg">{{ s }}</span>
     </div>
 
     <p class="rc-note">重新生成后旧恢复码立即失效；恢复码不会上传到云端。</p>
 
     <template #actions>
-      <Button icon="copy" @click="onCopy">{{ copied ? '已复制' : '复制恢复码' }}</Button>
+      <Button icon="copy" @click="onCopy">
+        {{ copied ? '已复制' : copyFallback ? '已选中，请按 Ctrl+C' : '复制恢复码' }}
+      </Button>
       <PrimaryButton icon="completed" @click="emit('close')">我已备份，进入密库</PrimaryButton>
     </template>
   </ModalShell>
