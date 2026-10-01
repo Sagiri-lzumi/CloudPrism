@@ -115,12 +115,23 @@ function onGlobalKey(e: KeyboardEvent) {
   }
   if (!mod) return
   const k = e.key.toLowerCase()
+  // 命中应用动作时才 preventDefault：Web 服务模式下浏览器原生快捷键
+  // （Ctrl+D 收藏、Ctrl+U 查看源码）只在「应用此刻不会响应」时放行
   if (k === 'l') {
-    if (connected.value) void lockVault()
+    if (connected.value) {
+      e.preventDefault()
+      void lockVault()
+    }
   } else if (k === 'u') {
-    if (connected.value && isFilePage.value) void pickUploadFiles()
+    if (connected.value && isFilePage.value) {
+      e.preventDefault()
+      void pickUploadFiles()
+    }
   } else if (k === 'd') {
-    if (connected.value && isFilePage.value && ui.sel) void downloadSel()
+    if (connected.value && isFilePage.value && ui.sel) {
+      e.preventDefault()
+      void downloadSel()
+    }
   }
 }
 
