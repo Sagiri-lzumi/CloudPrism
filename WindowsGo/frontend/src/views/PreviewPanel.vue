@@ -92,7 +92,12 @@ watch(sel, async (e) => {
   }
 }, {immediate: true})
 
-/** 文本预览：走代理 URL fetch（Go 侧已带 Access-Control-Allow-Origin）。 */
+/** 文本预览拉取上限：2MiB 够预览任何常规文本；PDF 有 PDF_INLINE_MAX，
+ *  文本此前没有 —— resp.text() 会把 500MB 日志整个拉进内存。 */
+const TEXT_FETCH_MAX = 2 * 1024 * 1024
+
+/** 文本预览：走代理 URL fetch（Go 侧已带 Access-Control-Allow-Origin）。
+ *  流式读取、封顶即停，绝不让整份大文件进内存。 */
 async function loadText(u: string, gen: number) {
   try {
     const resp = await fetch(u)
@@ -101,9 +106,42 @@ async function loadText(u: string, gen: number) {
       textErr.value = `读取失败（HTTP ${resp.status}）`
       return
     }
-    const raw = await resp.text()
+    const reader = resp.body?.getReader()
+    if (!reader) {
+      // 无流式 API 的极端环境：退回全量读（行为同旧实现）
+      const raw = await resp.text()
+      if (gen !== urlGen) return
+      text.value = raw
+      return
+    }
+    const chunks: Uint8Array[] = []
+    let got = 0
+    let capped = false
+    for (;;) {
+      const {done, value} = await reader.read()
+      if (done) break
+      chunks.push(value)
+      got += value.byteLength
+      if (gen !== urlGen) {
+        void reader.cancel()
+        return
+      }
+      if (got >= TEXT_FETCH_MAX) {
+        capped = true
+        void reader.cancel()
+        break
+      }
+    }
+    const buf = new Uint8Array(got)
+    let off = 0
+    for (const c of chunks) {
+      buf.set(c, off)
+      off += c.byteLength
+    }
     if (gen !== urlGen) return
-    text.value = raw
+    text.value = new TextDecoder().decode(buf)
+    // 触顶要显式标注：否则用户会把「前半份文件」当成完整内容
+    if (capped) text.value += `\n\n……（文件过大，仅拉取前 ${Math.floor(TEXT_FETCH_MAX / 1024 / 1024)}MiB 预览；完整内容请下载）……`
   } catch {
     if (gen !== urlGen) return
     textErr.value = '文本拉取失败（网络或解码错误）'
