@@ -90,7 +90,12 @@ function onDocDown(e: PointerEvent) {
 }
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') emit('close')
+  if (e.key !== 'Escape') return
+  // 阻止继续传播：菜单底下压着模态时（如 FolderPicker/MessageBox 内引入
+  // 下拉），一次 Esc 会连同底层模态一起关掉 —— Esc 只该关最上层
+  e.stopPropagation()
+  e.preventDefault()
+  emit('close')
 }
 
 watch(
