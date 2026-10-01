@@ -10,6 +10,7 @@
 -->
 <script setup lang="ts">
 import {computed, nextTick, reactive, ref, watch} from 'vue'
+import type {appstate} from '../../types/appstate'
 import {ui, openVault, navigate, endOp, pickLocalDir} from '../../lib/store'
 import {Vault, unwrap} from '../../lib/api'
 import {showInfo, showWarning} from '../../lib/toast'
@@ -68,7 +69,7 @@ const busy = ref(false) // 执行中（阶段文案走全局忙碌态，见 stor
 
 /* ---------------------------------------------------------- 最近记录 */
 
-const recentVaults = ref<Record<string, unknown>[]>([])
+const recentVaults = ref<appstate.RecentVault[]>([])
 let loadedRecents = false
 
 async function loadRecents() {
@@ -90,13 +91,13 @@ watch(
       const first = recentVaults.value[0]
       if (first && !(form.kind === 'baidu' && !form.baidu.authorized)) {
         // 默认沿用最近一次后端类型（连接场景概率最高）
-        const k = String(first.backend_type ?? '')
+        const k = first.backend_type
         if (k === 'local' || k === 'webdav' || k === 'baidu') {
           form.kind = k
-          if (k === 'local') form.localDir = String(first.path ?? '')
+          if (k === 'local') form.localDir = first.path
           else if (k === 'webdav') {
-            form.url = String(first.path ?? '')
-            form.user = String(first.webdav_user ?? '')
+            form.url = first.path
+            form.user = first.webdav_user ?? ''
           }
         }
       }

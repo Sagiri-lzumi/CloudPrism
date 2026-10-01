@@ -10,6 +10,7 @@
 -->
 <script setup lang="ts">
 import {computed, onMounted, reactive, ref, watch} from 'vue'
+import type {appstate} from '../types/appstate'
 import {ui, openVault, navigate, lockVault, endOp, pickLocalDir} from '../lib/store'
 import {Settings, Vault, unwrap} from '../lib/api'
 import {fmtSize, fmtConnectSec} from '../lib/format'
@@ -34,7 +35,7 @@ const snap = () => ui.snap!
 const showWiz = ref(false)
 
 /** 最近连接记录（本地副本：增删改后重拉）。 */
-const recents = ref<Record<string, any>[]>([])
+const recents = ref<appstate.RecentVault[]>([])
 
 async function refreshRecents() {
   try {
@@ -68,25 +69,25 @@ function kindIcon(k: string): string {
 }
 
 /** 卡片摘要行：位置 + 子目录 + 最近使用。 */
-function recLocation(r: Record<string, any>): string {
-  const path = String(r.path ?? '')
-  const vp = String(r.vault_path ?? '')
+function recLocation(r: appstate.RecentVault): string {
+  const path = r.path
+  const vp = r.vault_path
   const parts = [path, vp].filter((s) => s && s !== '/')
   return parts.length ? parts.join(' · ') : '未知位置'
 }
 
-function recMeta(r: Record<string, any>): string {
-  const t = String(r.backend_type ?? '')
-  const user = String(r.webdav_user ?? '')
+function recMeta(r: appstate.RecentVault): string {
+  const t = r.backend_type
+  const user = r.webdav_user ?? ''
   const bname = t === 'local' ? '本地文件夹' : t === 'webdav' ? 'WebDAV' : '百度网盘'
-  const last = String(r.last_used ?? '')
+  const last = r.last_used ?? ''
   const userTxt = user ? `（${user}）` : ''
   return `${bname}${userTxt} · 最近 ${last || '-'}`
 }
 
-async function forgetRecent(r: Record<string, any>) {
+async function forgetRecent(r: appstate.RecentVault) {
   try {
-    await Vault.ForgetRecent(String(r.key ?? ''))
+    await Vault.ForgetRecent(r.key)
     showInfo('已移除最近记录（云端数据不受影响）')
     void refreshRecents()
   } catch (e) {
@@ -98,7 +99,7 @@ async function forgetRecent(r: Record<string, any>) {
 
 const qc = reactive({
   open: false,
-  record: null as Record<string, any> | null,
+  record: null as appstate.RecentVault | null,
   webdavPass: '',
   master: '',
   useRecovery: false,
@@ -121,7 +122,7 @@ watch(
   },
 )
 
-function openQuickConnect(r: Record<string, any>) {
+function openQuickConnect(r: appstate.RecentVault) {
   qc.record = r
   qc.webdavPass = ''
   qc.master = ''
@@ -136,7 +137,7 @@ async function doQuickConnect() {
   const r = qc.record
   if (!r || qc.busy) return
   // 记录类型白名单收窄（防止脏数据把非法 kind 传进 OpenRequest）
-  const k = String(r.backend_type ?? '')
+  const k = r.backend_type
   const kind = k === 'webdav' || k === 'baidu' ? k : 'local'
   const webdav = kind === 'webdav'
   if (!qc.useRecovery && !qc.master) {
@@ -156,11 +157,11 @@ async function doQuickConnect() {
   try {
     await openVault({
       kind,
-      localDir: kind === 'local' ? String(r.path ?? '') : '',
-      url: webdav ? String(r.path ?? '') : '',
-      user: webdav ? String(r.webdav_user ?? '') : '',
+      localDir: kind === 'local' ? r.path : '',
+      url: webdav ? r.path : '',
+      user: webdav ? (r.webdav_user ?? '') : '',
       pass: webdav ? qc.webdavPass : '',
-      vaultPath: String(r.vault_path ?? ''),
+      vaultPath: r.vault_path,
       masterPassword: qc.useRecovery ? '' : qc.master,
       recoveryCode: qc.useRecovery ? qc.recovery.trim() : '',
       create: false,
@@ -182,8 +183,8 @@ async function doQuickConnect() {
  *  现在浮层结构与键盘处理都归 ModalShell，这里只留纯展示。 */
 const qcSub = computed(() => {
   const r = qc.record
-  const name = String(r?.vault_name ?? r?.label ?? '密库')
-  const where = String(r?.vault_path ?? '') || '根目录'
+  const name = r?.vault_name || r?.label || '密库'
+  const where = r?.vault_path || '根目录'
   return `${name} · ${where}`
 })
 
@@ -387,10 +388,10 @@ async function onOtherConfirm(payload: string | boolean) {
             <span class="sec-sub">点击卡片快速连接（仅需密码）</span>
           </div>
           <div class="recent-list">
-            <Card v-for="(r, i) in recents" :key="String(r.key ?? i)" clickable padding="none">
+            <Card v-for="(r, i) in recents" :key="r.key || i" clickable padding="none">
               <div class="recent-row" @click="openQuickConnect(r)">
                 <span class="rec-ic">
-                  <Icon :name="kindIcon(String(r.backend_type ?? ''))" :size="18" />
+                  <Icon :name="kindIcon(r.backend_type)" :size="18" />
                 </span>
                 <div class="rec-txt">
                   <div class="rec-name">

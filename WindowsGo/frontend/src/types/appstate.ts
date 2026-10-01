@@ -34,6 +34,22 @@ export namespace appstate {
     code: string
   }
 
+  /** 最近连接的密库记录（镜像 Go 侧 recents 存储的 JSON 字段）。
+   *  此前前端一路用 Record<string, any> + String() 强转，字段名写错编译器不拦。 */
+  export interface RecentVault {
+    key: string
+    /** local | webdav | baidu */
+    backend_type: string
+    /** localDir 或 webdav url */
+    path: string
+    vault_path: string
+    vault_name: string
+    /** 旧版记录字段（兼容性兜底展示用） */
+    label?: string
+    webdav_user?: string
+    last_used?: string
+  }
+
   export interface SyncStatus {
     running: boolean
     total: number
