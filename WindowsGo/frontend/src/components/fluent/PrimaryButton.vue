@@ -54,7 +54,44 @@ const emit = defineEmits<{click: [e: MouseEvent]}>()
   border: none;
   border-radius: var(--radius-ctrl);
   cursor: default;
+  /* 材质：顶部内嵌高光发丝线（按钮有「厚度」的暗示）+ 极轻投影托起色块；
+     position/overflow 为 hover 流光（::after）所需 */
+  position: relative;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 1px 2px color-mix(in srgb, var(--accent) 35%, transparent);
   transition: filter var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease-spring);
+}
+
+/* hover 流光：一道斜切的高光从左扫到右（一次、不循环）。
+   只动 transform 不平移布局；扫完即隐，常驻不留痕。 */
+.cp-btn-primary::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.38), transparent);
+  transform: translateX(-160%) skewX(-18deg);
+  pointer-events: none;
+}
+
+.cp-btn-primary:hover:not(:disabled)::after {
+  animation: btn-sheen 0.9s var(--ease) 1;
+}
+
+/* 减少动态效果：流光纯属装饰，直接移除 */
+@media (prefers-reduced-motion: reduce) {
+  .cp-btn-primary::after {
+    display: none;
+  }
+}
+
+@keyframes btn-sheen {
+  to {
+    transform: translateX(340%) skewX(-18deg);
+  }
 }
 
 /* hover/active 用 filter 提亮/压暗：纯色底沿用这套方案（渐变时代的遗产），

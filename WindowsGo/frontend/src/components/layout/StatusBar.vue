@@ -51,6 +51,12 @@ const connecting = computed(() => ui.opBusy && !connected.value)
       <Icon name="cloud" :size="12" />
       {{ snap.resumeCount }} 个任务可续传
     </button>
+
+    <!-- 快捷键提示：全局快捷键已存在（Ctrl+U/L/D）但界面上从未出现，
+         可发现性为零；底栏右侧用最低调的一档文字显性化。窄窗隐藏。 -->
+    <span v-if="connected" class="aux hint" aria-hidden="true">
+      Ctrl+U 上传 · Ctrl+L 锁定
+    </span>
   </footer>
 </template>
 
@@ -158,5 +164,16 @@ const connecting = computed(() => ui.opBusy && !connected.value)
 
 .aux.resume:hover {
   background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+
+/* 快捷键提示：比瞬时辅助再低一档（muted），不抢状态与提醒的注意力 */
+.aux.hint {
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .aux.hint {
+    display: none;
+  }
 }
 </style>

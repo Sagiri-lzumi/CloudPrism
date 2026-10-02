@@ -25,6 +25,7 @@ import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import type {appstate} from '../types/appstate'
 import {thumbUrl, revoke, ui, multiRemotes} from '../lib/store'
 import {kindOf, KIND_ICON} from '../lib/media'
+import {fmtSize} from '../lib/format'
 import {requestVideoCover, type CoverHandle} from '../lib/videoCover'
 import Icon from '../components/fluent/Icon.vue'
 import ProgressRing from '../components/fluent/ProgressRing.vue'
@@ -160,6 +161,21 @@ function isSel(e: appstate.FileEntry): boolean {
 // 多选批量态（≥2 项）：此时勾选角标才出现；单选仅靠 .gc.sel 整卡高亮
 //（v17：去掉单选常驻左上角蓝点的观感问题）
 const multiMode = computed(() => ui.multi.length > 1)
+
+/* ---- 元信息与类型徽标 ----
+   网格卡过去只有文件名，扫一眼得不到任何决策信息（多大？什么类型？）。
+   徽标取扩展名大写（≤5 字符，更长一律归「文件」防撑破胶囊）；
+   元信息行：文件显示大小、目录显示「文件夹」。 */
+const extLabel = computed(() => {
+  if (props.entry.isDir) return ''
+  const n = props.entry.display
+  const i = n.lastIndexOf('.')
+  if (i <= 0 || i === n.length - 1) return ''
+  const ext = n.slice(i + 1).toUpperCase()
+  return ext.length <= 5 ? ext : '文件'
+})
+
+const metaLabel = computed(() => (props.entry.isDir ? '文件夹' : fmtSize(props.entry.size)))
 </script>
 
 <template>
@@ -229,6 +245,11 @@ const multiMode = computed(() => ui.multi.length > 1)
         <span v-if="coverDur > 0" class="dur">{{ fmtDur(coverDur) }}</span>
       </template>
 
+      <!-- 类型徽标：缩略图面右上角（绝对定位，不参与 flex 排版，
+           与视频时长胶囊右下错开）。恒白字 + 恒黑罩：要压在任意画面上可读，
+           故与播放角标同取 --scrim-media，不随主题变化。 -->
+      <span v-if="!up && extLabel" class="ext" aria-hidden="true">{{ extLabel }}</span>
+
       <!-- 上传进度圆环：只给够大的文件画（小文件瞬间完成，画了反而闪） -->
       <ProgressRing
         v-if="up && up.showRing"
@@ -237,7 +258,11 @@ const multiMode = computed(() => ui.multi.length > 1)
         :size="52"
       />
     </div>
-    <figcaption class="name" :title="entry.display">{{ entry.display }}</figcaption>
+    <figcaption class="cap">
+      <span class="name" :title="entry.display">{{ entry.display }}</span>
+      <!-- 上传占位态不显示大小（服务端还没有它），给「上传中…」状态文案 -->
+      <span class="meta">{{ up ? '上传中…' : metaLabel }}</span>
+    </figcaption>
   </figure>
 </template>
 
@@ -258,6 +283,8 @@ const multiMode = computed(() => ui.multi.length > 1)
      stroke-card（浅色透明靠明度差、深色极淡白兜底）。 */
   border: 1px solid var(--stroke-card);
   background: var(--glass-card);
+  /* 玻璃厚度：上沿一条 --glass-edge 内嵌高光发丝线，光从上方来的暗示 */
+  box-shadow: inset 0 1px 0 var(--glass-edge);
   border-radius: var(--radius-card);
   cursor: default;
   user-select: none;
@@ -287,7 +314,7 @@ const multiMode = computed(() => ui.multi.length > 1)
    v1.01 幅度加深一档（-2px/1.012 → -3px/1.015，hover 底色混在玻璃卡面上）。 */
 .gc:hover {
   background: color-mix(in srgb, var(--text) 6%, var(--glass-card));
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-card), inset 0 1px 0 var(--glass-edge);
   transform: translateY(-3px) scale(1.015);
   z-index: var(--z-raise);
 }
@@ -302,7 +329,7 @@ const multiMode = computed(() => ui.multi.length > 1)
 .gc.sel {
   background: var(--accent-soft);
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-softer);
+  box-shadow: 0 0 0 3px var(--accent-softer), inset 0 1px 0 var(--glass-edge);
 }
 
 /* 上传占位（乐观条目）：不可交互，视觉上比真条目轻一档 —— 它在等真实条目
@@ -484,20 +511,52 @@ const multiMode = computed(() => ui.multi.length > 1)
   }
 }
 
-/* 名称：两行截断，底距让卡片呼吸；选中时随整体高亮 */
-.name {
-  padding: 2px 6px 8px;
+/* 说明区：名称（两行截断）+ 元信息行；底距让卡片呼吸 */
+.cap {
   width: 100%;
+  padding: 2px 6px 8px;
+  text-align: center;
+}
+
+.name {
   max-height: 2.7em; /* 两行截断 */
   font-size: 0.786rem;
   line-height: 1.35;
   color: var(--text);
-  text-align: center;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow-wrap: anywhere;
+}
+
+/* 元信息行：大小 / 「文件夹」。比名称再低一档，tabular-nums 让大小数字对齐 */
+.meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.679rem;
+  line-height: 1.3;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 类型徽标：缩略图面右上角胶囊（绝对定位 + 恒黑罩，同 .dur 一套配色） */
+.ext {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  padding: 1px 5px;
+  font-size: 0.643rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  color: #fff;
+  background: var(--scrim-media);
+  border-radius: 5px;
+  pointer-events: none;
 }
 
 .gc.sel .name {

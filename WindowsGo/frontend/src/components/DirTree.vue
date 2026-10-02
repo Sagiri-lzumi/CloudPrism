@@ -120,7 +120,7 @@ void loadChildren(root.value)
       :key="item.node.remote || '__root__'"
       class="dt-row"
       :class="{on: item.node.remote === current, loading: item.node.loading}"
-      :style="{paddingLeft: item.depth * 14 + 10 + 'px'}"
+      :style="{paddingLeft: item.depth * 16 + 12 + 'px'}"
       @click="open(item.node)"
     >
       <!-- 展开箭头：有子目录或未加载才显示 -->
@@ -130,10 +130,10 @@ void loadChildren(root.value)
         class="dt-arrow"
         @click.stop="toggle(item.node)"
       >
-        <Icon :name="item.node.expanded ? 'chevron_down_med' : 'chevron_right_med'" :size="12" />
+        <Icon :name="item.node.expanded ? 'chevron_down_med' : 'chevron_right_med'" :size="13" />
       </button>
       <span v-else class="dt-arrow-placeholder" />
-      <Icon :name="item.node.remote === '' ? 'cloud' : 'folder'" :size="15" class="dt-ic" />
+      <Icon :name="item.node.remote === '' ? 'cloud' : 'folder'" :size="17" class="dt-ic" />
       <span class="dt-label">{{ item.node.label }}</span>
     </div>
   </div>
@@ -154,9 +154,9 @@ void loadChildren(root.value)
 .dt-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 8px 0 0;
+  gap: 7px;
+  height: 34px;
+  padding: 0 10px 0 0;
   border-radius: var(--radius-ctrl);
   cursor: default;
   transition: background var(--dur-fast) var(--ease);
@@ -175,8 +175,8 @@ void loadChildren(root.value)
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   color: var(--text2);
   background: transparent;
   border: none;
@@ -190,8 +190,8 @@ void loadChildren(root.value)
 
 .dt-arrow-placeholder {
   flex: none;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
 }
 
 .dt-ic {
@@ -207,7 +207,7 @@ void loadChildren(root.value)
   flex: 1;
   min-width: 0;
   /* 与外壳侧栏导航项同字号：树与导航在同一栏里，字号不一致会显得是两套控件 */
-  font-size: 0.857rem;
+  font-size: 0.929rem;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;

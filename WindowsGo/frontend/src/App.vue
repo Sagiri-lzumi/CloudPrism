@@ -88,7 +88,6 @@ function badgeOf(page: PageId): string {
 
 const NAV_KEY = 'cp-nav-collapsed'
 const navCollapsed = ref(localStorage.getItem(NAV_KEY) === '1')
-
 function toggleNav() {
   navCollapsed.value = !navCollapsed.value
   localStorage.setItem(NAV_KEY, navCollapsed.value ? '1' : '0')
@@ -203,18 +202,10 @@ async function onDrop(e: DragEvent) {
     <!-- 侧栏：品牌头 + 导航（+ 文件页目录树）+ 页脚 -->
     <nav class="app-nav">
       <div class="brand">
-        <span class="brand-mark"><Icon name="cloud" :size="17" /></span>
+        <!-- 品牌位：真实应用图标（public/brand.png，与 README 同源）+ 品牌色柔光。
+     不再用 cloud 轮廓图标 —— 那是「云盘品类」的通用符号，棱镜分光才是本产品。 -->
+<span class="brand-mark"><img class="brand-logo" src="/brand.png" alt="" /></span>
         <span class="brand-name lbl">CloudPrism</span>
-        <button
-          type="button"
-          class="collapse-btn"
-          :title="navCollapsed ? '展开侧栏' : '收起侧栏'"
-          :aria-label="navCollapsed ? '展开侧栏' : '收起侧栏'"
-          :aria-expanded="!navCollapsed"
-          @click="toggleNav"
-        >
-          <Icon :name="navCollapsed ? 'care_right_solid' : 'care_left_solid'" :size="12" />
-        </button>
       </div>
 
       <div class="nav-body">
@@ -228,7 +219,7 @@ async function onDrop(e: DragEvent) {
           :title="navCollapsed ? n.title : undefined"
           @click="navigate(n.page)"
         >
-          <Icon :name="n.icon" :size="17" class="nav-ic" />
+          <Icon :name="n.icon" :size="19" class="nav-ic" />
           <span class="nav-label lbl">{{ n.title }}</span>
           <!-- :key 绑角标数值：数值一变就换一个新节点，badge-pop 动画随之重播
                （否则同一个节点上只改文字，CSS 动画不会重新触发）。
@@ -251,22 +242,35 @@ async function onDrop(e: DragEvent) {
       <div class="nav-foot">
         <button
           type="button"
-          class="foot-btn"
+          class="foot-btn lock-btn"
           :disabled="!connected"
           :title="connected ? '锁定密库（Ctrl+L）' : '未连接'"
           @click="lockVault"
         >
-          <Icon :name="connected ? 'lock' : 'lock_open'" :size="15" />
+          <Icon :name="connected ? 'lock' : 'lock_open'" :size="19" />
           <span class="lbl">锁定密库</span>
+        </button>
+        <!-- 收起/展开侧栏：原在品牌头（与品牌名抢位，窄栏还会压住图标），
+             移到页脚与「锁定/退出」并排 —— 三者同为全局常驻动作，语义一致；
+             并且它贴着侧栏右缘，箭头方向与「栏往哪动」直接对应。 -->
+        <button
+          type="button"
+          class="foot-btn icon-only collapse-btn"
+          :title="navCollapsed ? '展开侧栏' : '收起侧栏'"
+          :aria-label="navCollapsed ? '展开侧栏' : '收起侧栏'"
+          :aria-expanded="!navCollapsed"
+          @click="toggleNav"
+        >
+          <Icon name="chevron_right_med" :size="19" :class="{flip: !navCollapsed}" />
         </button>
         <button
           type="button"
-          class="foot-btn icon-only"
+          class="foot-btn icon-only power-btn"
           title="退出应用"
           aria-label="退出应用"
           @click="quitApp"
         >
-          <Icon name="power_button" :size="15" />
+          <Icon name="power_button" :size="19" />
         </button>
       </div>
     </nav>
@@ -352,16 +356,16 @@ async function onDrop(e: DragEvent) {
 .app-nav {
   display: flex;
   flex-direction: column;
-  width: var(--nav-w, 192px);
-  min-width: var(--nav-w, 192px);
+  width: var(--nav-w, 216px);
+  min-width: var(--nav-w, 216px);
   padding: 0;
-  /* v1.01 折叠/展开动画化：只过渡列宽（custom property 换值触发的是
-     computed width 变化，transition 拿得到）。子元素规则零改动 ——
-     .lbl 在折叠态 display:none（瞬时消失，无文字可裁），图标恒居中于
-     ≥56px 的行内、角标 15px，均不越界（此前担心的裁切只发生在
-     「位移子元素」，宽度过渡不移动子元素）。网格 auto 列随宽逐帧重排，
-     一次性 200ms 可接受。≤640px 下 width:auto 不可插值，过渡自动失效为
-     no-op，底部 TabBar 不受影响。 */
+  /* v1.4 折叠/展开动画化：只过渡列宽（custom property 换值触发的是
+     computed width 变化，transition 拿得到）。子元素几何全程不变 ——
+     文字由栏宽收窄 + overflow 自然裁掉（旧方案在折叠态 display:none
+     文字 + 子元素切居中，动画首尾各跳变一次，即「收起时闪一下」的
+     来源）。网格 auto 列随宽逐帧重排，一次性 200ms 可接受。
+     ≤640px 下 width:auto 不可插值，过渡自动失效为 no-op，
+     底部 TabBar 不受影响。 */
   transition: width var(--dur) var(--ease), min-width var(--dur) var(--ease);
   background: var(--glass-chrome);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
@@ -374,10 +378,12 @@ async function onDrop(e: DragEvent) {
 .brand {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   flex: none;
-  height: 52px;
-  padding: 0 8px 0 12px;
+  height: 58px;
+  padding: 0 10px 0 14px;
+  /* padding 可过渡：折叠时 14→13 的居中是平滑滑入而非跳变 */
+  transition: padding var(--dur) var(--ease);
 }
 
 .brand-mark {
@@ -385,17 +391,23 @@ async function onDrop(e: DragEvent) {
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 26px;
-  height: 26px;
-  color: var(--text-on-accent);
-  background: var(--accent);
-  border-radius: var(--radius-ctrl);
+  width: 30px;
+  height: 30px;
+}
+
+/* 应用图标：圆角裁切 + 品牌色柔光（color-mix 随主题取当前 accent，
+   深色下蓝更亮故光晕自动跟亮一档，无需手写两套色值） */
+.brand-logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px -1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .brand-name {
   flex: 1;
   min-width: 0;
-  font-size: 0.929rem;
+  font-size: 1.071rem;
   font-weight: 650;
   color: var(--heading);
   letter-spacing: 0.01em;
@@ -403,28 +415,28 @@ async function onDrop(e: DragEvent) {
   overflow: hidden;
 }
 
+/* 收起/展开钮（页脚 .foot-btn.icon-only 的变体）：尺寸/底色全部沿用 .foot-btn，
+   这里只补箭头自身的动效 —— 展开态箭头朝左、收起态朝右，
+   换向时箭头沿轴向弹一下，让「栏要往哪边动」有预告。 */
 .collapse-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  /* 不参与 .foot-btn 的 flex:1 拉伸：它是窄方钮，不是条状按钮 */
   flex: none;
-  width: 26px;
-  height: 26px;
-  color: var(--text2);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-ctrl);
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
-    transform var(--dur-fast) var(--ease-spring);
 }
 
-.collapse-btn:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-  color: var(--text);
+/* 展开态朝左（flip）、收起态朝右：换向走 200ms 原地旋转，不换图标。
+   必须 :deep + 选 .fluent-icon 外壳 span：Icon 组件的根是 span
+   （svg 是它 v-html 的内层），class 透传落在外壳上 —— 此前选 svg.flip
+   双层错位，是「展开时箭头不换向」的真正原因。 */
+.collapse-btn :deep(.fluent-icon) {
+  transition: transform var(--dur) var(--ease-spring);
 }
 
-.collapse-btn:active {
-  transform: scale(.9);
+.collapse-btn :deep(.fluent-icon.flip) {
+  transform: rotate(180deg);
+}
+
+.collapse-btn:active svg {
+  transform: scale(.85);
 }
 
 /* ---- 导航主体（可滚动：目录树长起来时导航项不被顶出视野） ---- */
@@ -433,15 +445,15 @@ async function onDrop(e: DragEvent) {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 0 8px;
+  padding: 0 10px;
   overflow-y: auto;
   overflow-x: hidden;
 }
 
 /* 分区标题：把「去哪」与「在哪」两种语义分开 */
 .nav-title {
-  margin: 10px 8px 4px;
-  font-size: 0.714rem;
+  margin: 12px 10px 5px;
+  font-size: 0.786rem;
   font-weight: 600;
   color: var(--text2);
   letter-spacing: 0.06em;
@@ -452,21 +464,23 @@ async function onDrop(e: DragEvent) {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   flex: none;
-  height: 34px;
-  padding: 0 8px;
-  margin-bottom: 1px;
+  height: 38px;
+  padding: 0 10px;
+  margin-bottom: 2px;
   font-family: inherit;
-  font-size: 0.857rem;
+  font-size: 0.929rem;
   color: var(--text);
   background: transparent;
   border: none;
   /* 选中态是「整块圆角面」而不是细指示条：与苹果风侧栏一致 */
   border-radius: var(--radius-ctrl);
   text-align: left;
+  /* padding 参与过渡：折叠时图标从「左对齐」平滑滑入栏中心（10→19），
+     与栏宽收窄同步进行，杜绝任何跳变 */
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
-    transform var(--dur-fast) var(--ease-spring);
+    transform var(--dur-fast) var(--ease-spring), padding var(--dur) var(--ease);
 }
 
 .nav-item:hover:not(.on) {
@@ -524,12 +538,12 @@ async function onDrop(e: DragEvent) {
 /* 活动任务角标：让「传输」这个入口自己带上状态 */
 .nav-badge {
   flex: none;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  font-size: 0.714rem;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  font-size: 0.786rem;
   font-weight: 600;
-  line-height: 18px;
+  line-height: 20px;
   color: var(--text-on-accent);
   background: var(--accent);
   border-radius: var(--radius-round);
@@ -564,26 +578,38 @@ async function onDrop(e: DragEvent) {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 8px;
+  padding: 10px;
   border-top: 1px solid var(--divider);
 }
 
 .foot-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   flex: 1;
   min-width: 0;
-  height: 30px;
-  padding: 0 8px;
+  height: 34px;
+  padding: 0 10px;
   font-family: inherit;
-  font-size: 0.857rem;
+  font-size: 0.929rem;
   color: var(--text2);
   background: transparent;
   border: none;
   border-radius: var(--radius-ctrl);
+  /* overflow 裁切：栏宽收窄时按钮随之变窄，标签在按钮内部被平滑裁掉
+     （修复：此前按钮无裁切，「锁定密库」在窄栏里被挤成逐字竖排泄漏到栏外） */
+  overflow: hidden;
+  /* max-width 上限是收没动画的起点（锁定钮的实际宽度远小于它，
+     折叠时 200→0 平滑收没；取 200 而非更大值，避免大差值压缩前半程速率） */
+  max-width: 200px;
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
-    transform var(--dur-fast) var(--ease-spring);
+    transform var(--dur-fast) var(--ease-spring), max-width var(--dur) var(--ease),
+    padding var(--dur) var(--ease), opacity var(--dur) var(--ease);
+}
+
+.foot-btn .lbl {
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .foot-btn:hover:not(:disabled) {
@@ -599,43 +625,41 @@ async function onDrop(e: DragEvent) {
   opacity: 0.4;
 }
 
-/* 退出：次级图标钮，不与「锁定密库」争夺视觉权重 */
+/* 次级图标钮（收起 / 退出）：不与「锁定密库」争夺视觉权重，等宽方形 */
 .foot-btn.icon-only {
   flex: none;
-  width: 30px;
+  width: 34px;
   justify-content: center;
   padding: 0;
 }
 
 /* ============================================================ 折叠态
-   只切 --nav-w 与隐藏文字；图标仍居中，命中区不变。 */
-.app-shell.collapsed .lbl {
-  display: none;
-}
+   v1.4 重构：折叠只收窄栏宽（--nav-w 200ms 过渡），**不改任何子元素的
+   几何** —— 展开态的几何本来就兼容 56px（品牌头左 14 + 图标 30 的中心
+   ≈ 栏中心 28；nav-body 10 + nav-item 10 + 半枚图标 ≈ 28 同理），文字
+   由栏宽收窄 + overflow 平滑裁掉（flex:1 + min-width:0 + ellipsis 会让
+   标签逐帧缩短成「文…」，而不是瞬消）。
+   唯一的例外是「目录树 + 分区标题」：窄栏里它们只剩图标碎片，留着像
+   显示错误 —— 用 opacity 渐隐（150ms，可过渡）替代 display:none 瞬消，
+   与宽度动画同向叠加，整栏看起来是一个连续动作。 */
 
-.app-shell.collapsed .brand {
-  justify-content: center;
-  padding: 0 4px;
-}
-
+/* 折叠态保留品牌图标：56px 栏里它是唯一的身份标识，
+   藏掉之后顶部只剩一片空白（且用户会以为「收起把 logo 弄丢了」）。 */
 .app-shell.collapsed .brand-mark {
-  display: none;
+  flex: none;
 }
 
-.app-shell.collapsed .nav-item,
-.app-shell.collapsed .foot-btn {
-  justify-content: center;
-  gap: 0;
-  padding: 0;
+/* 树与分区标题：渐隐而非瞬消（visibility 跟随 opacity 结束时离散步进，
+   不占可点击区域）；展开时反向淡入。 */
+.nav-tree,
+.nav-title {
+  transition: opacity 150ms var(--ease), visibility 150ms var(--ease);
 }
 
-/* 折叠时不给树留位置（它的内容没有可用宽度） */
-.app-shell.collapsed .nav-tree {
-  display: none;
-}
-
+.app-shell.collapsed .nav-tree,
 .app-shell.collapsed .nav-title {
-  display: none;
+  opacity: 0;
+  visibility: hidden;
 }
 
 /* 角标在折叠态改为吸附在图标右上角，避免把 34px 的行撑破 */
@@ -650,13 +674,36 @@ async function onDrop(e: DragEvent) {
   line-height: 15px;
 }
 
-/* 折叠时页脚两钮竖排（56px 宽放不下「图标 + 文字」并排） */
-.app-shell.collapsed .nav-foot {
-  flex-direction: column;
-}
+/* ---- 折叠态居中与页脚收没（仅桌面；移动端底栏有自己的排版） ----
+   原则：只动**可过渡**属性（padding / max-width / opacity），
+   不碰 display / flex-direction / justify-content 这类瞬切属性。
+   栏中心 = 28px；logo 30px ⇒ padding 13+15=28；导航图标 19px ⇒
+   padding 19+9.5=28.5 ≈ 28，全程随栏宽动画滑入中心。 */
+@media (min-width: 641px) {
+  .app-shell.collapsed .brand {
+    padding: 0 13px;
+  }
 
-.app-shell.collapsed .foot-btn.icon-only {
-  width: 100%;
+  .app-shell.collapsed .nav-item {
+    /* 图标中心 = nav-body 左内距 10 + 此值 + 图标半径 9.5 = 28 ≈ 栏中心。
+       （v1.4 初版误算成 19，漏加了 nav-body 的 10px，图标偏右 10.5px） */
+    padding: 0 9px;
+  }
+
+  /* 页脚：锁定/退出两钮横向收没（max-width 200→0 + 淡出），
+     只留收起钮 —— 页脚高度全程不变，上方不会产生空白带，
+     也没有 flex-direction 瞬切的重排跳变。 */
+  .app-shell.collapsed .nav-foot {
+    gap: 0;
+  }
+
+  .app-shell.collapsed .foot-btn.lock-btn,
+  .app-shell.collapsed .foot-btn.power-btn {
+    max-width: 0;
+    padding: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
 }
 
 /* ============================================================ 页面过渡

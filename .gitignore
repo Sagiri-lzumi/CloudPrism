@@ -275,3 +275,6 @@ WindowsGo/frontend/package.json.md5
 .npm-cache/
 .devdata/
 .dsh-vision-router/
+.pnpm-store/
+# pnpm 12 自动生成的本机构建审批残桩（审批真源在 package.json 的 onlyBuiltDependencies）
+WindowsGo/frontend/pnpm-workspace.yaml

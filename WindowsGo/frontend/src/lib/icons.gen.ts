@@ -1,22 +1,20 @@
 // 本文件由 scripts/gen-icons.mjs 自动生成，请勿手工编辑。
 //
 // 图标来源：fluent 176 个 / lucide 60 个；
-// 按源码实际引用裁剪后仅打包 fluent 9 个 / lucide 57 个。
+// 按源码实际引用裁剪后仅打包 fluent 7 个 / lucide 57 个。
 //
 // 重新生成：npm --prefix WindowsGo/frontend run gen:icons
 // 新增图标后若忘记重新生成，运行期会回退成 question 并在 dev 控制台告警。
 
 /* eslint-disable */
 
-import f0 from '../assets/fluent-icons/care_left_solid.svg?raw'
-import f1 from '../assets/fluent-icons/care_right_solid.svg?raw'
-import f2 from '../assets/fluent-icons/checkbox.svg?raw'
-import f3 from '../assets/fluent-icons/close.svg?raw'
-import f4 from '../assets/fluent-icons/label.svg?raw'
-import f5 from '../assets/fluent-icons/menu.svg?raw'
-import f6 from '../assets/fluent-icons/question.svg?raw'
-import f7 from '../assets/fluent-icons/scroll.svg?raw'
-import f8 from '../assets/fluent-icons/wifi.svg?raw'
+import f0 from '../assets/fluent-icons/checkbox.svg?raw'
+import f1 from '../assets/fluent-icons/close.svg?raw'
+import f2 from '../assets/fluent-icons/label.svg?raw'
+import f3 from '../assets/fluent-icons/menu.svg?raw'
+import f4 from '../assets/fluent-icons/question.svg?raw'
+import f5 from '../assets/fluent-icons/scroll.svg?raw'
+import f6 from '../assets/fluent-icons/wifi.svg?raw'
 
 import l0 from '../assets/lucide/add.svg?raw'
 import l1 from '../assets/lucide/cancel.svg?raw'
@@ -141,15 +139,13 @@ export const STROKE_NAMES: ReadonlySet<string> = Object.freeze(
 
 /** 图标表：Lucide 同名覆盖 Fluent（构建期已去重，无重叠键）。 */
 export const ICONS: Readonly<Record<string, string>> = Object.freeze({
-  "care_left_solid": f0,
-  "care_right_solid": f1,
-  "checkbox": f2,
-  "close": f3,
-  "label": f4,
-  "menu": f5,
-  "question": f6,
-  "scroll": f7,
-  "wifi": f8,
+  "checkbox": f0,
+  "close": f1,
+  "label": f2,
+  "menu": f3,
+  "question": f4,
+  "scroll": f5,
+  "wifi": f6,
   "add": l0,
   "cancel": l1,
   "care_down_solid": l2,

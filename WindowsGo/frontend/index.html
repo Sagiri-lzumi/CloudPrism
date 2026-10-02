@@ -7,6 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache"/>
     <meta http-equiv="Expires" content="0"/>
     <title>CloudPrism</title>
+    <link rel="icon" type="image/png" href="/brand.png"/>
     <script>
         // 首屏主题：HTML 解析完成前应用缓存主题，避免浅色闪白/深色闪黑。
         // 取值口径与 frontend/src/lib/theme.ts 镜像（KEY: cp-theme，
@@ -47,9 +48,16 @@
         };
     </script>
     <style>
-        #boot-loading{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#f3f3f3;color:#616161;font-family:"Segoe UI","Microsoft YaHei",sans-serif;z-index:50}
-        .boot-spin{width:32px;height:32px;border:3px solid #ddd;border-top-color:#0067b8;border-radius:50%;animation:bspin 1s linear infinite}
-        @keyframes bspin{to{transform:rotate(360deg)}}
+        #boot-loading{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#f3f3f3;color:#616161;font-family:"Segoe UI","Microsoft YaHei",sans-serif;z-index:50}
+        html[data-theme="dark"] #boot-loading{background:#1a1a1e;color:#a1a1ab}
+        /* 启动画面：应用图标 + 品牌色呼吸光晕（加载的「活着」感），
+           下方一条滑动进度槽取代朴素的旋转圈 */
+        .boot-logo{width:56px;height:56px;border-radius:14px;animation:bpulse 1.6s ease-in-out infinite;box-shadow:0 4px 18px rgba(0,103,184,.35)}
+        @keyframes bpulse{0%,100%{transform:scale(1);box-shadow:0 4px 18px rgba(0,103,184,.35)}50%{transform:scale(1.05);box-shadow:0 6px 28px rgba(0,103,184,.55)}}
+        .boot-bar{width:120px;height:3px;border-radius:2px;background:rgba(0,0,0,.08);overflow:hidden}
+        html[data-theme="dark"] .boot-bar{background:rgba(255,255,255,.10)}
+        .boot-bar i{display:block;height:100%;width:40%;border-radius:2px;background:#0067b8;animation:bslide 1.1s ease-in-out infinite}
+        @keyframes bslide{from{transform:translateX(-100%)}to{transform:translateX(320%)}}
         #boot-err{display:none;position:fixed;inset:0;padding:24px;background:#fff;color:#c62828;font-family:Consolas,monospace;font-size:13px;white-space:pre-wrap;overflow:auto;z-index:100}
         .boot-err-title{font-weight:bold;margin-bottom:8px;color:#c62828;font-size:15px;font-family:"Segoe UI",sans-serif}
     </style>
@@ -57,7 +65,8 @@
 <body>
 <div id="app"></div>
 <div id="boot-loading">
-    <div class="boot-spin"></div>
+    <img class="boot-logo" src="/brand.png" alt=""/>
+    <div class="boot-bar"><i></i></div>
     <div>CloudPrism 加载中…</div>
 </div>
 <div id="boot-err">
