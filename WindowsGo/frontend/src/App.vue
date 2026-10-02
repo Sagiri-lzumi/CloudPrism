@@ -44,6 +44,7 @@ import UploadPlan from './components/layout/UploadPlan.vue'
 import DirTree from './components/DirTree.vue'
 import InfoBar from './components/fluent/InfoBar.vue'
 import Icon from './components/fluent/Icon.vue'
+import MessageBox from './components/fluent/MessageBox.vue'
 
 onMounted(() => {
   start()
@@ -94,6 +95,15 @@ function toggleNav() {
 }
 
 const connected = computed(() => !!ui.snap?.connected)
+
+/* ------------------------------------------------------ 退出确认 */
+
+// 退出是破坏性全局动作（中断传输、断开密库），误触不可恢复，需显式确认。
+const quitDlgOpen = ref(false)
+function onQuitConfirm() {
+  quitDlgOpen.value = false
+  quitApp()
+}
 const isFilePage = computed(() => ui.page === 'files')
 
 /** 目录树只在文件页出现：它表达的是「当前浏览位置」，不是全局导航。 */
@@ -268,7 +278,7 @@ async function onDrop(e: DragEvent) {
           class="foot-btn icon-only power-btn"
           title="退出应用"
           aria-label="退出应用"
-          @click="quitApp"
+          @click="quitDlgOpen = true"
         >
           <Icon name="power_button" :size="19" />
         </button>
@@ -302,6 +312,17 @@ async function onDrop(e: DragEvent) {
 
     <!-- 通知条 host（队列在 lib/toast） -->
     <InfoBar />
+
+    <!-- 退出应用确认：防止页脚电源钮误触直接关进程 -->
+    <MessageBox
+      :open="quitDlgOpen"
+      title="退出应用"
+      content="退出将中断进行中的传输并断开密库连接，未完成的任务可在下次启动后续传。确定退出吗？"
+      danger
+      confirm-text="退出"
+      @confirm="onQuitConfirm"
+      @cancel="quitDlgOpen = false"
+    />
 
     <!-- 全局恢复码模态：新建成功的一次性码展示，独立于页面生命周期 -->
     <RecoveryCodeDlg
