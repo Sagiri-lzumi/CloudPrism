@@ -1,8 +1,7 @@
-﻿# CloudPrism 开发脚本：编译后端，并在同一终端内并排输出前后端日志。
-#   [后端] 绿色 —— Go HTTP 服务（stdout/stderr + data/logs/cloudprism.log 落盘日志）
-#   [前端] 黄色 —— Vite 开发服务（热更新）
-# 后端代码改动：重跑本脚本（先结束旧后端再编译启动）。前端改动：Vite 自动热更新。
-# Ctrl+C 一次停止全部进程。
+﻿# CloudPrism dev script: build the backend, stream backend/frontend logs side by side.
+#   [backend]  green  - Go HTTP server (stdout/stderr + .devdata/logs/cloudprism.log)
+#   [frontend] yellow - Vite dev server (HMR)
+# Backend changes: rerun this script. Frontend changes: Vite HMR. Ctrl+C stops all.
 $ErrorActionPreference = 'Stop'
 
 $ROOT          = Split-Path $PSScriptRoot -Parent
@@ -12,36 +11,68 @@ $BACKEND_EXE   = 'CloudPrismGo-dev.exe'
 $BACKEND_PORT  = 7840
 $FRONTEND_PORT = 5173
 
+# Log tags (single definition, reused everywhere).
+$TAG_DEV = '[dev]'
+$TAG_BE  = '[backend]'
+$TAG_FE  = '[frontend]'
+
+# Stop-DevPortListeners: free the dev ports, but ONLY kill processes whose command
+# line references this repo - never touch an unrelated app that happens to share a port.
+function Stop-DevPortListeners {
+    foreach ($port in @($BACKEND_PORT, $FRONTEND_PORT)) {
+        try {
+            $procIds = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop |
+                Select-Object -ExpandProperty OwningProcess -Unique
+        } catch { continue }
+        foreach ($procId in $procIds) {
+            $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue).CommandLine
+            if ($cmdLine -and $cmdLine.Contains($ROOT)) {
+                Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+            } else {
+                Write-Host "$TAG_DEV warn: port $port held by unrelated process (pid $procId), left running." -ForegroundColor DarkYellow
+            }
+        }
+    }
+}
+
 # ---- [1/4] 结束旧后端 ----
-Write-Host '[1/4] 结束后端开发进程（如果存在）...' -ForegroundColor Cyan
+Write-Host "$TAG_DEV [1/4] stopping old backend..." -ForegroundColor Cyan
 cmd /c "taskkill /F /IM $BACKEND_EXE >nul 2>&1"
+# also free the dev ports: a crashed previous run may leave vite/node holding them
+Stop-DevPortListeners
 
 # ---- [2/4] 编译后端 ----
-Write-Host '[2/4] 编译后端...' -ForegroundColor Cyan
+Write-Host "$TAG_DEV [2/4] building backend..." -ForegroundColor Cyan
 Push-Location $BACKEND_DIR
 try {
     New-Item -ItemType Directory -Force 'build\bin' | Out-Null
     $env:CGO_ENABLED = '0'
     go build -o "build\bin\$BACKEND_EXE" .
-    if ($LASTEXITCODE -ne 0) { Write-Host '后端编译失败。' -ForegroundColor Red; exit 1 }
+    if ($LASTEXITCODE -ne 0) { Write-Host "$TAG_DEV backend build failed." -ForegroundColor Red; exit 1 }
 } finally { Pop-Location }
 
 # ---- 日志文件准备（后端启动前建好，避免丢早期日志） ----
-$logDir = Join-Path $BACKEND_DIR 'build\bin\data\logs'
+$env:CLOUDPRISM_DATA_DIR = Join-Path $BACKEND_DIR '.devdata'   # 开发态数据目录固定，不随 exe 路径漂移
+$logDir = Join-Path $env:CLOUDPRISM_DATA_DIR 'logs'
 New-Item -ItemType Directory -Force $logDir | Out-Null
 $beLog = Join-Path $logDir 'cloudprism.log'
 $beOut = Join-Path $logDir 'dev-be-out.log'
 $beErr = Join-Path $logDir 'dev-be-err.log'
 $feOut = Join-Path $logDir 'dev-fe-out.log'
 $feErr = Join-Path $logDir 'dev-fe-err.log'
-foreach ($f in @($beOut, $beErr, $feOut, $feErr)) { '' | Set-Content -Encoding ascii -LiteralPath $f }
+# Truncate dev logs; a leftover process may still hold a lock - tolerate that and
+# tail such files from their current end instead of dying (ErrorActionPreference=Stop).
+$cleared = @{}
+foreach ($f in @($beOut, $beErr, $feOut, $feErr)) {
+    try { '' | Set-Content -Encoding ascii -LiteralPath $f; $cleared[$f] = $true }
+    catch { $cleared[$f] = $false; Write-Host "$TAG_DEV warn: log file locked, tailing from end: $f" -ForegroundColor DarkYellow }
+}
 if (-not (Test-Path $beLog)) { New-Item -ItemType File $beLog | Out-Null }
 $beLogLen = (Get-Item $beLog).Length   # 只尾随新日志，不刷历史
 
 # ---- [3/4] 启动后端 ----
-Write-Host "[3/4] 启动后端（http://127.0.0.1:$BACKEND_PORT）..." -ForegroundColor Cyan
+Write-Host "$TAG_DEV [3/4] starting backend (http://127.0.0.1:$BACKEND_PORT)..." -ForegroundColor Cyan
 $env:CP_NO_BROWSER = '1'
-$env:CLOUDPRISM_DATA_DIR = Join-Path $BACKEND_DIR '.devdata'   # 开发态数据目录固定，不随 exe 路径漂移
 $env:CP_DEV_ORIGIN = "http://127.0.0.1:$FRONTEND_PORT"
 $beCmd = "`"$BACKEND_DIR\build\bin\$BACKEND_EXE`" > `"$beOut`" 2> `"$beErr`""
 $bePsi = New-Object System.Diagnostics.ProcessStartInfo
@@ -56,12 +87,16 @@ $beProc = [System.Diagnostics.Process]::Start($bePsi)
 Push-Location $FRONTEND_DIR
 try {
     if (-not (Test-Path 'node_modules')) {
-        Write-Host '[4/4] 首次运行，安装前端依赖...' -ForegroundColor Cyan
+        Write-Host "$TAG_DEV [4/4] first run: npm install..." -ForegroundColor Cyan
         npm install
-        if ($LASTEXITCODE -ne 0) { Write-Host '前端依赖安装失败。' -ForegroundColor Red; exit 1 }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "$TAG_DEV npm install failed." -ForegroundColor Red
+            cmd /c "taskkill /F /IM $BACKEND_EXE >nul 2>&1"   # don't orphan the running backend
+            exit 1
+        }
     }
 } finally { Pop-Location }
-Write-Host "[4/4] 启动前端（http://127.0.0.1:$FRONTEND_PORT）..." -ForegroundColor Cyan
+Write-Host "$TAG_DEV [4/4] starting frontend (http://127.0.0.1:$FRONTEND_PORT)..." -ForegroundColor Cyan
 $feCmd = "npm run dev -- --host 127.0.0.1 --port $FRONTEND_PORT --strictPort > `"$feOut`" 2> `"$feErr`""
 $fePsi = New-Object System.Diagnostics.ProcessStartInfo
 $fePsi.FileName = 'cmd.exe'
@@ -85,13 +120,15 @@ function Test-PortListen([int]$port) {
 }
 
 # ---- 尾随输出：逐源增量读取，加前缀 + 颜色 ----
+# Start position per file: 0 when truncated just now, else current end (skip stale content).
+function Get-StartPos($path) { if ($cleared[$path]) { 0L } else { (Get-Item $path).Length } }
 $script:opened = $false
 $sources = @(
-    @{ Path = $beOut; Tag = '后端'; Color = 'Green';      Pos = 0L;        Leftover = '' },
-    @{ Path = $beErr; Tag = '后端'; Color = 'DarkGreen';  Pos = 0L;        Leftover = '' },
-    @{ Path = $beLog; Tag = '后端'; Color = 'Green';      Pos = $beLogLen; Leftover = '' },
-    @{ Path = $feOut; Tag = '前端'; Color = 'Yellow';     Pos = 0L;        Leftover = '' },
-    @{ Path = $feErr; Tag = '前端'; Color = 'DarkYellow'; Pos = 0L;        Leftover = '' }
+    @{ Path = $beOut; Tag = $TAG_BE; Color = 'Green';      Pos = (Get-StartPos $beOut); Leftover = '' },
+    @{ Path = $beErr; Tag = $TAG_BE; Color = 'DarkGreen';  Pos = (Get-StartPos $beErr); Leftover = '' },
+    @{ Path = $beLog; Tag = $TAG_BE; Color = 'Green';      Pos = $beLogLen;             Leftover = '' },
+    @{ Path = $feOut; Tag = $TAG_FE; Color = 'Yellow';     Pos = (Get-StartPos $feOut); Leftover = '' },
+    @{ Path = $feErr; Tag = $TAG_FE; Color = 'DarkYellow'; Pos = (Get-StartPos $feErr); Leftover = '' }
 )
 
 function Read-NewLines([hashtable]$s) {
@@ -122,7 +159,10 @@ function Read-NewLines([hashtable]$s) {
     foreach ($l in $lines) {
         $l = ($l -replace "\x1b\[[0-9;]*[A-Za-z]", '').TrimEnd()
         if ($l -eq '') { continue }
-        Write-Host "[$($s.Tag)] $l" -ForegroundColor $s.Color
+        # npm noise: legacy .npmrc keys warning + run banner, pure clutter
+        if ($l -match '^npm (warn|notice)') { continue }
+        Write-Host "$($s.Tag)" -NoNewline -ForegroundColor $s.Color
+        Write-Host " $l"
         if (-not $script:opened -and $l -match 'Local:') {
             $script:opened = $true
             Start-Process "http://127.0.0.1:$FRONTEND_PORT"
@@ -131,36 +171,36 @@ function Read-NewLines([hashtable]$s) {
 }
 
 Write-Host ''
-Write-Host '开发环境就绪：绿色=[后端]  黄色=[前端]  Ctrl+C 停止全部。' -ForegroundColor Cyan
+Write-Host "$TAG_DEV ready: green=$TAG_BE  yellow=$TAG_FE  Ctrl+C to stop all." -ForegroundColor Cyan
 $beWarned = $false; $feWarned = $false
 $started = Get-Date
 try {
     while ($true) {
         foreach ($s in $sources) { Read-NewLines $s }
         $elapsed = ((Get-Date) - $started).TotalSeconds
-        if (-not $beWarned -and $elapsed -gt 3 -and -not (Test-PortListen $BACKEND_PORT)) {
+        if (-not $beWarned -and $elapsed -gt 10 -and -not (Test-PortListen $BACKEND_PORT)) {
             $beWarned = $true
-            Write-Host '[后端] 端口未监听，进程可能已退出。' -ForegroundColor Red
+            Write-Host "$TAG_BE port not listening, process may have exited." -ForegroundColor Red
         }
         if (-not $feWarned -and $elapsed -gt 15 -and -not (Test-PortListen $FRONTEND_PORT)) {
             $feWarned = $true
-            Write-Host '[前端] 端口未监听，进程可能已退出。' -ForegroundColor Red
+            Write-Host "$TAG_FE port not listening, process may have exited." -ForegroundColor Red
         }
-        if ($beWarned -and $feWarned) {
+        # either side exits -> stop everything (finally block kills the rest)
+        if ($beWarned -or $feWarned) {
             foreach ($s in $sources) { Read-NewLines $s }
-            Write-Host '前后端均已退出。' -ForegroundColor Red
+            Write-Host "$TAG_DEV a process exited, stopping the rest..." -ForegroundColor Red
             break
         }
         Start-Sleep -Milliseconds 300
     }
 } finally {
-    Write-Host '正在停止前后端进程...' -ForegroundColor Cyan
+    Write-Host "$TAG_DEV stopping all processes..." -ForegroundColor Cyan
     cmd /c "taskkill /F /IM $BACKEND_EXE >nul 2>&1"
     foreach ($p in @($beProc, $feProc)) {
         if ($p) { cmd /c "taskkill /T /F /PID $($p.Id) >nul 2>&1" }
     }
-    try {
-        $c = Get-NetTCPConnection -LocalPort $FRONTEND_PORT -State Listen -ErrorAction Stop | Select-Object -First 1
-        if ($c) { Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue }
-    } catch {}
+    # last resort: kill whatever still listens on the dev ports (catches orphaned
+    # vite/node trees that taskkill /T sometimes misses)
+    Stop-DevPortListeners
 }
