@@ -272,6 +272,8 @@ WindowsGo/frontend/package.json.md5
 
 .gocache/
 .gomodcache/
+# 构建脚本产物（scripts/build.ps1 → releases\<时间戳>\，与上方 Release/ 同性质）
+releases/
 # Go 构建临时目录
 .gotmp/
 .gitattributes
