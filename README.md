@@ -95,6 +95,27 @@ $env:CGO_ENABLED = "0"
 go build -ldflags "-s -w -H windowsgui" -o build\bin\CloudPrismGo.exe .
 ```
 
+## 运行
+
+改完想直接看效果，用 `scripts/run.ps1`：编译后就地启动，前端已内嵌进 exe，
+单进程单端口，自动打开浏览器。跑在 `.devdata/` 数据目录，不碰任何已装的包。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run.ps1
+```
+
+| 开关 | 作用 |
+|---|---|
+| `-NoBrowser` | 不自动开浏览器（自己在浏览器里访问提示的地址） |
+| `-RebuildFrontend` | 强制重建前端产物（改了前端源码后用） |
+| `-Stop` | 结束本仓库启动的实例 |
+
+程序常驻系统托盘，**关掉浏览器标签页不会退出**；前台运行时用 `Ctrl+C`，或
+另开一个终端用 `-Stop` 结束它。
+
+三个脚本的分工：`run.ps1` 是「跑起来看效果」，`dev.ps1` 是「改前端代码要
+热更」，`build.ps1` 是「打包发布」。
+
 发布打包用 `WindowsGo/build/release.ps1`，产出 `Release/` 下的便携目录版与单文件版。
 
 ## 配置
@@ -133,9 +154,10 @@ CloudPrism/
 │   ├── internal/         # 后端业务逻辑
 │   ├── pkg/              # 可复用包（协议、流式传输等）
 │   └── docs/            # 工程文档
-├── scripts/              # 构建脚本
+├── scripts/              # 构建与运行脚本
+│   ├── run.ps1           # 直接跑起来看效果（内嵌前端、单进程、自动开浏览器）
 │   ├── build.ps1         # 一键构建（前端 + Go + 组装便携目录 → releases/）
-│   └── dev.ps1           # 开发态：后端 + Vite 热更
+│   └── dev.ps1           # 开发态：后端 + Vite 热更（改前端代码时用）
 ├── Pic/                  # README 资源图
 ├── releases/             # build.ps1 产物（打包生成）
 ├── Release/              # release.ps1 产物（打包生成）
