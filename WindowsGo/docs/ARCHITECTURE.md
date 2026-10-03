@@ -34,7 +34,7 @@ WindowsGo/
 ├── main.go                     Web 模式入口：依赖图 → Listen → 开浏览器 → Serve(goroutine) → 托盘
 ├── app.go                      NewApp() 依赖图装配 + frontendFingerprint + Version 诊断
 ├── build/                      release.ps1（go build -H windowsgui）+ windows/icon.ico
-├── frontend/                   Vue 3 + Vite + TS；dist/ 入库（//go:embed 依赖），无 wailsjs
+├── frontend/                   Vue 3 + Vite + TS；dist/ 忽略（//go:embed 依赖，构建期生成），无 wailsjs
 │   ├── scripts/gen-icons.mjs   图标注册表生成器（按源码引用裁剪，prebuild 自动跑，详见 §8.2）
 │   └── src/lib/icons.gen.ts    ★ 生成物，勿手工编辑；图标显式 import 表
 ├── pkg/                        ★ GUI 无关核心，零平台 import
@@ -47,6 +47,7 @@ WindowsGo/
 │   ├── thumb/                  缩略图解码与两级缓存
 │   ├── cache/                  大文件分块读缓存（密文、按阈值切块、LRU 淘汰）
 │   ├── secret/                 单个秘密值的加密落盘（DPAPI:/PLAIN: 前缀，局域网令牌用）
+│   ├── config/                 启动配置解析（data/config.json：端口/地址/顺延范围）
 │   ├── settings/  paths/  syncengine/
 │   ├── storage/                三后端：local / webdav / baidu
 │   └── streaming/              令牌化流式解密代理（/s/ 播放 /t/ 缩略图 /d/ 下载）
@@ -59,7 +60,8 @@ WindowsGo/
 │   │                           + 静态资源 gzip 中间件 compress.go（§8.3）
 │   ├── tray/                   系统托盘（getlantern/systray，纯 syscall）；「退出」项自己
 │   │                           调 systray.Quit()（= systray.Run 的唯一返回条件，漏了即挂死）
-│   ├── platform/win/           dpapi / shell / localfs(本机目录浏览) / procstats / FatalMessage —— 唯一 syscall 出口
+│   ├── platform/win/           dpapi / shell / localfs(本机目录浏览) / procstats / FatalMessage
+│   │                           / instance(命名互斥体单实例锁) —— 唯一 syscall 出口
 │   └── loggingx/               slog + 脱敏 handler + 2MB×3 轮转
 ├── interop/                    冻结黄金向量夹具（testdata/ 入库，参考实现移除前生成，不可再生）
 └── docs/                       本文件 + manual_smoke.md
@@ -106,8 +108,11 @@ go build -ldflags "-s -w -H windowsgui" -o build/bin/CloudPrismGo.exe .
   无控制台窗口（双击不闪黑框）；`-s -w` 去符号减体积。无绑定生成、无 `.syso`、
   无 `wails build` 的 main() 二次执行副作用。
 - 前端产物由 `npm run build` 生成到 `frontend/dist/`，经 `//go:embed all:frontend/dist`
-  内嵌进 exe；`frontend/dist/` **必须入库**（fresh clone 下 embed 才能编译），
-  仓库根 `.gitignore` 已为它开白名单例外。
+  内嵌进 exe。**`frontend/dist/` 不入库**（2026-10 起改为忽略；此前为「必须入库」）——
+  它是纯构建产物，入库会让每次前端改动都产生一批 hash 命名文件的增删污染 diff，
+  且 dist 与源码容易不同步。**代价**：fresh clone 后直接 `go build` 会因 embed
+  找不到文件而失败，必须先跑一次前端构建（`scripts/build.ps1` 已自动化该步，
+  见 §9）。只改后端时可复用本地已有 dist。
 - 前端 TS 类型自 `src/types/appstate.ts`（v33 起自有，替代已删除的 `wailsjs/go/models.ts`）。
 - 发布走 `build/release.ps1`（go build + S1 嵌入断言 + S2 双形态一致性 + 指纹清单）。
 
@@ -153,7 +158,7 @@ HTTP/SSE 与后端交互，不再依赖 Chromium Mojo IPC。
 | 6 | 代理响应 MIME | 恒发 `application/octet-stream` | 按解密后**展示名**的扩展名推断 | Qt Multimedia 会嗅探内容，Chromium 的 `<video>` 强依赖 MIME，照抄会黑屏 |
 | 7 | 进度事件频率 | 每个分块回调都 emit，且聚合时全量遍历任务 | core 层原子累计字节，`internal/web` 10Hz 定时合帧经 SSE 推快照 | 避免高频 IPC/SSE 风暴（1MiB 分块 × 4 并发 = 每秒数十次 O(n) 扫描 + JSON 序列化） |
 | 8 | 百度凭证刷新 | 多线程可同时触发刷新（竞态） | `sync.Mutex` 串行化，`errno=111` 只重试一次 | 修掉既有竞态 |
-| 9 | 设置存储 | QSettings IniFormat（`data/cloudprism.ini`） | `data/config.json`（原子写：tmp + rename）；首启只读导入 INI 一次 | 摆脱 Qt 依赖；老用户数据无缝迁移 |
+| 9 | 设置存储 | QSettings IniFormat（`data/cloudprism.ini`） | `data/cloudprism_settings.json`（原子写：tmp + rename）；首启只读导入 INI 一次 | 摆脱 Qt 依赖；老用户数据无缝迁移。**注意与 `data/config.json`（启动配置，见 §7.4）不是同一个文件**：前者是运行期读写、Web UI 可改的偏好；后者是启动前必须知道、只能手工编辑的参数 |
 | 10 | 传输任务生命周期 | `_release_worker` / `thread.wait(5000)` / `_graveyard` | `context` + `WaitGroup` | 整类生命周期问题天然消失 |
 | 11 | 速度统计 | `PerfMonitor.report_bytes()` 无生产调用方，状态栏恒为 `--` | 曾取队列 `done_bytes` 差分；**v33 Web 化后未接线，指标不上屏**；`pkg/perf` 整包已于 v1.1 移除（含分层违规：pkg 反向 import internal/platform/win） | 零生产引用死代码；后续如需上屏直接从队列聚合接口取数，不再留未接线包 |
 | 12 | 拖出到资源管理器 | `filesDraggedOut` 信号 | 浏览器原生下载（`<a download>` 指向 /d/ 流式端点）| 浏览器可直接落盘解密文件；目录暂不支持下载（zip 打包后续） |
@@ -284,6 +289,25 @@ Web 模式意味着「凡是能连上这个端口的人，都能操作这个密�
 | `listen/lan`（非秘密） | 是否允许局域网访问 | `"0"`（关） |
 | `data/lan_token`（秘密） | 访问令牌密文，`DPAPI:<b64>` / `PLAIN:<b64>` | 首次需要时生成 |
 
+### 7.2.1 `data/` 目录全貌
+
+区分「随包交付、用户手工编辑」与「运行时自动生成」两类文件 —— 前者是部署
+输入，后者删掉即回到初始状态：
+
+| 文件 | 类别 | 内容 |
+|---|---|---|
+| `config.json` | **交付 / 手工编辑** | 启动配置：`port` / `host` / `port_range`（§7.4.1） |
+| `cloudprism_settings.json` | 运行时生成 | 运行期偏好，Web UI 读写（`pkg/settings`） |
+| `cloudprism.ini` | 遗留只读 | Python 端 QSettings 原文，仅首启导入一次后改名 `.imported` |
+| `baidu.json` | 运行时生成 | 百度凭证密文（DPAPI） |
+| `lan_token` | 运行时生成 | 局域网访问令牌密文（DPAPI） |
+| `cache/` | 运行时生成 | 缩略图与媒体分块缓存（均为密文） |
+| `logs/` | 运行时生成 | `cloudprism.log` 等，2MB×3 轮转 |
+| `tmp/` | 运行时生成 | 自管临时目录（不用 `%TEMP%`） |
+
+除 `config.json` 外的全部内容都由程序按需创建，**打包产物里不应预置** ——
+预置空文件会制造「必须存在某文件」的错觉，而实际语义是「缺失即用默认值」。
+
 `pkg/secret` 专管「一个文件装一个秘密值」，落盘格式与
 `pkg/storage.BaiduCredStore` 同一约定（`DPAPI:` / `PLAIN:` 前缀 + base64），
 加解密实现由装配层注入（`pkg/*` 不允许 import `internal/platform/win`）。
@@ -323,8 +347,56 @@ Web 模式意味着「凡是能连上这个端口的人，都能操作这个密�
 这不是「隐藏的无效开关」，而是刻意避免「看似可配但要重启」的展示缺口 ——
 把生效时机如实写在卡片上。
 
-**明确非目标：不做端口可配。** 端口可配同样需要重新监听；而 `7840` 起自动
-顺延的机制已够用，UI 直接显示**实际监听端口**即可。
+### 7.4.1 启动配置 `data/config.json`
+
+端口**可配**，但不走设置页 —— 它需要一个独立的、启动前就能读到的来源。
+
+| 键 | 含义 | 默认 |
+|---|---|---|
+| `port` | 起始监听端口 | `7840` |
+| `host` | 起始绑定地址 | `"127.0.0.1"` |
+| `port_range` | 顺延范围（试 `port .. port+port_range-1`） | `10` |
+
+设计要点：
+
+- **为什么不放设置页**：`Listen` 在启动时确定绑定地址（同 §7.4 的原理），
+  改端口必然要重启。放进设置页只会制造「看似可点、实际要重启」的缺口，
+  而配置文件本身就明说了「改完重启」，反而更诚实。
+- **为什么单独一个文件**：`pkg/settings` 由 `appstate` 持有、在 `NewApp()`
+  之后才可用；而端口必须在 `web.Server.Listen` 之前确定。启动顺序要求一个
+  在依赖图**之前**就能读的来源，故独立成 `data/config.json`，与运行期设置
+  存储分开命名（见 §3 差异表第 9 条）。
+- **顺延语义不变**：起始端口可配，但被占用时仍顺延，`port_range` 控制范围。
+  单实例探测与实际监听**共用同一个候选列表**（`config.Config.Ports()`）——
+  探测范围若窄于监听范围，会漏掉落在尾部端口上的运行实例，导致多开（既有
+  约束，改为可配后更易踩，故用同一个函数强制对齐）。
+- **单实例改锁数据目录，不再只靠端口扫描**（本项随端口可配一并修正）：
+
+  端口扫描原本是「同一数据目录只允许一个进程」的**代理指标**，端口一旦可配
+  就失效 —— 改了 `port` 重启，新进程只扫新端口段，探测不到仍在旧端口上运行
+  的实例，于是两个进程共享同一个 `data/`（设置互相覆盖、日志轮转互删文件）。
+  现在改为在 `NewApp()` **之前**用命名互斥体锁住 `data/` 目录
+  （`win.AcquireInstanceLock`，内核对象随进程消亡自动释放，崩溃不留僵尸锁）；
+  非主实例则扫描「默认端口段 + 当前配置段」找出在跑的那个实例并打开其界面，
+  找不到就弹框告知原因。
+
+  顺序是关键：`NewApp()` 会打开日志与设置存储，锁必须在那之前拿到，否则
+  两个进程已经各自持有日志文件了，锁也拦不住踩踏。
+  锁建立失败（环境异常）时 fail-open 照常启动 —— 单实例约束不该让用户完全
+  打不开程序。
+
+  > 边界：锁按**数据目录**区分，故同一份 exe 拷到两个文件夹（各自的 `data/`）
+  > 算两个独立安装，可以同时运行 —— 这与便携化语义一致，是刻意行为。
+- **不绕鉴权**：`host` 只决定绑哪个地址，非回环访问是否需要令牌仍由
+  `listen/lan` 开关 + 令牌闸门决定（fail-closed，同 §7.1）。把 `host` 写成
+  `0.0.0.0` 而 `listen/lan` 为关时，**依然**只绑 `127.0.0.1`。
+- **容错**：文件缺失/损坏/字段非法一律回退默认值并记 Warn 日志，**绝不阻塞
+  启动**（同 §1「目录不可写时静默降级」的取向）。解析前剥掉 UTF-8 BOM ——
+  记事本另存默认带 BOM，而 `encoding/json` 遇到 BOM 直接报错。
+
+> 历史决策变更：本节原写「**明确非目标：不做端口可配**」，理由是「端口可配
+> 同样需要重新监听」。该理由成立，但结论只适用于「放进 UI」这一种做法；
+> 改用启动配置文件后不再需要热重载，「重新监听」的成本自然消失，故放开。
 
 ### 7.5 已知局限（必须在 UI 如实告知）
 

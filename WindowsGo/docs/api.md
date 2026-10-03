@@ -36,8 +36,9 @@
 ```
 
 - 后端是**纯 HTTP server**（非 Wails/WebView2），默认监听 `127.0.0.1:7840`；端口被占时顺延
-  `7840..7849`（`main.go: basePort=7840, maxPortOffset=10`）。实际端口以 `/api/lan/status` 或
-  启动日志为准。
+  `7840..7849`。起始端口与顺延范围来自启动配置 `data/config.json`（`port` / `host` /
+  `port_range`，见 ARCHITECTURE §7.4.1）；文件缺失或字段非法时回退上述默认值并记 Warn 日志。
+  实际端口以 `/api/lan/status` 或启动日志为准。
 - 「局域网访问档」开启时绑 `0.0.0.0` + 访问令牌闸门；关闭（默认）时纯本机。
 - 业务状态收敛在 `internal/appstate.State`（唯一有状态对象）；`internal/bind` 只做薄适配
   （错误分类映射）；`internal/web` 是前端唯一数据通道。
@@ -265,7 +266,13 @@ UI 按 `code` 分流（见 §5 错误码目录）；`message` 为可直接展示
 
 #### 3.2.1 `POST /api/app/ping`
 - 请求体：`{"Token": string}`。响应：`"pong:" + Token`（JSON 字符串）。
-- 说明：单实例探测（main.go 用 `{"Token":"probe"}` 探测 7840..7849，应答 `pong:probe` 即认作本程序）。
+- 说明：用于**找出已在运行的实例的界面地址**（main.go 用 `{"Token":"probe"}` 逐个探测候选
+  端口，应答 `pong:probe` 即认作本程序）。候选端口 = 默认段（`7840..7849`）∪ 当前
+  `config.json` 配置段，去重后按序探测 —— 无法预知在跑的那个实例用的是哪份配置，故两段都扫。
+
+  注意分工：**是否允许启动**不由端口探测决定，而由数据目录上的命名互斥体
+  （`win.AcquireInstanceLock`）决定；探测只负责「已在运行时把它的界面打开」。详见
+  ARCHITECTURE §7.4.1 与 §7.1。
 
 #### 3.2.2 `POST /api/app/version`
 - 请求体：无。响应：`"web-mode"`（JSON 字符串；目前固定值，前端指纹见 app.go 注入的启动日志）。
