@@ -67,21 +67,61 @@
 
 ## 构建
 
-需要 Go ≥ 1.25。前端产物已入库，纯 Go 构建不需要 Node。
+需要 Go ≥ 1.25。**前端产物不入库**，所以 fresh clone 后必须先构建一次前端
+（需要 Node ≥ 20），否则 `go build` 会因 `//go:embed all:frontend/dist`
+找不到文件而失败。不想操心顺序就用一键脚本：
 
 ```powershell
+# 前端 + Go + 组装便携目录 -> releases/<时间戳>/
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1
+```
+
+只改后端时，可复用本地已有的 `frontend/dist` 跳过 npm 步骤（更快）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -SkipFrontend
+```
+
+手动分步构建：
+
+```powershell
+# 1) 前端产物 -> WindowsGo/frontend/dist/
+npm --prefix WindowsGo\frontend ci
+npm --prefix WindowsGo\frontend run build
+
+# 2) Go 二进制
 cd WindowsGo
 $env:CGO_ENABLED = "0"
 go build -ldflags "-s -w -H windowsgui" -o build\bin\CloudPrismGo.exe .
 ```
 
-改动前端源码时需先用 Node ≥ 20 重建产物：
+发布打包用 `WindowsGo/build/release.ps1`，产出 `Release/` 下的便携目录版与单文件版。
 
-```powershell
-npm --prefix frontend run build
+## 配置
+
+运行时不需要任何配置文件即可启动：所有参数都有内置默认值。要改监听端口等**启动前
+必须确定**的参数，编辑程序旁 `data/config.json`（便携包已附带，改完重启生效）：
+
+```json
+{
+  "port": 7840,
+  "host": "127.0.0.1",
+  "port_range": 10
+}
 ```
 
-发布打包用 `WindowsGo/build/release.ps1`，产出 `Release/` 下的便携目录版与单文件版。
+| 键 | 含义 | 默认 |
+|---|---|---|
+| `port` | 起始监听端口，被占用时顺延 | `7840` |
+| `host` | 起始绑定地址 | `"127.0.0.1"` |
+| `port_range` | 顺延范围（试 `port .. port+port_range-1`） | `10` |
+
+文件缺失、损坏或字段非法时一律回退默认值，并在 `data/logs/cloudprism.log` 记 Warn，
+**不会**阻塞启动。`host` 只决定绑哪个地址，非回环访问是否需要令牌仍由界面里的
+「局域网访问」开关决定，改这里绕不过鉴权。
+
+其余运行期偏好（主题、缓存、传输等）在界面里改，存在 `data/cloudprism_settings.json`，
+与上面这个文件是**两个不同的文件**。
 
 ## 项目结构
 
@@ -93,8 +133,12 @@ CloudPrism/
 │   ├── internal/         # 后端业务逻辑
 │   ├── pkg/              # 可复用包（协议、流式传输等）
 │   └── docs/            # 工程文档
+├── scripts/              # 构建脚本
+│   ├── build.ps1         # 一键构建（前端 + Go + 组装便携目录 → releases/）
+│   └── dev.ps1           # 开发态：后端 + Vite 热更
 ├── Pic/                  # README 资源图
-├── Release/              # 发布产物（打包生成）
+├── releases/             # build.ps1 产物（打包生成）
+├── Release/              # release.ps1 产物（打包生成）
 ├── LICENSE
 └── README.md
 ```

@@ -12,9 +12,13 @@ go build -ldflags "-s -w -H windowsgui" -o build\bin\CloudPrismGo.exe .
 # 或直接出发布产物：build\release.ps1 -Tag vN -SkipFrontend（落仓库根 Release\ 双产物）
 ```
 
-> ⚠️ 改了前端源码**必须先重建 `frontend/dist`**（`npm --prefix frontend run build`）
-> 再 `go build` —— `//go:embed all:frontend/dist` 吃的是入库的那份 dist，
-> 忘了重建就会「改了前端但界面没变」（`release.ps1` 的 S1 自检抓这个）。
+> ⚠️ `frontend/dist` **不入库**，fresh clone 后直接 `go build` 会失败
+> （`pattern all:frontend/dist: no matching files found`）。先跑一次前端构建：
+> `npm --prefix frontend run build`，或直接用 `scripts/build.ps1`（它按顺序做两件事）。
+>
+> ⚠️ 改了前端源码**必须重建 dist 再 go build** —— `//go:embed all:frontend/dist`
+> 吃的是磁盘上那份 dist，忘了重建就会「改了前端但界面没变」
+> （`release.ps1` 的 S1 自检抓这个）。
 
 > ⚠️ 托盘相关项需要**有通知区的真实桌面会话**；远程/沙箱会话里图标可能不出现，
 > 但不影响其它项（服务照常起、系统浏览器照常打开）。
@@ -42,12 +46,16 @@ go build -ldflags "-s -w -H windowsgui" -o build\bin\CloudPrismGo.exe .
 
 纯逻辑已由 `go test ./...` 全绿覆盖，这里只列**运行态可观察**项：
 
+- [ ] 启动配置 `data\config.json`：删掉该文件后程序仍能启动（用默认 7840）；
+      把 `{"port": 8085}` 写进去（记事本保存即可，带 BOM 也应生效）重启 → 实际监听 8085；
+      写 `{"port": 99999}` 重启 → 回退 7840 且在日志里有 WARN「启动配置回退」
 - [ ] 首启后 exe 同级 `data\logs\` 出现日志：中文文案，无任何明文密钥/密码/token
 - [ ] 日志轮转：连续写满 6MB+ 后该目录恒为 3 个文件（2MB×3），不无限膨胀
 - [ ] 浏览含大图的文件夹后 `data\thumb-cache\` 出现 5–15KB 的 192px JPEG
       （服务端重编码，非原图字节）；重进目录无新增文件 = 命中缓存
 - [ ] 把 Python 版旧 `data\cloudprism.ini` 拷入 Go exe 同级 `data\` 后首启：
-      生成 `config.json` 且旧键已迁移、INI 原文未动（一次性只读导入）
+      生成 `cloudprism_settings.json` 且旧键已迁移、INI 原文未动（一次性只读导入）
+      （注意：启动配置是另一个文件 `data\config.json`，两者不要混）
 - [ ] 自动锁定：设置页把自动锁设为 5 分钟，空闲等待后界面回锁定态，需重输主密码
 - [ ] 播放/预览时把代理地址 `http://127.0.0.1:PORT/s/{token}/…` 复制到浏览器
       新标签访问 → 404（令牌仅本进程内有效，密文路径不外泄）
@@ -104,6 +112,12 @@ go build -ldflags "-s -w -H windowsgui" -o build\bin\CloudPrismGo.exe .
       再访问 `http://127.0.0.1:7840` 连接被拒
 - [ ] 界面侧栏「退出」等效：进程结束、端口释放（托盘的替代路径，必须一直可用）
 - [ ] 单实例：进程还在时双击 exe → 不新开，转而打开已有实例的界面
+- [ ] 单实例（改端口后仍成立）：实例 A 在跑（默认 7840）时把 `data\config.json`
+      的 `port` 改成 7900 再启动 → **仍不新开**（弹框提示已在运行或打开 A 的界面）。
+      这是「锁数据目录」取代「扫端口」的原因：只扫端口会漏掉 A 而跑起第二个实例，
+      两个进程共享 `data\` 导致设置互相覆盖、日志轮转互删文件
+- [ ] 崩溃不留僵尸锁：任务管理器强杀 exe 后重新双击 → 正常启动（命名互斥体由内核
+      随进程消亡释放，不需要手工删锁文件）
       （日志出现「检测到已在运行的实例，打开其界面」）
 
 ## 阶段 7：发布产物
