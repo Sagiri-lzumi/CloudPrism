@@ -3,13 +3,14 @@
 自动化测试覆盖不到的部分（GUI 渲染、真实网盘、系统交互）在这里逐项手工验证。
 **每完成一个阶段就把对应小节的勾选项跑一遍**，发现回归立刻停下修，不要攒到最后。
 
-运行前置：
+运行前置（在仓库根执行；不写绝对路径，仓库可整体搬迁）：
 
 ```powershell
-cd C:\Codes\CloudPrism\WindowsGo
-$env:CGO_ENABLED = "0"
-go build -ldflags "-s -w -H windowsgui" -o build\bin\CloudPrismGo.exe .
-# 或直接出发布产物：build\release.ps1 -Tag vN -SkipFrontend（落仓库根 Release\ 双产物）
+# 直接跑起来看效果
+powershell -ExecutionPolicy Bypass -File scripts\run.ps1
+# 或出发布产物
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Tag vN -SkipFrontend
+# 预期末行 BUILD ALL OK；产物 releases\<日期>-vN-Go-{dir,exe}\ 两目录
 ```
 
 > ⚠️ `frontend/dist` **不入库**，fresh clone 后直接 `go build` 会失败
@@ -18,7 +19,7 @@ go build -ldflags "-s -w -H windowsgui" -o build\bin\CloudPrismGo.exe .
 >
 > ⚠️ 改了前端源码**必须重建 dist 再 go build** —— `//go:embed all:frontend/dist`
 > 吃的是磁盘上那份 dist，忘了重建就会「改了前端但界面没变」
-> （`release.ps1` 的 S1 自检抓这个）。
+> （`scripts/build.ps1` 的 S1 自检抓这个）。
 
 > ⚠️ 托盘相关项需要**有通知区的真实桌面会话**；远程/沙箱会话里图标可能不出现，
 > 但不影响其它项（服务照常起、系统浏览器照常打开）。
@@ -27,20 +28,16 @@ go build -ldflags "-s -w -H windowsgui" -o build\bin\CloudPrismGo.exe .
 
 ## 阶段 3：工程骨架
 
-- [ ] `wails doctor` 全绿（WebView2 ✅，不提示需要 gcc）
 - [ ] `go vet ./...` 无输出
-- [ ] `wails build` 成功，产出 `build/bin/CloudPrismGo.exe`
-- [ ] 双击 exe：窗口标题为 `CloudPrism`，图标是项目图标（非 Wails 默认 logo）
-- [ ] 任务栏 / 资源管理器右键属性 → 详细信息：产品版本 `1.0.0`、
-      文件说明 `CloudPrism 端到端加密云盘`、版权 `AGPL-3.0`
-- [ ] **启动瞬间不闪黑窗**（`-H windowsgui` 生效）
-- [ ] 页面「绑定往返」一栏显示绿色 `pong:skeleton`（= 阶段 2 的 S1b 验证通过）
-- [ ] 页面「运行时」一栏显示 `Go go1.27.x · WebView2 <版本> · CGO_ENABLED=0 · windows/amd64`
-- [ ] exe 同级生成 `data\webview2\`，且 `%AppData%\CloudPrismGo.exe` **不存在**
-      （证明 UDF 显式生效，便携约定未被破坏）
-- [ ] 点「退出」按钮，进程正常结束，任务管理器无残留 `CloudPrismGo.exe`
-- [ ] DPI 缩放 125% / 150% 下窗口文字不模糊、不错位（`wails.exe.manifest` 的
-      permonitorv2 生效）
+- [ ] `scripts\build.ps1 -SkipFrontend` 成功，产出 `releases\<日期>-<Tag>-Go-{dir,exe}\`
+- [ ] 双击 exe：**不闪黑窗**（`-H windowsgui` 生效），托盘出现图标，
+      默认浏览器自动打开 `http://127.0.0.1:7840`
+- [ ] 页面「关于」处显示 `Go go1.27.x · CGO_ENABLED=0 · windows/amd64 · 前端 <指纹>`
+      （指纹与 `releases\<ver>-Go-MD5.txt` 的「前端产物:」一行一致）
+- [ ] exe 同级只生成 `data\`（无 webview2 目录——Web 模式不内嵌浏览器）；
+      `%AppData%` 与注册表均无残留（便携约定）
+- [ ] 托盘「退出」后进程正常结束，任务管理器无残留 `CloudPrismGo.exe`
+- [ ] DPI 缩放 125% / 150% 下页面文字不模糊、不错位（浏览器渲染，随系统缩放）
 
 ## 阶段 4–5：核心与绑定层
 
@@ -88,7 +85,7 @@ go build -ldflags "-s -w -H windowsgui" -o build\bin\CloudPrismGo.exe .
       拉起浏览器完成 oob 授权 → 状态变已授权（需真实凭证；无凭证则标注待验）
 - [ ] 设置页「关于」组显示两行只读信息：`服务端：web-mode`（App.Version 诊断串）
       与 `界面构建：index-XXX.js + index-YYY.css`（v1.8 起，用于分辨跑的是哪个发布包 ——
-      与 Release 包里 `-Go-MD5.txt` 的「前端产物:」一行对照）；
+      与 `releases\` 包里 `-Go-MD5.txt` 的「前端产物:」一行对照）；
       Go 端暂无「检查更新」按钮（未接线，见 ARCHITECTURE 差异 #18）
 - [ ] 状态栏三态：未连接灰点「未连接」；连接中橙点脉冲 + 后端阶段文案
       （如「正在校验主密码…」）；已连接绿点 + 密库名/后端/连接时长
@@ -123,19 +120,19 @@ go build -ldflags "-s -w -H windowsgui" -o build\bin\CloudPrismGo.exe .
 ## 阶段 7：发布产物
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File build\release.ps1 -Tag v1
-# 预期末行 BUILD ALL OK；产物 Release\<日期>-v1-Go-{dir,exe}\ 两目录
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Tag v1
+# 预期末行 BUILD ALL OK；产物 releases\<日期>-v1-Go-{dir,exe}\ 两目录 + -Go-MD5.txt
 ```
 
 - [ ] `-Go-exe\` 内**仅**一个 `CloudPrismGo.exe`；`-Go-dir\` 含 exe +
-      `assets\{icon.ico, baidu_guide.md}` + `data\tmp\` + `README-便携版.txt`
-      （README 文件名与内容均无乱码）
+      `assets\{icon.ico, baidu_guide.md, self_test_guide.md}` + `data\config.json` +
+      `data\tmp\` + `README-便携版.txt` + `版本信息.txt`（文件名与内容均无乱码）
 - [ ] 目录与命名遵循 `YYYY-MM-DD-<tag>-Go-dir` / `-Go-exe` 惯例，含 `-Go` 标识
-- [ ] 两个 exe 右键属性 → 详细信息：产品版本 `1.0.0.0`、产品名 `CloudPrism`、
-      文件说明正确、图标为项目图标（非 Wails 默认）
-- [ ] `-exe` 版拷到 U 盘/任意目录双击：`data\`（含 webview2 缓存）落在 exe 同级；
-      `%AppData%` 无 `CloudPrismGo.exe` 残留目录（便携约定）
-- [ ] `-dir` 版同测一遍；删除 `data\webview2\` 后重启仍正常（缓存可重建）
-- [ ] 双击到窗口可交互的冷启动时间 < 1s；退出后任务管理器无残留进程
-- [ ] 在**无 WebView2 运行时的干净机器**上双击：弹出说明框且系统默认浏览器
-      自动打开微软官方下载页（fwlink）→ 安装后重启即正常（条件允许时验证）
+- [ ] `-Go-MD5.txt` 里两个 MD5 相同；「前端产物:」一行与 `frontend/dist/assets/`
+      实际文件名一致
+- [ ] `-exe` 版拷到 U 盘/任意目录双击：`data\` 落在 exe 同级；`%AppData%`
+      无残留目录（便携约定）
+- [ ] `-dir` 版同测一遍；删除 `data\cache\` 后重启仍正常（缓存可重建）
+- [ ] 双击到界面可交互的冷启动时间 < 1s；退出后任务管理器无残留进程
+- [ ] 在**无 WebView2 运行时的干净机器**上双击：正常启动（Web 模式用系统浏览器，
+      不依赖 WebView2），界面可正常打开（条件允许时验证）
