@@ -228,8 +228,10 @@ Plan/
 # Plan 未入库，改动前的手工备份目录同样不入库
 Plan_backup_*/
 
-# qfluentwidgets 运行时配置（qconfig 落盘产物，仅测试环境可能生成）
-config/
+# qfluentwidgets 运行时配置（qconfig 落盘产物，仅测试环境可能生成）。
+# 锚定到仓库根：无锚定的 config/ 会连带忽略任意深度的同名目录，
+# 例如 WindowsGo/pkg/config/（启动配置解析包，必须入库）。
+/config/
 
 # dist
 Release/

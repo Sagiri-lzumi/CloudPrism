@@ -63,6 +63,15 @@ func SettingsFile() string {
 	return filepath.Join(DataDir(), "cloudprism_settings.json")
 }
 
+// LaunchConfigFile 返回启动配置文件路径 data/config.json。
+//
+// 与 SettingsFile（运行期设置）分开：本文件承载**进程启动前必须知道**
+// 的参数（监听端口/地址/顺延范围），由 pkg/config 解析。用户手工编辑、
+// 重启生效，不经 Web 界面读写，故独立命名。
+func LaunchConfigFile() string {
+	return filepath.Join(DataDir(), "config.json")
+}
+
 // BaiduCredentialFile 返回百度网盘凭证文件路径 data/baidu.json
 // （内容为 DPAPI/PLAIN 前缀 + base64 密文，见 pkg/storage.BaiduCredStore）。
 func BaiduCredentialFile() string {

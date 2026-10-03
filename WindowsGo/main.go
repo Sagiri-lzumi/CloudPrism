@@ -4,7 +4,8 @@
 // 业务逻辑（internal/appstate + internal/bind + pkg/*）完全复用，不依赖 Wails。
 // 前端 Vue 组件逻辑复用，数据层改 fetch/SSE（不依赖 wailsjs runtime）。
 //
-// 启动顺序：依赖图 → 内嵌前端 dist → 按「局域网访问档」设置决定监听地址
+// 启动顺序：依赖图 → 读 data/config.json（起始端口/地址/顺延范围）→
+// 内嵌前端 dist → 按「局域网访问档」设置决定监听地址
 // （关闭=127.0.0.1；开启=0.0.0.0 + 访问令牌闸门，令牌不可用则回退本机）→
 // 端口顺延 + 单实例探测 → 开浏览器 → Serve（goroutine）→ 托盘消息循环（主线程）。
 // 退出：托盘「退出」/ NavRail「退出」/ SIGINT → 统一收尾（停帧循环→
@@ -31,6 +32,8 @@ import (
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/platform/win"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/tray"
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/web"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/config"
+	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/paths"
 )
 
 // assets 内嵌前端产物。Web 模式下 HTTP server 直接 serve 这份 dist。
@@ -38,15 +41,53 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// basePort 默认监听端口；被占用时最多顺延 maxPortOffset 个端口。
-// 单实例探测与实际监听共用同一范围：探测范围若小于监听范围，
-// 会漏掉落在尾部端口上的已在运行实例，导致多开。
-const basePort = 7840
-const maxPortOffset = 10
+// 监听端口不再硬编码：起始端口与顺延范围来自程序目录旁的
+// data/config.json（见 pkg/config），缺省值等价于历史的 7840 + 顺延 10。
+//
+// 单实例探测与实际监听共用同一候选列表（cfg.Ports()）：探测范围若小于
+// 监听范围，会漏掉落在尾部端口上的已在运行实例，导致多开。
 
 func main() {
+	// 启动配置（data/config.json）：起始端口 / 监听地址 / 顺延范围。
+	// 先于一切副作用读取（Load 是纯函数，不碰日志/设置），因为单实例闸门
+	// 需要它与默认端口段一起构成探测范围。
+	// 缺失或损坏一律回退默认值；每条回退都写进日志，不让用户写错的配置
+	// 静默失效（否则「我明明配了 8080 怎么还是 7840」无从排查）。
+	launchCfg, cfgProblems := config.Load(paths.LaunchConfigFile())
+	ports := launchCfg.Ports()
+
+	// 单实例闸门必须在 NewApp() **之前**：NewApp 会打开 data/logs 下的日志
+	// 文件并初始化设置存储，两个进程同时持有这些文件会互相踩踏
+	//（loggingx 轮转要 os.Remove + os.Rename 整条链，另一方正在写的文件
+	// 可能被删掉；设置存储是「最后写入者胜」，会静默丢改动）。
+	//
+	// 这里锁的是**数据目录**而不是端口：真正的约束是「一个数据目录只能有
+	// 一个进程」。端口扫描只是它的一个代理指标，且自端口可配之后不再可靠
+	// —— 改了 config.json 的 port 重启，新进程扫的是新端口段，探测不到
+	// 仍在旧端口上运行的实例，于是两个进程共享同一个 data/。
+	//
+	// 锁建立失败（环境异常）时 fail-open 照常启动：单实例约束不该让用户
+	// 完全打不开程序。
+	if primary, lockErr := win.AcquireInstanceLock(paths.DataDir()); lockErr != nil {
+		log.Printf("[warn] 单实例锁不可用，跳过单实例检查: %v", lockErr)
+	} else if !primary {
+		// 已有实例在跑。端口可配后无法确定它用的是哪一段配置，故默认段与
+		// 当前配置段都扫一遍；找到就把它的界面打开，找不到则明确告知。
+		if url := detectRunningInstance(mergePorts(config.Default().Ports(), ports)); url != "" {
+			_ = win.OpenURL(url)
+		} else {
+			win.FatalMessage("CloudPrism 已在运行",
+				"检测到本程序已在运行（同一数据目录只允许一个实例）。\n\n"+
+					"请使用已打开的程序界面；若确实需要启动新实例，请先从托盘退出旧实例。")
+		}
+		return
+	}
+
 	app := NewApp()
 	app.holder.Set(context.Background())
+	for _, p := range cfgProblems {
+		app.log.Warn("启动配置回退", "problem", p, "file", paths.LaunchConfigFile())
+	}
 
 	// 内嵌前端 dist → fs.Sub 取 frontend/dist 子树，注入 web.Server。
 	dist, err := fs.Sub(assets, "frontend/dist")
@@ -58,20 +99,25 @@ func main() {
 	srv := web.New(app.log, app.st, app.holder, app.vault, app.files,
 		app.transfer, app.settings, app.preview, app.localfs, app.lan, dist)
 
-	// 单实例：若 basePort..basePort+maxPortOffset-1 已有 CloudPrism 实例
-	// （ping 应答），直接打开其界面并退出，避免多开。
-	if existing := detectRunningInstance(); existing != "" {
-		app.log.Info("检测到已在运行的实例，打开其界面", "url", existing)
-		_ = win.OpenURL(existing)
-		return
-	}
+	// 单实例检查已在 main 开头完成（命名互斥体锁数据目录），此处不再按
+	// 端口扫描：端口只是数据目录的代理指标，配置改了端口就失效。走到这里
+	// 说明本进程已持有数据目录锁，是按定义的主实例。
 
 	// 监听地址与访问令牌由「局域网访问档」设置决定：
 	//   档位关闭（默认）→ 只绑 127.0.0.1，无令牌，行为与历史版本完全一致；
 	//   档位开启       → 绑 0.0.0.0 并启用访问令牌闸门（回环来源仍免令牌）。
 	// 令牌取不到时**回退为仅本机监听**（fail-closed）：宁可局域网访问不了，
 	// 也不能把没有鉴权的界面暴露出去。
-	host, token := "127.0.0.1", ""
+	//
+	// config.json 的 host 只能**收窄**绑定范围，不能放宽：把 host 写成
+	// 0.0.0.0 而 listen/lan 为关时，仍然只绑回环。理由（第一性原则）：
+	// 「哪些接口可达」与「远端是否要鉴权」是同一条安全决策的两面，必须由
+	// 同一个开关统一裁决。若允许配置文件单方面把监听放大到全网卡，就会出现
+	// 「绑了 0.0.0.0 但令牌闸门因档位关闭而未启用」这种自相矛盾的状态 ——
+	// 此时 LAN 请求实际被 auth.go 的 fail-closed 规则拒掉（401），
+	// 但启动日志会打印「局域网访问地址」，把人引向一个连不上的地址。
+	// 故这里以 listen/lan 为唯一权威，host 仅在档位开启时生效。
+	host, token := config.DefaultHost, ""
 	if app.lan.Enabled() {
 		tok, err := app.lan.Token()
 		if err != nil {
@@ -79,15 +125,18 @@ func main() {
 		} else {
 			host, token = "0.0.0.0", tok
 		}
+	} else if !config.IsLoopbackHost(launchCfg.Host) {
+		app.log.Warn("config.json 的 host 被忽略：局域网访问未启用",
+			"host", launchCfg.Host, "using", config.DefaultHost, "hint", "先在界面里开启「局域网访问」")
 	}
 
-	// 端口从 basePort 起顺延，直到找到一个可绑端口。
-	port, err := listenOn(srv, host, token)
-	if err != nil && host != "127.0.0.1" {
+	// 端口从配置的起始端口起顺延，直到找到一个可绑端口。
+	port, err := listenOn(srv, host, token, ports)
+	if err != nil && host != config.DefaultHost {
 		// 局域网档绑失败（例如被安全软件拦截）：退一步保证程序仍可用。
 		app.log.Error("局域网监听失败，回退为仅本机监听", "err", err)
-		host, token = "127.0.0.1", ""
-		port, err = listenOn(srv, host, token)
+		host, token = config.DefaultHost, ""
+		port, err = listenOn(srv, host, token, ports)
 	}
 	if err != nil {
 		fatal("CloudPrism Web 服务启动失败", err.Error())
@@ -167,15 +216,36 @@ func main() {
 	app.closeLog()
 }
 
-// detectRunningInstance 探测 basePort..basePort+3 是否已有 CloudPrism 实例：
+// mergePorts 合并两组端口并去重，保持各组内部顺序（先 a 后 b）。
+//
+// 用途：单实例探测无法预知「已在运行的那个实例」用的是哪份配置，故把
+// 默认端口段与当前配置段一起探测，避免改了 port 之后互相看不见。
+func mergePorts(a, b []int) []int {
+	seen := make(map[int]bool, len(a)+len(b))
+	out := make([]int, 0, len(a)+len(b))
+	for _, group := range [][]int{a, b} {
+		for _, p := range group {
+			if !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+// detectRunningInstance 在候选端口上探测是否已有 CloudPrism 实例：
 // POST /api/app/ping（500ms 超时，body 带 token=probe），应答 pong:probe
 // 即认作本程序。返回其 URL；无则空串。
 //
+// ports 必须与 listenOn 用的是**同一个列表**（cfg.Ports()）：探测范围若
+// 窄于监听范围，会漏掉落在尾部端口上的运行实例，导致多开。
+//
 // 用 POST 而非 GET：/api/* 现在一律只接受 POST（见 web.apiMethodOK），
 // GET 会被 405 挡下 —— 探测失败会让第二个实例以为端口空着而另起一个服务。
-func detectRunningInstance() string {
+func detectRunningInstance(ports []int) string {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
-	for p := basePort; p < basePort+maxPortOffset; p++ {
+	for _, p := range ports {
 		resp, err := client.Post(
 			fmt.Sprintf("http://127.0.0.1:%d/api/app/ping", p),
 			"application/json",
@@ -193,17 +263,16 @@ func detectRunningInstance() string {
 	return ""
 }
 
-// listenOn 从 basePort 起尝试绑 host（"127.0.0.1" 或 "0.0.0.0"），
-// 范围与单实例探测一致（maxPortOffset 个端口）；token 透传给访问闸门
-// （空串 = 纯本机 fail-closed 模式）。返回实际监听端口。所有端口均不可绑时
-// 返回 error。
-func listenOn(srv *web.Server, host string, token string) (int, error) {
-	for p := basePort; p < basePort+maxPortOffset; p++ {
+// listenOn 按 ports 顺序尝试绑 host（"127.0.0.1" 或 "0.0.0.0"），
+// 范围与单实例探测一致；token 透传给访问闸门（空串 = 纯本机 fail-closed
+// 模式）。返回实际监听端口。所有端口均不可绑时返回 error。
+func listenOn(srv *web.Server, host string, token string, ports []int) (int, error) {
+	for _, p := range ports {
 		addr, err := srv.Listen(host, p, token)
 		if err != nil {
 			continue // 端口被占（非本程序，detectRunningInstance 已排除本程序），顺延
 		}
-		// addr 形如 127.0.0.1:7840；解析端口。
+		// addr 形如 127.0.0.1:7840；解析出实际端口。
 		_, portStr, err := net.SplitHostPort(addr)
 		if err != nil {
 			return p, nil
@@ -214,7 +283,8 @@ func listenOn(srv *web.Server, host string, token string) (int, error) {
 		}
 		return port, nil
 	}
-	return 0, fmt.Errorf("无可绑端口（尝试 %d-%d 均失败）", basePort, basePort+maxPortOffset-1)
+	return 0, fmt.Errorf("无可绑端口（尝试 %v 均失败），可在 %s 里改 port / port_range",
+		ports, paths.LaunchConfigFile())
 }
 
 // sanitizeShareURL 去掉分享链接里的查询串（即访问令牌）后再写日志。
