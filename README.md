@@ -72,7 +72,7 @@
 找不到文件而失败。不想操心顺序就用一键脚本：
 
 ```powershell
-# 前端 + Go + 组装便携目录 -> releases/<时间戳>/
+# 前端 + Go + 组装双形态产物 -> releases/<日期>-v1.0-Go-{dir,exe}/
 powershell -ExecutionPolicy Bypass -File scripts\build.ps1
 ```
 
@@ -116,7 +116,8 @@ powershell -ExecutionPolicy Bypass -File scripts\run.ps1
 三个脚本的分工：`run.ps1` 是「跑起来看效果」，`dev.ps1` 是「改前端代码要
 热更」，`build.ps1` 是「打包发布」。
 
-发布打包用 `WindowsGo/build/release.ps1`，产出 `Release/` 下的便携目录版与单文件版。
+发布打包就是上面的 `scripts/build.ps1`：产出 `releases/` 下的便携目录版
+（`*-Go-dir`）与单文件版（`*-Go-exe`），默认 Tag 为 `v1.0`，加 `-Tag` 指定版本。
 
 ## 配置
 
@@ -159,8 +160,7 @@ CloudPrism/
 │   ├── build.ps1         # 一键构建（前端 + Go + 组装便携目录 → releases/）
 │   └── dev.ps1           # 开发态：后端 + Vite 热更（改前端代码时用）
 ├── Pic/                  # README 资源图
-├── releases/             # build.ps1 产物（打包生成）
-├── Release/              # release.ps1 产物（打包生成）
+├── releases/             # build.ps1 产物（打包生成，双形态 + MD5 指纹）
 ├── LICENSE
 └── README.md
 ```

@@ -33,7 +33,7 @@
 WindowsGo/
 ├── main.go                     Web 模式入口：依赖图 → Listen → 开浏览器 → Serve(goroutine) → 托盘
 ├── app.go                      NewApp() 依赖图装配 + frontendFingerprint + Version 诊断
-├── build/                      release.ps1（go build -H windowsgui）+ windows/icon.ico
+├── build/                      windows/icon.ico（打包图标；打包脚本在仓库根 scripts/build.ps1）
 ├── frontend/                   Vue 3 + Vite + TS；dist/ 忽略（//go:embed 依赖，构建期生成），无 wailsjs
 │   ├── scripts/gen-icons.mjs   图标注册表生成器（按源码引用裁剪，prebuild 自动跑，详见 §8.2）
 │   └── src/lib/icons.gen.ts    ★ 生成物，勿手工编辑；图标显式 import 表
@@ -114,7 +114,8 @@ go build -ldflags "-s -w -H windowsgui" -o build/bin/CloudPrismGo.exe .
   找不到文件而失败，必须先跑一次前端构建（`scripts/build.ps1` 已自动化该步，
   见 §9）。只改后端时可复用本地已有 dist。
 - 前端 TS 类型自 `src/types/appstate.ts`（v33 起自有，替代已删除的 `wailsjs/go/models.ts`）。
-- 发布走 `build/release.ps1`（go build + S1 嵌入断言 + S2 双形态一致性 + 指纹清单）。
+- 发布走仓库根 `scripts/build.ps1`（前端构建 → go build + S1 嵌入断言 + S2 双形态
+  一致性 + 指纹清单），产出 `releases/<日期>-<Tag>-Go-{dir,exe}`。
 
 ---
 
