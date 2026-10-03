@@ -19,6 +19,9 @@ func TestDataDirOverride(t *testing.T) {
 	if got := SettingsFile(); got != filepath.Join(`C:\custom\portable-data`, "cloudprism_settings.json") {
 		t.Errorf("SettingsFile 应跟随 override，实得 %q", got)
 	}
+	if got := LaunchConfigFile(); got != filepath.Join(`C:\custom\portable-data`, "config.json") {
+		t.Errorf("LaunchConfigFile 应跟随 override，实得 %q", got)
+	}
 	if got := BaiduCredentialFile(); got != filepath.Join(`C:\custom\portable-data`, "baidu.json") {
 		t.Errorf("BaiduCredentialFile 应跟随 override，实得 %q", got)
 	}
@@ -75,7 +78,7 @@ func TestEnsureDataDirIdempotent(t *testing.T) {
 func TestAllFilesUnderDataDir(t *testing.T) {
 	t.Setenv(DataDirEnv, t.TempDir())
 	dir := DataDir()
-	for _, p := range []string{ConfigFile(), SettingsFile(), BaiduCredentialFile()} {
+	for _, p := range []string{ConfigFile(), SettingsFile(), LaunchConfigFile(), BaiduCredentialFile()} {
 		if filepath.Dir(p) != dir {
 			t.Errorf("路径 %q 应位于数据目录 %q 下", p, dir)
 		}
