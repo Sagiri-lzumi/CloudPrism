@@ -71,7 +71,10 @@ if (-not (Test-Path $beLog)) { New-Item -ItemType File $beLog | Out-Null }
 $beLogLen = (Get-Item $beLog).Length   # 只尾随新日志，不刷历史
 
 # ---- [3/4] 启动后端 ----
-Write-Host "$TAG_DEV [3/4] starting backend (http://127.0.0.1:$BACKEND_PORT)..." -ForegroundColor Cyan
+# 端口可配（data/config.json）且被占用时顺延，BACKEND_PORT 只是期望起点，
+# 实际端口必须探测：写死 7840 会在顺延后把 vite 代理打到错误的实例上
+#（比如 run.ps1 跑着的那个）。
+Write-Host "$TAG_DEV [3/4] starting backend (config port, falls forward from $BACKEND_PORT)..." -ForegroundColor Cyan
 $env:CP_NO_BROWSER = '1'
 $env:CP_DEV_ORIGIN = "http://127.0.0.1:$FRONTEND_PORT"
 $beCmd = "`"$BACKEND_DIR\build\bin\$BACKEND_EXE`" > `"$beOut`" 2> `"$beErr`""
@@ -82,6 +85,45 @@ $bePsi.WorkingDirectory = $BACKEND_DIR
 $bePsi.UseShellExecute = $false
 $bePsi.CreateNoWindow = $true
 $beProc = [System.Diagnostics.Process]::Start($bePsi)
+
+# 探测后端实际端口：候选 = config.json 的 port..port+range-1 与默认段
+# 7840..7849 的并集。用 POST /api/app/ping 辨认本程序（/api/* 只收 POST），
+# 而不是裸 TCP——只占坑的不是本程序的端口不能算数。
+function Find-BackendPort {
+    $candidates = @($BACKEND_PORT..($BACKEND_PORT + 9))
+    $cfgPath = Join-Path $env:CLOUDPRISM_DATA_DIR 'config.json'
+    if (Test-Path $cfgPath) {
+        try {
+            $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
+            if ($cfg.port -and $cfg.port -ge 1 -and $cfg.port -le 65535) {
+                $range = if ($cfg.port_range -and $cfg.port_range -ge 1) { [int]$cfg.port_range } else { 10 }
+                $candidates += ([int]$cfg.port)..([int]$cfg.port + $range - 1)
+            }
+        } catch { }
+    }
+    $deadline = (Get-Date).AddSeconds(15)
+    while ((Get-Date) -lt $deadline) {
+        foreach ($p in ($candidates | Select-Object -Unique)) {
+            try {
+                $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$p/api/app/ping" -Method Post `
+                    -Body '{"Token":"probe"}' -UseBasicParsing -TimeoutSec 1
+                if ($resp.Content -match 'pong:probe') { return $p }
+            } catch { }
+        }
+        Start-Sleep -Milliseconds 400
+    }
+    return 0
+}
+$BACKEND_ACTUAL_PORT = Find-BackendPort
+if ($BACKEND_ACTUAL_PORT -eq 0) {
+    Write-Host "$TAG_DEV backend did not come up on any candidate port; see $beErr" -ForegroundColor Red
+    cmd /c "taskkill /F /IM $BACKEND_EXE >nul 2>&1"
+    exit 1
+}
+Write-Host "$TAG_DEV backend listening on 127.0.0.1:$BACKEND_ACTUAL_PORT" -ForegroundColor Cyan
+# vite.config.ts 读 CP_BACKEND_ORIGIN 决定代理目标；在启动前端前注入，
+# ProcessStartInfo(UseShellExecute=false) 默认继承本进程环境。
+$env:CP_BACKEND_ORIGIN = "http://127.0.0.1:$BACKEND_ACTUAL_PORT"
 
 # ---- [4/4] 前端依赖 + 启动 Vite ----
 Push-Location $FRONTEND_DIR
@@ -178,7 +220,7 @@ try {
     while ($true) {
         foreach ($s in $sources) { Read-NewLines $s }
         $elapsed = ((Get-Date) - $started).TotalSeconds
-        if (-not $beWarned -and $elapsed -gt 10 -and -not (Test-PortListen $BACKEND_PORT)) {
+        if (-not $beWarned -and $elapsed -gt 10 -and -not (Test-PortListen $BACKEND_ACTUAL_PORT)) {
             $beWarned = $true
             Write-Host "$TAG_BE port not listening, process may have exited." -ForegroundColor Red
         }
