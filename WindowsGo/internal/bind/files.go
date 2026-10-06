@@ -6,7 +6,7 @@ import (
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/appstate"
 )
 
-// Files 是文件浏览域的 Wails 绑定：目录列表/新建/重命名/删除/导出。
+// Files 是文件浏览域的绑定：目录列表/新建/重命名/删除/导出。
 //
 // 薄适配原则同 Vault；条目一律以 appstate.FileEntry.Remote（完整后端
 // 相对路径）回传操作，前端不拼路径。

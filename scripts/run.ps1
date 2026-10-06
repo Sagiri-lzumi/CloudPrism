@@ -1,4 +1,4 @@
-﻿# run.ps1 - Build and run CloudPrism the way an end user would: one process,
+# run.ps1 - Build and run CloudPrism the way an end user would: one process,
 # one port, the UI embedded in the binary, browser opens automatically.
 #
 # Usage (run from anywhere - paths come from $PSScriptRoot):
@@ -31,6 +31,10 @@ $repo    = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $goDir   = Join-Path $repo "WindowsGo"
 $feDir   = Join-Path $goDir "frontend"
 $binDir  = Join-Path $goDir "build\bin"
+# The exe name is deliberately NOT CloudPrismGo.exe: packaged builds live in
+# releases\ under this same repo root, and -Stop kills by exe name + repo-path
+# prefix. A distinct name makes a packaged instance from releases\ unreachable
+# by name, so run.ps1 can never kill a real installation by accident.
 $exeName = "CloudPrismRun.exe"
 $exe     = Join-Path $binDir $exeName
 

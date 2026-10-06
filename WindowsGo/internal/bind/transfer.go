@@ -4,7 +4,7 @@ import (
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/appstate"
 )
 
-// Transfer 是传输域的 Wails 绑定：上传/下载/任务管理/系统对话框。
+// Transfer 是传输域的绑定：上传/下载/任务管理/系统对话框。
 //
 // 任务进度不在此轮询：活动传输的任务明细随 10Hz 状态帧（st:frame）
 // 推送，Tasks 只服务页面初始化与下拉刷新。

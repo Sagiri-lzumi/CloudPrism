@@ -4,7 +4,7 @@ import (
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/internal/appstate"
 )
 
-// Preview 是预览域的 Wails 绑定：流媒体/缩略图代理 URL 的签发与吊销。
+// Preview 是预览域的绑定：流媒体/缩略图代理 URL 的签发与吊销。
 //
 // 令牌 URL 只在密库会话内有效：代理随锁库停止，派生密钥随 Revoke/进程
 // 退出清空。播放/预览页拿 URL 交给 <video>/<img>，无需暴露密文路径。

@@ -11,7 +11,7 @@ import (
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/storage"
 )
 
-// Vault 是密库域的 Wails 绑定：连接/锁定/切换/恢复码/续传/统计入口。
+// Vault 是密库域的绑定：连接/锁定/切换/恢复码/续传/统计入口。
 //
 // 只做薄适配：参数直传 appstate，错误经 Wrap 分类为带 Code 的 ApiError
 // 抛给前端（禁止 import cryptox/protocol，见 docs/ARCHITECTURE.md）。

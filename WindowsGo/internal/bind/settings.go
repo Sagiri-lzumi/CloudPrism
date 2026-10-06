@@ -9,7 +9,7 @@ import (
 	"github.com/Sagiri-lzumi/cloudprism/windowsgo/pkg/settings"
 )
 
-// Settings 是设置域的 Wails 绑定：读写外观/缓存/传输/同步/安全设置。
+// Settings 是设置域的绑定：读写外观/缓存/传输/同步/安全设置。
 //
 // 每次写入即落盘（Store.Sync），与 Python 端 QSettings 的「每次 set 即
 // 持久化」对齐；需要即时生效的项（传输并发/自动锁）同步应用。
