@@ -43,9 +43,8 @@ var assets embed.FS
 
 // 监听端口不再硬编码：起始端口与顺延范围来自程序目录旁的
 // data/config.json（见 pkg/config），缺省值等价于历史的 7840 + 顺延 10。
-//
-// 单实例探测与实际监听共用同一候选列表（cfg.Ports()）：探测范围若小于
-// 监听范围，会漏掉落在尾部端口上的已在运行实例，导致多开。
+// 单实例与否由数据目录上的命名互斥体决定（win.AcquireInstanceLock），
+// 与端口无关 —— 端口扫描只用于非主实例找出已有实例的界面地址。
 
 func main() {
 	// 启动配置（data/config.json）：起始端口与顺延范围。
@@ -226,15 +225,16 @@ func mergePorts(a, b []int) []int {
 	return out
 }
 
-// detectRunningInstance 在候选端口上探测是否已有 CloudPrism 实例：
+// detectRunningInstance 在候选端口上找出**已在运行的实例的界面地址**：
 // POST /api/app/ping（500ms 超时，body 带 token=probe），应答 pong:probe
 // 即认作本程序。返回其 URL；无则空串。
 //
-// ports 必须与 listenOn 用的是**同一个列表**（cfg.Ports()）：探测范围若
-// 窄于监听范围，会漏掉落在尾部端口上的运行实例，导致多开。
+// 调用时机只有一处：非主实例（数据目录锁已被持有）想把已有实例的界面打开。
+// 它探测的是「默认端口段 ∪ 当前配置段」——无法预知在跑的实例用的是哪份
+// 配置，两段都要扫。能否启动新实例不由本函数决定（那是命名互斥体的职责），
+// 所以探测范围不需要与 listenOn 的列表有任何关系。
 //
-// 用 POST 而非 GET：/api/* 现在一律只接受 POST（见 web.apiMethodOK），
-// GET 会被 405 挡下 —— 探测失败会让第二个实例以为端口空着而另起一个服务。
+// 用 POST 而非 GET：/api/* 一律只接受 POST（见 web.apiMethodOK）。
 func detectRunningInstance(ports []int) string {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	for _, p := range ports {
@@ -262,7 +262,7 @@ func listenOn(srv *web.Server, host string, token string, ports []int) (int, err
 	for _, p := range ports {
 		addr, err := srv.Listen(host, p, token)
 		if err != nil {
-			continue // 端口被占（非本程序，detectRunningInstance 已排除本程序），顺延
+			continue // 端口被占（单实例已由数据目录锁排除本程序），顺延
 		}
 		// addr 形如 127.0.0.1:7840；解析出实际端口。
 		_, portStr, err := net.SplitHostPort(addr)

@@ -28,7 +28,6 @@ const (
 	// 局域网档开启时由 main.go 改为 0.0.0.0（见 listen/lan 设置）。
 	DefaultHost = "127.0.0.1"
 	// DefaultPortRange 默认顺延范围：DefaultPort 起共这么多个端口。
-	// 单实例探测与实际监听共用同一范围，两者必须一致。
 	DefaultPortRange = 10
 	// maxPortRange 顺延范围上限，防配置写出一个扫满全端口的离谱值。
 	maxPortRange = 256
@@ -130,8 +129,8 @@ func Load(path string) (Config, []string) {
 // Ports 返回按尝试顺序排列的候选端口列表
 // （Port, Port+1, ... Port+PortRange-1）。
 //
-// 单实例探测与实际监听**必须**共用本函数，否则探测范围小于监听范围时
-// 会漏掉落在尾部端口上的已在运行实例，导致多开（历史 bug，见 main.go）。
+// 实际监听（listenOn）按此顺序顺延；非主实例找出已有实例界面时的探测
+// 范围是它的超集（见 main.go mergePorts），两者方向相反、互不构成约束。
 func (c Config) Ports() []int {
 	n := c.PortRange
 	if n < 1 {

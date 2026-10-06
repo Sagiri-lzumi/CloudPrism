@@ -187,7 +187,7 @@ func TestPortsGuardsZeroRange(t *testing.T) {
 }
 
 // TestDefaultPortsUnchanged 默认值必须仍是历史的 7840..7849：
-// 改这个范围会让已在运行的旧实例探测不到，进而多开。
+// 改这个范围会让历史用户的默认监听位置漂移，非主实例也更难找到已有实例。
 func TestDefaultPortsUnchanged(t *testing.T) {
 	ports := Default().Ports()
 	if len(ports) != 10 || ports[0] != 7840 || ports[9] != 7849 {
