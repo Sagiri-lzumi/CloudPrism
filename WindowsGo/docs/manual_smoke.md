@@ -134,5 +134,3 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Tag v1
       无残留目录（便携约定）
 - [ ] `-dir` 版同测一遍；删除 `data\cache\` 后重启仍正常（缓存可重建）
 - [ ] 双击到界面可交互的冷启动时间 < 1s；退出后任务管理器无残留进程
-- [ ] 在**无 WebView2 运行时的干净机器**上双击：正常启动（Web 模式用系统浏览器，
-      不依赖 WebView2），界面可正常打开（条件允许时验证）

@@ -1,5 +1,10 @@
 """跨语言互操作黄金向量生成器（Python 侧真源，一次性运行后把产物提交入库）。
 
+⚠️ 存档说明：本脚本依赖已移除的 Python 参考实现（.venv editable 安装），
+现已**不可运行**。保留仅为记录黄金向量的生成方式与来源（provenance），
+供回溯夹具语义时对照；夹具本身冻结于 testdata/，不要试图重跑本脚本。
+如确需再生成，需先从 git 历史恢复参考实现，并重新走 README 的验证流程。
+
 用法（cwd 任意，依赖 .venv 的 editable 安装）：
 
     .venv\\Scripts\\python.exe WindowsGo\\interop\\gen_vectors.py
