@@ -5,6 +5,7 @@ package win
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/windows"
@@ -32,7 +33,16 @@ var instanceMutex windows.Handle
 // 用 Local\ 前缀（而非 Global\）使锁限定在当前登录会话内 —— 与本程序的
 // 数据目录模型一致，也避免了多用户/终端服务场景下跨会话互相阻塞。
 func AcquireInstanceLock(key string) (bool, error) {
-	sum := sha256.Sum256([]byte(strings.ToLower(key)))
+	// key 归一化：同一数据目录的不同写法必须映射到同一把锁。
+	//   - 转绝对路径：CLOUDPRISM_DATA_DIR 允许相对路径，而调用方 cwd 不同
+	//     会得到不同 key；
+	//   - Clean + 小写：消除 "./"、多余分隔符、正反斜杠与盘符大小写差异。
+	// 漏掉任何一步都意味着「同一 data/ 两个进程各持一把锁」，即单实例失效。
+	if abs, err := filepath.Abs(key); err == nil {
+		key = abs
+	}
+	key = strings.ToLower(filepath.Clean(key))
+	sum := sha256.Sum256([]byte(key))
 	name := `Local\CloudPrism-` + hex.EncodeToString(sum[:16])
 	namePtr, err := windows.UTF16PtrFromString(name)
 	if err != nil {

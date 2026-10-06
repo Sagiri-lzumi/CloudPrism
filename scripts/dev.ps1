@@ -80,7 +80,7 @@ $beProc = [System.Diagnostics.Process]::Start($bePsi)
 # 探测后端实际端口：候选 = config.json 的 port..port+range-1 与默认段
 # 7840..7849 的并集。用 POST /api/app/ping 辨认本程序（/api/* 只收 POST），
 # 而不是裸 TCP——只占坑的不是本程序的端口不能算数。
-function Find-BackendPort {
+function Get-BackendCandidates {
     $candidates = @($BACKEND_PORT..($BACKEND_PORT + 9))
     $cfgPath = Join-Path $env:CLOUDPRISM_DATA_DIR 'config.json'
     if (Test-Path $cfgPath) {
@@ -92,14 +92,31 @@ function Find-BackendPort {
             }
         } catch { }
     }
+    return ($candidates | Select-Object -Unique)
+}
+function Test-BackendPing([int]$port) {
+    try {
+        $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$port/api/app/ping" -Method Post `
+            -Body '{"Token":"probe"}' -UseBasicParsing -TimeoutSec 1
+        return ($resp.Content -match 'pong:probe')
+    } catch { return $false }
+}
+# ping 只能证明「那是个 CloudPrism」，不能证明是**本次启动的这个**——另一份
+# checkout 或发布版实例也会应答。所以先快照「启动前就在应答」的端口集合，
+# 之后只接受**新增**的应答端口，杜绝把 vite 代理到别人的后端。
+$preExisting = @{}
+foreach ($p in (Get-BackendCandidates)) {
+    if (Test-BackendPing $p) {
+        $preExisting[$p] = $true
+        Write-Host "$TAG_DEV warn: port $p already answers ping before backend start (another instance?), will not treat it as ours" -ForegroundColor DarkYellow
+    }
+}
+function Find-BackendPort {
     $deadline = (Get-Date).AddSeconds(15)
     while ((Get-Date) -lt $deadline) {
-        foreach ($p in ($candidates | Select-Object -Unique)) {
-            try {
-                $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$p/api/app/ping" -Method Post `
-                    -Body '{"Token":"probe"}' -UseBasicParsing -TimeoutSec 1
-                if ($resp.Content -match 'pong:probe') { return $p }
-            } catch { }
+        foreach ($p in (Get-BackendCandidates)) {
+            if ($preExisting.ContainsKey($p)) { continue }
+            if (Test-BackendPing $p) { return $p }
         }
         Start-Sleep -Milliseconds 400
     }

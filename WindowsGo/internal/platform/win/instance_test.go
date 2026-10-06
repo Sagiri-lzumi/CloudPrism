@@ -3,6 +3,7 @@
 package win
 
 import (
+	"os"
 	"testing"
 )
 
@@ -47,6 +48,25 @@ func TestAcquireInstanceLockDistinctKeys(t *testing.T) {
 // TestAcquireInstanceLockCaseInsensitive key 大小写不敏感：
 // Windows 路径不区分大小写，同一目录的不同写法必须映射到同一把锁，
 // 否则 "C:\\Data" 与 "c:\\data" 会被当成两个数据目录而放过第二个实例。
+// TestAcquireInstanceLockNormalizesKey 同一目录的不同写法（相对/绝对、
+// 尾部斜杠、正反斜杠）必须映射到同一把锁 —— 否则 CLOUDPRISM_DATA_DIR 用
+// 相对路径时，换个 cwd 启动就会变成两个「主实例」共享同一 data/。
+func TestAcquireInstanceLockNormalizesKey(t *testing.T) {
+	ok1, err1 := AcquireInstanceLock(".")
+	if err1 != nil || !ok1 {
+		t.Fatalf("首个 key 应可取锁：ok=%v err=%v", ok1, err1)
+	}
+	// 当前目录的绝对写法，应与 "." 是同一把锁。
+	cwd, _ := os.Getwd()
+	ok2, err2 := AcquireInstanceLock(cwd)
+	if err2 != nil {
+		t.Fatalf("第二个 key 不应报错：%v", err2)
+	}
+	if ok2 {
+		t.Error("绝对路径与相对路径「.」指向同一目录，应拿不到锁")
+	}
+}
+
 func TestAcquireInstanceLockCaseInsensitive(t *testing.T) {
 	ok1, err1 := AcquireInstanceLock(`C:\CloudPrismTest\CaseDir`)
 	if err1 != nil || !ok1 {

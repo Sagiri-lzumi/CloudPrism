@@ -128,7 +128,6 @@ powershell -ExecutionPolicy Bypass -File scripts\run.ps1
 ```json
 {
   "port": 7840,
-  "host": "127.0.0.1",
   "port_range": 10
 }
 ```
@@ -136,12 +135,11 @@ powershell -ExecutionPolicy Bypass -File scripts\run.ps1
 | 键 | 含义 | 默认 |
 |---|---|---|
 | `port` | 起始监听端口，被占用时顺延 | `7840` |
-| `host` | 起始绑定地址 | `"127.0.0.1"` |
 | `port_range` | 顺延范围（试 `port .. port+port_range-1`） | `10` |
 
 文件缺失、损坏或字段非法时一律回退默认值，并在 `data/logs/cloudprism.log` 记 Warn，
-**不会**阻塞启动。`host` 只决定绑哪个地址，非回环访问是否需要令牌仍由界面里的
-「局域网访问」开关决定，改这里绕不过鉴权。
+**不会**阻塞启动。监听地址刻意不可配：本机/局域网由界面里的「局域网访问」开关
+统一裁决（开启时自带令牌闸门），配置文件无法绕开鉴权把监听放大到全网卡。
 
 其余运行期偏好（主题、缓存、传输等）在界面里改，存在 `data/cloudprism_settings.json`，
 与上面这个文件是**两个不同的文件**。

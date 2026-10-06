@@ -145,8 +145,7 @@ Write-Host "[run] note     : the app lives in the tray; Ctrl+C or -Stop ends it"
 # logged "Web ready" and vanished seconds later). Start-Process -Wait blocks
 # until the process actually exits, for console and GUI binaries alike.
 try {
-    $proc = Start-Process -FilePath $exe -PassThru -Wait
-    $code = $proc.ExitCode
+    Start-Process -FilePath $exe -Wait
 } finally {
     # Ctrl+C lands here while the app is still up. Only sweep processes
     # started from THIS repo (Stop-RepoProcess filters by path prefix).

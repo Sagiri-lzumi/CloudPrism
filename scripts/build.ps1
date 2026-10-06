@@ -168,7 +168,6 @@ New-Item -ItemType Directory -Force -Path (Join-Path $dataDir "tmp") | Out-Null
 $cfgJson = @"
 {
   "port": 7840,
-  "host": "127.0.0.1",
   "port_range": 10
 }
 "@
@@ -208,7 +207,7 @@ CloudPrism 便携版（Go 版）说明
 
 目录结构
     CloudPrismGo.exe        主程序（单文件，无安装，常驻系统托盘）
-    data\config.json        启动配置：端口 / 监听地址 / 顺延范围（改完重启生效）
+    data\config.json        启动配置：端口 / 顺延范围（改完重启生效）
     assets\icon.ico         应用图标（随包资源）
     assets\baidu_guide.md   百度网盘开放平台凭证获取教程
     assets\self_test_guide.md 加密链路自测指南（新建库→上传→验证解密→续传）
@@ -221,7 +220,6 @@ CloudPrism 便携版（Go 版）说明
     data\logs\cloudprism.log 记「启动配置回退」WARN，不会阻塞启动。
 
         port        7840         起始监听端口，被占用时顺延
-        host        "127.0.0.1"  绑定地址（局域网访问在界面里开，改这里绕不过鉴权）
         port_range  10           顺延范围：试 port .. port+port_range-1
 
     范围内所有端口都被占用时程序无法启动：把 port_range 调大或腾出一个端口。

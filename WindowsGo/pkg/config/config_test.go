@@ -38,9 +38,9 @@ func TestLoadEmptyPathUsesDefaults(t *testing.T) {
 
 // TestLoadOverrides 正常覆盖各项。
 func TestLoadOverrides(t *testing.T) {
-	p := writeCfg(t, `{"port": 8080, "host": "0.0.0.0", "port_range": 3}`)
+	p := writeCfg(t, `{"port": 8080, "port_range": 3}`)
 	cfg, problems := Load(p)
-	want := Config{Port: 8080, Host: "0.0.0.0", PortRange: 3}
+	want := Config{Port: 8080, PortRange: 3}
 	if cfg != want {
 		t.Errorf("实得 %+v，期望 %+v", cfg, want)
 	}
@@ -55,7 +55,7 @@ func TestLoadPartialKeepsDefaults(t *testing.T) {
 	if cfg.Port != 9000 {
 		t.Errorf("port 应为 9000，实得 %d", cfg.Port)
 	}
-	if cfg.Host != DefaultHost || cfg.PortRange != DefaultPortRange {
+	if cfg.PortRange != DefaultPortRange {
 		t.Errorf("未写的项应保持默认，实得 %+v", cfg)
 	}
 	if len(problems) != 0 {
@@ -94,6 +94,18 @@ func TestLoadToleratesCRLF(t *testing.T) {
 	}
 }
 
+// TestLoadIgnoresRemovedHostKey 历史版本的 config.json 含 host 键；
+// 该字段从未生效、已删除，残留键必须静默忽略而不是报错。
+func TestLoadIgnoresRemovedHostKey(t *testing.T) {
+	cfg, problems := Load(writeCfg(t, `{"port": 8080, "host": "0.0.0.0"}`))
+	if cfg.Port != 8080 {
+		t.Errorf("port 应为 8080，实得 %d", cfg.Port)
+	}
+	if len(problems) != 0 {
+		t.Errorf("残留的 host 键不应产生告警，实得 %v", problems)
+	}
+}
+
 // TestLoadMalformedFallsBack 坏 JSON 回退默认值且报告原因（绝不阻塞启动）。
 func TestLoadMalformedFallsBack(t *testing.T) {
 	cfg, problems := Load(writeCfg(t, `{"port": `))
@@ -114,7 +126,6 @@ func TestLoadInvalidValuesFallBack(t *testing.T) {
 		{"port 为 0", `{"port": 0}`},
 		{"port 超上限", `{"port": 70000}`},
 		{"port 为负", `{"port": -1}`},
-		{"host 为空串", `{"host": "   "}`},
 		{"port_range 为 0", `{"port_range": 0}`},
 		{"port_range 为负", `{"port_range": -5}`},
 	}

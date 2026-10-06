@@ -14,7 +14,6 @@ package config
 import (
 	"bytes"
 	"encoding/json"
-	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -38,19 +37,20 @@ const (
 type Config struct {
 	// Port 起始监听端口。被占用时向上顺延，见 PortRange。
 	Port int
-	// Host 起始监听地址。空 = DefaultHost。
-	//
-	// 注意：该字段只覆盖「起始」地址，是否允许非回环访问仍由运行期
-	// 设置 listen/lan 与令牌闸门决定（fail-closed 语义不被本文件绕过）。
-	Host string
 	// PortRange 顺延端口个数（含起始端口），即尝试
 	// Port .. Port+PortRange-1。
 	PortRange int
 }
 
+// 注意：配置刻意**不含监听地址**。监听地址与「远端是否鉴权」是同一条安全
+// 决策的两面，必须由 listen/lan 开关统一裁决（见 main.go）；若配置能单方面
+// 指定 host，就会出现「绑了 0.0.0.0 但令牌闸门未启用」的自相矛盾状态。
+// 历史上 config.json 曾有 host 字段，但从未真正生效（只会产生一条 WARN），
+// 已按「死配置面即删」的原则移除；文件里残留的 host 键会被静默忽略。
+
 // Default 返回全默认配置。
 func Default() Config {
-	return Config{Port: DefaultPort, Host: DefaultHost, PortRange: DefaultPortRange}
+	return Config{Port: DefaultPort, PortRange: DefaultPortRange}
 }
 
 // fileShape 是 config.json 的线上结构。
@@ -58,9 +58,8 @@ func Default() Config {
 // 用指针接收可选字段，以区分「没写这一项」与「显式写了 0」：
 // 前者沿用默认值，后者（0 端口）视为非法同样回退默认，并记入 Problems。
 type fileShape struct {
-	Port      *int    `json:"port"`
-	Host      *string `json:"host"`
-	PortRange *int    `json:"port_range"`
+	Port      *int `json:"port"`
+	PortRange *int `json:"port_range"`
 }
 
 // Load 从 path 载入配置。
@@ -102,13 +101,6 @@ func Load(path string) (Config, []string) {
 			problems = append(problems, "port 超出 1-65535 范围，已用默认值 "+strconv.Itoa(DefaultPort))
 		}
 	}
-	if shape.Host != nil {
-		if h := strings.TrimSpace(*shape.Host); h != "" {
-			cfg.Host = h
-		} else {
-			problems = append(problems, "host 为空，已用默认值 "+DefaultHost)
-		}
-	}
 	if shape.PortRange != nil {
 		switch r := *shape.PortRange; {
 		case r >= 1 && r <= maxPortRange:
@@ -132,29 +124,6 @@ func Load(path string) (Config, []string) {
 	}
 
 	return cfg, problems
-}
-
-// IsLoopbackHost 报告 host 是否只绑定回环地址。
-//
-// 用途：调用方据此判断配置里的 host 是否试图**放宽**监听范围。空串按回环
-// 处理（等同默认值）；只有明确指向某个具体网卡 IP、或 0.0.0.0/:: 这类
-// 非回环地址，才算放宽。
-//
-// 为什么放宽判定要放在这里而不是调用方：host 的取值语义属配置层，且
-// 「哪些写法算回环」是一个容易写错的纯函数（主机名不区分大小写、
-// 127.0.0.0/8 整段都是回环、IPv6 可能带方括号）。集中在此便于穷举测试。
-func IsLoopbackHost(host string) bool {
-	// 主机名不区分大小写（"LOCALHOST" 与 "localhost" 等价），先归一化。
-	h := strings.ToLower(strings.TrimSpace(host))
-	switch h {
-	case "", "127.0.0.1", "localhost", "::1", "[::1]":
-		return true
-	}
-	// 127.0.0.0/8 整段都是回环。
-	if ip := net.ParseIP(strings.Trim(h, "[]")); ip != nil && ip.IsLoopback() {
-		return true
-	}
-	return false
 }
 
 // Ports 返回按尝试顺序排列的候选端口列表

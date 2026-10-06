@@ -109,14 +109,9 @@ func main() {
 	// 令牌取不到时**回退为仅本机监听**（fail-closed）：宁可局域网访问不了，
 	// 也不能把没有鉴权的界面暴露出去。
 	//
-	// config.json 的 host 只能**收窄**绑定范围，不能放宽：把 host 写成
-	// 0.0.0.0 而 listen/lan 为关时，仍然只绑回环。理由（第一性原则）：
-	// 「哪些接口可达」与「远端是否要鉴权」是同一条安全决策的两面，必须由
-	// 同一个开关统一裁决。若允许配置文件单方面把监听放大到全网卡，就会出现
-	// 「绑了 0.0.0.0 但令牌闸门因档位关闭而未启用」这种自相矛盾的状态 ——
-	// 此时 LAN 请求实际被 auth.go 的 fail-closed 规则拒掉（401），
-	// 但启动日志会打印「局域网访问地址」，把人引向一个连不上的地址。
-	// 故这里以 listen/lan 为唯一权威，host 仅在档位开启时生效。
+	// 「哪些接口可达」与「远端是否要鉴权」是同一条安全决策的两面，由
+	// listen/lan 这一个开关统一裁决 —— config.json 因此刻意不含监听地址
+	//（见 pkg/config 的说明），配置文件无法单方面把监听放大到全网卡。
 	host, token := config.DefaultHost, ""
 	if app.lan.Enabled() {
 		tok, err := app.lan.Token()
@@ -125,9 +120,6 @@ func main() {
 		} else {
 			host, token = "0.0.0.0", tok
 		}
-	} else if !config.IsLoopbackHost(launchCfg.Host) {
-		app.log.Warn("config.json 的 host 被忽略：局域网访问未启用",
-			"host", launchCfg.Host, "using", config.DefaultHost, "hint", "先在界面里开启「局域网访问」")
 	}
 
 	// 端口从配置的起始端口起顺延，直到找到一个可绑端口。
