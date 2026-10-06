@@ -54,30 +54,8 @@ $md5File = Join-Path $relRoot "$ver-MD5.txt"
 
 function Step([string]$msg) { Write-Host "[build] $msg" -ForegroundColor Cyan }
 
-# Remove-Tree 高效递归删除：.NET Directory.Delete 走 Win32，比 Remove-Item
-# -Recurse 快 1~2 个数量级（后者在深层小文件树上反复重枚举）。删不掉时重试
-# 而非回退 Remove-Item —— 某些环境把 Remove-Item 接到回收站，遇占用文件会
-# 弹模态框无限等待。失败要响、不要等。
-function Remove-Tree([string]$path) {
-    if (-not (Test-Path -LiteralPath $path)) { return }
-    $item = Get-Item -LiteralPath $path -Force
-    if ($item.PSIsContainer) {
-        Get-ChildItem -LiteralPath $item.FullName -Recurse -Force -ErrorAction SilentlyContinue |
-            ForEach-Object { try { $_.Attributes = [System.IO.FileAttributes]::Normal } catch { } }
-    } else {
-        try { [System.IO.File]::SetAttributes($item.FullName, [System.IO.FileAttributes]::Normal) } catch { }
-    }
-    $lastErr = $null
-    for ($i = 0; $i -lt 3; $i++) {
-        try {
-            if ($item.PSIsContainer) { [System.IO.Directory]::Delete($item.FullName, $true) }
-            else { [System.IO.File]::Delete($item.FullName) }
-        } catch { $lastErr = $_ }
-        if (-not (Test-Path -LiteralPath $path)) { return }
-        Start-Sleep -Milliseconds 400
-    }
-    throw "旧产物无法删除（多半被其他进程占用）：$path - $($lastErr.Exception.Message)"
-}
+# 共享辅助函数（Remove-Tree 等）：单一实现，见 scripts\lib\CloudPrism.ps1。
+. (Join-Path $PSScriptRoot "lib\CloudPrism.ps1")
 
 # Fail：报错 + 清掉本次的半成品输出目录（不碰历史产物）+ 非 0 退出。
 function Fail([string]$msg) {

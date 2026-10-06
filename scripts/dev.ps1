@@ -16,23 +16,14 @@ $TAG_DEV = '[dev]'
 $TAG_BE  = '[backend]'
 $TAG_FE  = '[frontend]'
 
+# 共享辅助函数（Remove-Tree / Stop-RepoProcess / Stop-RepoPortListeners）：
+# 单一实现，见 scripts\lib\CloudPrism.ps1。
+. (Join-Path $PSScriptRoot "lib\CloudPrism.ps1")
+
 # Stop-DevPortListeners: free the dev ports, but ONLY kill processes whose command
 # line references this repo - never touch an unrelated app that happens to share a port.
 function Stop-DevPortListeners {
-    foreach ($port in @($BACKEND_PORT, $FRONTEND_PORT)) {
-        try {
-            $procIds = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop |
-                Select-Object -ExpandProperty OwningProcess -Unique
-        } catch { continue }
-        foreach ($procId in $procIds) {
-            $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue).CommandLine
-            if ($cmdLine -and $cmdLine.Contains($ROOT)) {
-                Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-            } else {
-                Write-Host "$TAG_DEV warn: port $port held by unrelated process (pid $procId), left running." -ForegroundColor DarkYellow
-            }
-        }
-    }
+    [void](Stop-RepoPortListeners -ports @($BACKEND_PORT, $FRONTEND_PORT) -repoRoot $ROOT)
 }
 
 # ---- [1/4] 结束旧后端 ----

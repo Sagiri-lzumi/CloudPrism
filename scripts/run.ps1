@@ -1,4 +1,4 @@
-# run.ps1 - Build and run CloudPrism the way an end user would: one process,
+﻿# run.ps1 - Build and run CloudPrism the way an end user would: one process,
 # one port, the UI embedded in the binary, browser opens automatically.
 #
 # Usage (run from anywhere - paths come from $PSScriptRoot):
@@ -50,30 +50,17 @@ function Fail([string]$msg) {
 }
 function Step([string]$msg) { Write-Host "[run] $msg" -ForegroundColor Cyan }
 
+# Shared helpers (Stop-RepoProcess): one implementation, see scripts\lib\CloudPrism.ps1.
+. (Join-Path $PSScriptRoot "lib\CloudPrism.ps1")
+
+$procName = [System.IO.Path]::GetFileNameWithoutExtension($exeName)
+
 # --- Stop mode: kill a previously started run and exit. ---
 # Removes the need to hunt for the process by hand when a run is left behind
 # (the app lives in the tray, so closing the browser tab does NOT stop it).
 if ($Stop) {
-    $procs = @(Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($exeName)) -ErrorAction SilentlyContinue)
-    if ($procs.Count -eq 0) {
-        Write-Host "[run] nothing to stop." -ForegroundColor DarkGray
-        exit 0
-    }
-    # Only kill processes launched from THIS repo: another installation may
-    # legitimately be running from a different folder.
-    $killed = 0
-    foreach ($p in $procs) {
-        $path = $null
-        try { $path = $p.Path } catch { }
-        if ($path -and $path.StartsWith($repo, [System.StringComparison]::OrdinalIgnoreCase)) {
-            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-            Write-Host "[run] stopped pid $($p.Id)" -ForegroundColor DarkGray
-            $killed++
-        } else {
-            Write-Host "[run] leaving pid $($p.Id) alone (not started from this repo)" -ForegroundColor DarkYellow
-        }
-    }
-    if ($killed -eq 0) { Write-Host "[run] nothing from this repo was running." -ForegroundColor DarkGray }
+    $killed = Stop-RepoProcess -processName $procName -repoRoot $repo
+    if ($killed -eq 0) { Write-Host "[run] nothing to stop." -ForegroundColor DarkGray }
     exit 0
 }
 
@@ -124,16 +111,8 @@ if (-not (Test-Path $exe)) { Fail "build output not found: $exe" }
 # The app holds a single-instance lock on its data directory. A leftover tray
 # process would make this launch exit immediately (correctly, but confusingly),
 # so clear it first and say so.
-$stale = @(Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($exeName)) -ErrorAction SilentlyContinue)
-foreach ($p in $stale) {
-    $path = $null
-    try { $path = $p.Path } catch { }
-    if ($path -and $path.StartsWith($repo, [System.StringComparison]::OrdinalIgnoreCase)) {
-        Write-Host "[run] stopping previous instance (pid $($p.Id))" -ForegroundColor DarkYellow
-        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-    }
-}
-if ($stale.Count -gt 0) { Start-Sleep -Milliseconds 700 }
+$stale = Stop-RepoProcess -processName $procName -repoRoot $repo
+if ($stale -gt 0) { Start-Sleep -Milliseconds 700 }
 
 # --- 5. Launch ---
 # Do not set CP_NO_BROWSER here: opening the browser is the point, and the app
@@ -165,15 +144,8 @@ try {
     $proc = Start-Process -FilePath $exe -PassThru -Wait
     $code = $proc.ExitCode
 } finally {
-    # Ctrl+C lands here while the app is still up. Exit is not enough on its
-    # own: the app can also be left running intentionally (tray), so only sweep
-    # processes started from THIS repo, and only if one is still alive.
-    foreach ($p in @(Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($exeName)) -ErrorAction SilentlyContinue)) {
-        $path = $null
-        try { $path = $p.Path } catch { }
-        if ($path -and $path.StartsWith($repo, [System.StringComparison]::OrdinalIgnoreCase)) {
-            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-        }
-    }
+    # Ctrl+C lands here while the app is still up. Only sweep processes
+    # started from THIS repo (Stop-RepoProcess filters by path prefix).
+    [void](Stop-RepoProcess -processName $procName -repoRoot $repo)
 }
 Write-Host "[run] exited." -ForegroundColor DarkGray

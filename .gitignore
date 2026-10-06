@@ -15,8 +15,11 @@ dist-onefile/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# 锚定到仓库根：这些条目来自 Python 打包模板；无锚定的目录名规则会连带
+# 忽略任意深度的同名目录（lib/ 曾吞掉 scripts/lib/，导致 git add 静默跳过、
+# 提交缺文件）。本仓库的 Python 构建产物只会出现在根目录。
+/lib/
+/lib64/
 parts/
 sdist/
 var/
