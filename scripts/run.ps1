@@ -15,8 +15,11 @@
 #   run.ps1   - this one. Compile and launch in place so you can look at the
 #               result. No Vite, no package assembly, one server on one port.
 #
-# Data goes to <repo>\.devdata (gitignored) so a run never touches the data of
-# a package in releases\ or a real installation.
+# Data goes to WindowsGo\.devdata (gitignored), the same directory dev.ps1 uses,
+# so dev.ps1 and run.ps1 share one data home: settings and recent vaults carry
+# over between them. It never touches the data of a package in releases\ or a
+# real installation. (Not WindowsGo\build\bin\data: the exe lives in build\bin,
+# and the default data dir would follow the exe path.)
 param(
     [switch]$NoBrowser,
     [switch]$RebuildFrontend,
@@ -37,8 +40,9 @@ $env:GOCACHE     = Join-Path $repo ".gocache"
 $env:GOMODCACHE  = Join-Path $repo ".gomodcache"
 $env:CGO_ENABLED = "0"
 
-# Dev data dir: a run must not read or write the data/ of a packaged build.
-$env:CLOUDPRISM_DATA_DIR = Join-Path $repo ".devdata"
+# Dev data dir, shared with dev.ps1: a run must not read or write the data/
+# of a packaged build, and must not drift with the exe location.
+$env:CLOUDPRISM_DATA_DIR = Join-Path $goDir ".devdata"
 
 function Fail([string]$msg) {
     Write-Host "[run] FAILED: $msg" -ForegroundColor Red

@@ -98,7 +98,8 @@ go build -ldflags "-s -w -H windowsgui" -o build\bin\CloudPrismGo.exe .
 ## 运行
 
 改完想直接看效果，用 `scripts/run.ps1`：编译后就地启动，前端已内嵌进 exe，
-单进程单端口，自动打开浏览器。跑在 `.devdata/` 数据目录，不碰任何已装的包。
+单进程单端口，自动打开浏览器。跑在 `WindowsGo/.devdata/` 数据目录（与 dev.ps1
+共用，设置与最近密库互通），不碰任何已装的包。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\run.ps1
