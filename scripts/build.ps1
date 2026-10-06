@@ -22,7 +22,14 @@
 #   fresh clone 没有它，此时本开关会失败 —— 先不带开关跑一次。
 #
 # 任一一步失败立即退出并给出非 0 码，且清掉本次的半成品目录。
+#
+# -Tag 会直接进产物目录名（releases\<日期>-<Tag>-Go-*），故按版本号规则做
+# 白名单校验：只允许 v<数字>.<数字>（如 v1.0 / v1.01）。其它写法一律拒绝，
+# 否则 "..\..\x" 这类值会让产物逃逸出 releases\。
+[CmdletBinding()]
 param(
+    [Parameter()]
+    [ValidatePattern('^v\d+\.\d+$')]
     [string]$Tag = "v1.0",
     [switch]$Clean,
     [switch]$SkipNpmCi,

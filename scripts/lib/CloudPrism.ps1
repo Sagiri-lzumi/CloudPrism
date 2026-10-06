@@ -45,14 +45,19 @@ function Remove-Tree([string]$path) {
 # Stop-RepoProcess 结束名为 $processName 且可执行路径在 $repoRoot 之下的
 # 进程。返回实际结束的进程数。
 #
-# 必须按路径前缀过滤，不能只按 exe 名：同名程序可能来自另一份安装
+# 必须按路径过滤，不能只按 exe 名：同名程序可能来自另一份安装
 #（例如用户同时装了发布版和源码仓库版），误杀后果自负不起。
+#
+# 前缀比较必须带分隔符：裸前缀 "C:\code\CloudPrism" 也会匹配
+# "C:\code\CloudPrismFork\"（兄弟目录撞前缀），那会杀错进程。
+# 故统一成「根 + \」再比较。
 function Stop-RepoProcess([string]$processName, [string]$repoRoot) {
+    $prefix = $repoRoot.TrimEnd('\') + '\'
     $killed = 0
     foreach ($p in @(Get-Process -Name $processName -ErrorAction SilentlyContinue)) {
         $path = $null
         try { $path = $p.Path } catch { }
-        if ($path -and $path.StartsWith($repoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        if ($path -and $path.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
             Write-Host "  stopped $processName (pid $($p.Id))" -ForegroundColor DarkGray
             $killed++
@@ -69,6 +74,7 @@ function Stop-RepoProcess([string]$processName, [string]$repoRoot) {
 # 端口过滤用命令行而不是可执行路径：node.exe / vite 这类进程的可执行路径
 # 是 Node 安装目录，不含仓库路径，只有命令行里带脚本路径。
 function Stop-RepoPortListeners([int[]]$ports, [string]$repoRoot) {
+    $prefix = $repoRoot.TrimEnd('\') + '\'
     $killed = 0
     foreach ($port in $ports) {
         try {
@@ -77,7 +83,7 @@ function Stop-RepoPortListeners([int[]]$ports, [string]$repoRoot) {
         } catch { continue }
         foreach ($procId in $procIds) {
             $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue).CommandLine
-            if ($cmdLine -and $cmdLine.Contains($repoRoot)) {
+            if ($cmdLine -and $cmdLine.Contains($prefix)) {
                 Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
                 Write-Host "  freed port $port (pid $procId)" -ForegroundColor DarkGray
                 $killed++
