@@ -5,6 +5,7 @@ package win
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"path/filepath"
 	"strings"
 
@@ -49,18 +50,15 @@ func AcquireInstanceLock(key string) (bool, error) {
 		return false, err
 	}
 	h, err := windows.CreateMutex(nil, false, namePtr)
-	if err != nil {
-		// ERROR_ALREADY_EXISTS 也可能是普通错误码；CreateMutex 成功时
-		// 用 GetLastError 判定是否「已存在」，见下方处理。
-		if err == windows.ERROR_ALREADY_EXISTS {
-			return false, nil
-		}
-		return false, err
-	}
-	// CreateMutex 在「名字已存在」时仍返回有效句柄，须看 LastError。
-	if lastErr := windows.GetLastError(); lastErr == windows.ERROR_ALREADY_EXISTS {
+	if errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+		// 「已存在」时 CreateMutex 仍返回**有效**句柄（x/sys 的包装把
+		// ERROR_ALREADY_EXISTS 折进 err，见 zsyscall_windows.go），不关就是泄漏。
+		// 关掉我们只影响本进程的引用，持有方（主实例）的句柄不受影响。
 		_ = windows.CloseHandle(h)
 		return false, nil
+	}
+	if err != nil {
+		return false, err
 	}
 	instanceMutex = h
 	return true, nil
