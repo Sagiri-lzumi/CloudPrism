@@ -150,14 +150,15 @@ powershell -ExecutionPolicy Bypass -File scripts\run.ps1
 CloudPrism/
 ├── WindowsGo/            # Windows 客户端（纯 Go 单 exe）
 │   ├── frontend/         # Vue 3 + Vite + TypeScript 界面
-│   ├── build/            # 打包脚本
+│   ├── build/            # 图标等打包资源（打包脚本在仓库根 scripts/）
 │   ├── internal/         # 后端业务逻辑
 │   ├── pkg/              # 可复用包（协议、流式传输等）
 │   └── docs/            # 工程文档
 ├── scripts/              # 构建与运行脚本
 │   ├── run.ps1           # 直接跑起来看效果（内嵌前端、单进程、自动开浏览器）
 │   ├── build.ps1         # 一键构建（前端 + Go + 组装便携目录 → releases/）
-│   └── dev.ps1           # 开发态：后端 + Vite 热更（改前端代码时用）
+│   ├── dev.ps1           # 开发态：后端 + Vite 热更（改前端代码时用）
+│   └── lib/              # 三脚本共享的辅助函数（清理/进程管理，单一实现）
 ├── Pic/                  # README 资源图
 ├── releases/             # build.ps1 产物（打包生成，双形态 + MD5 指纹）
 ├── LICENSE

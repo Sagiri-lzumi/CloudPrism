@@ -23,7 +23,10 @@ $TAG_FE  = '[frontend]'
 # Stop-DevPortListeners: free the dev ports, but ONLY kill processes whose command
 # line references this repo - never touch an unrelated app that happens to share a port.
 function Stop-DevPortListeners {
-    [void](Stop-RepoPortListeners -ports @($BACKEND_PORT, $FRONTEND_PORT) -repoRoot $ROOT)
+    # 后端可能顺延（BACKEND_ACTUAL_PORT 在探测后才有值），清扫要带上实际端口
+    $ports = @($BACKEND_PORT, $FRONTEND_PORT)
+    if (Get-Variable BACKEND_ACTUAL_PORT -ErrorAction SilentlyContinue) { $ports += $BACKEND_ACTUAL_PORT }
+    [void](Stop-RepoPortListeners -ports $ports -repoRoot $ROOT)
 }
 
 # ---- [1/4] 结束旧后端 ----
@@ -125,6 +128,11 @@ function Find-BackendPort {
 $BACKEND_ACTUAL_PORT = Find-BackendPort
 if ($BACKEND_ACTUAL_PORT -eq 0) {
     Write-Host "$TAG_DEV backend did not come up on any candidate port; see $beErr" -ForegroundColor Red
+    if ($preExisting.Count -gt 0) {
+        # 快照里标记过的端口被跳过：若那个实例恰好在窗口期内退出、我们的后端
+        # 顺延到了它的端口上，就会误报「没起来」。重跑一次即可（快照会重取）。
+        Write-Host "$TAG_DEV note: ports $(($preExisting.Keys | Sort-Object) -join ',') answered ping before backend start and were skipped; if one was vacated in between, just re-run" -ForegroundColor DarkYellow
+    }
     cmd /c "taskkill /F /IM $BACKEND_EXE >nul 2>&1"
     exit 1
 }
