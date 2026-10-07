@@ -134,6 +134,14 @@ if (Test-Path $cfgPath) {
     } catch { }
 }
 
+# Port ownership pre-flight, same model as dev.ps1 (see lib Resolve-PortOwner):
+# if the intended port is held by a process that is NOT from this repo, fail
+# loudly instead of silently falling forward to a port the user never expected.
+$owner = Resolve-PortOwner -port $shownPort -repoRoot $repo
+if ($owner.State -eq "Foreign") {
+    Fail "port $shownPort is held by $($owner.Name) (pid $($owner.ProcessId)), not a CloudPrism process from this repo. Free the port yourself, or change port in .devdataconfig.json"
+}
+
 Step "starting (http://127.0.0.1:$shownPort, Ctrl+C to stop)"
 Write-Host "[run] data dir : $env:CLOUDPRISM_DATA_DIR" -ForegroundColor DarkGray
 Write-Host "[run] note     : the app lives in the tray; Ctrl+C or -Stop ends it" -ForegroundColor DarkGray

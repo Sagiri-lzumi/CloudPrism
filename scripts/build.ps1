@@ -144,7 +144,7 @@ if (-not (Test-Path $exe)) { Fail "未找到构建产物 $exe" }
 # 防「前端已重建、包里却是旧 exe」的错配（历史事故）：扫 exe 字节验证 dist
 # index.html 引用的 css/js 文件名都在 exe 里，不一致立即失败。
 $html = Get-Content (Join-Path $feDir "dist\index.html") -Raw
-$assetHashes = [regex]::Matches($html, "assets/(index-[\w-]+\.(?:css|js))") | ForEach-Object { $_.Groups[1].Value }
+$assetHashes = [regex]::Matches($html, "assets/(index-[A-Za-z0-9-]+\.(?:css|js))") | ForEach-Object { $_.Groups[1].Value }
 if (-not $assetHashes) { Fail "dist/index.html 未解析到产物文件名，S1 自检无法执行" }
 $exeText = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($exe))
 foreach ($h in $assetHashes) {

@@ -68,6 +68,41 @@ function Stop-RepoProcess([string]$processName, [string]$repoRoot) {
     return $killed
 }
 
+# Resolve-PortOwner 判定一个端口的归属：Free / Ours / Foreign。
+#
+# 「是不是本项目的」不能用「端口是否在应答 ping」判断——任何 CloudPrism 实例
+# 都会应答 ping，分不清是不是本仓库跑起来的。权威依据是进程本身：
+#   - 可执行路径落在仓库根之下（CloudPrismGo.exe / CloudPrismRun.exe 这类）；
+#   - 或命令行引用了仓库根（node/vite/powershell 跑本仓库脚本，可执行路径在
+#     Node/PS 安装目录，只有命令行带仓库路径）。
+# 两者都按「根 + 分隔符」前缀比较，避免兄弟目录撞前缀（CloudPrismFork）。
+#
+# 返回 [pscustomobject]@{ State; ProcessId; Name; Path }。
+# 无法枚举（权限/沙箱）时返回 State=Free —— 让后端照常启动，它要么绑上、
+# 要么顺延并把实际端口写进日志，调用方从日志拿真实端口，不会更糟。
+function Resolve-PortOwner([int]$port, [string]$repoRoot) {
+    $prefix = $repoRoot.TrimEnd('\') + '\'
+    try {
+        $procIds = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop |
+            Select-Object -ExpandProperty OwningProcess -Unique
+    } catch {
+        return [pscustomobject]@{ State = "Free"; ProcessId = 0; Name = ""; Path = "" }
+    }
+    if (-not $procIds) { return [pscustomobject]@{ State = "Free"; ProcessId = 0; Name = ""; Path = "" } }
+    foreach ($procId in $procIds) {
+        $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+        if (-not $proc) { continue }
+        $exePath = $null
+        try { $exePath = $proc.Path } catch { }
+        $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue).CommandLine
+        $ours = ($exePath -and $exePath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) -or
+                ($cmdLine -and $cmdLine.Contains($prefix))
+        $state = if ($ours) { "Ours" } else { "Foreign" }
+        return [pscustomobject]@{ State = $state; ProcessId = $procId; Name = $proc.ProcessName; Path = $exePath }
+    }
+    return [pscustomobject]@{ State = "Free"; ProcessId = 0; Name = ""; Path = "" }
+}
+
 # Stop-RepoPortListeners 释放一组端口：结束监听这些端口、且命令行引用了
 # $repoRoot 的进程。返回实际结束的进程数。
 #

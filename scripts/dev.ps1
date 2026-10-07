@@ -65,9 +65,30 @@ if (-not (Test-Path $beLog)) { New-Item -ItemType File $beLog | Out-Null }
 $beLogLen = (Get-Item $beLog).Length   # 只尾随新日志，不刷历史
 
 # ---- [3/4] 启动后端 ----
-# 端口可配（data/config.json）且被占用时顺延，BACKEND_PORT 只是期望起点，
-# 实际端口必须探测：写死 7840 会在顺延后把 vite 代理打到错误的实例上
-#（比如 run.ps1 跑着的那个）。
+# 端口预检（先判归属，再定动作）：目标端口被占用时——
+#   是本仓库跑起来的（按进程路径/命令行判定，见 lib 的 Resolve-PortOwner）
+#     → 停掉它，再起新的；
+#   不是本项目的 → 报错退出，绝不静默顺延到一个你没预期的端口。
+$intendedPort = $BACKEND_PORT
+$devCfg = Join-Path $env:CLOUDPRISM_DATA_DIR 'config.json'
+if (Test-Path $devCfg) {
+    try {
+        $c = Get-Content $devCfg -Raw | ConvertFrom-Json
+        if ($c.port -and $c.port -ge 1 -and $c.port -le 65535) { $intendedPort = [int]$c.port }
+    } catch { }
+}
+$owner = Resolve-PortOwner -port $intendedPort -repoRoot $ROOT
+if ($owner.State -eq "Foreign") {
+    Write-Host "$TAG_DEV port $intendedPort is held by $($owner.Name) (pid $($owner.ProcessId)), not a CloudPrism process from this repo." -ForegroundColor Red
+    Write-Host "$TAG_DEV free the port yourself, or change port in .devdataconfig.json" -ForegroundColor Red
+    exit 1
+}
+if ($owner.State -eq "Ours") {
+    Write-Host "$TAG_DEV port $intendedPort held by our leftover $($owner.Name) (pid $($owner.ProcessId)); stopping it" -ForegroundColor DarkYellow
+    Stop-Process -Id $owner.ProcessId -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+}
+
 Write-Host "$TAG_DEV [3/4] starting backend (config port, falls forward from $BACKEND_PORT)..." -ForegroundColor Cyan
 $env:CP_NO_BROWSER = '1'
 $env:CP_DEV_ORIGIN = "http://127.0.0.1:$FRONTEND_PORT"
@@ -80,59 +101,38 @@ $bePsi.UseShellExecute = $false
 $bePsi.CreateNoWindow = $true
 $beProc = [System.Diagnostics.Process]::Start($bePsi)
 
-# 探测后端实际端口：候选 = config.json 的 port..port+range-1 与默认段
-# 7840..7849 的并集。用 POST /api/app/ping 辨认本程序（/api/* 只收 POST），
-# 而不是裸 TCP——只占坑的不是本程序的端口不能算数。
-function Get-BackendCandidates {
-    $candidates = @($BACKEND_PORT..($BACKEND_PORT + 9))
-    $cfgPath = Join-Path $env:CLOUDPRISM_DATA_DIR 'config.json'
-    if (Test-Path $cfgPath) {
-        try {
-            $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
-            if ($cfg.port -and $cfg.port -ge 1 -and $cfg.port -le 65535) {
-                $range = if ($cfg.port_range -and $cfg.port_range -ge 1) { [int]$cfg.port_range } else { 10 }
-                $candidates += ([int]$cfg.port)..([int]$cfg.port + $range - 1)
-            }
-        } catch { }
-    }
-    return ($candidates | Select-Object -Unique)
-}
-function Test-BackendPing([int]$port) {
+# 后端实际端口不猜、不扫：web.Server.Listen 成功后会往自己的日志写
+# 「Web 服务启动 addr=127.0.0.1:<port>」。读本进程自己的日志是权威来源——
+# 端口扫描分不清「本次启动的这个」和「别的 CloudPrism 实例」（曾把 vite
+# 代理到别的实例；后来加的快照又会在旧实例死得慢时误报没起来），而日志
+# 只会写本进程实际绑定的端口。
+#
+# 只读 $beLogLen 之后的内容：cloudprism.log 是追加写的、带历史，且中文行是
+# 多字节，必须按字节偏移读（dev.ps1 在后端启动前已记录其长度）。
+$BACKEND_ACTUAL_PORT = 0
+$deadline = (Get-Date).AddSeconds(15)
+while ((Get-Date) -lt $deadline) {
     try {
-        $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$port/api/app/ping" -Method Post `
-            -Body '{"Token":"probe"}' -UseBasicParsing -TimeoutSec 1
-        return ($resp.Content -match 'pong:probe')
-    } catch { return $false }
+        $fs = [System.IO.File]::Open($beLog, 'Open', 'Read', 'ReadWrite')
+        try {
+            if ($fs.Length -gt $beLogLen) {
+                $fs.Position = $beLogLen
+                $buf = New-Object byte[] ($fs.Length - $beLogLen)
+                [void]$fs.Read($buf, 0, $buf.Length)
+                $tail = [System.Text.Encoding]::UTF8.GetString($buf)
+                $m = [regex]::Matches($tail, 'addr=127\.0\.0\.1:([0-9]+)')
+                if ($m.Count -gt 0) { $BACKEND_ACTUAL_PORT = [int]$m[$m.Count - 1].Groups[1].Value }
+            }
+        } finally { $fs.Dispose() }
+    } catch { }
+    if ($BACKEND_ACTUAL_PORT -gt 0) { break }
+    Start-Sleep -Milliseconds 400
 }
-# ping 只能证明「那是个 CloudPrism」，不能证明是**本次启动的这个**——另一份
-# checkout 或发布版实例也会应答。所以先快照「启动前就在应答」的端口集合，
-# 之后只接受**新增**的应答端口，杜绝把 vite 代理到别人的后端。
-$preExisting = @{}
-foreach ($p in (Get-BackendCandidates)) {
-    if (Test-BackendPing $p) {
-        $preExisting[$p] = $true
-        Write-Host "$TAG_DEV warn: port $p already answers ping before backend start (another instance?), will not treat it as ours" -ForegroundColor DarkYellow
-    }
-}
-function Find-BackendPort {
-    $deadline = (Get-Date).AddSeconds(15)
-    while ((Get-Date) -lt $deadline) {
-        foreach ($p in (Get-BackendCandidates)) {
-            if ($preExisting.ContainsKey($p)) { continue }
-            if (Test-BackendPing $p) { return $p }
-        }
-        Start-Sleep -Milliseconds 400
-    }
-    return 0
-}
-$BACKEND_ACTUAL_PORT = Find-BackendPort
 if ($BACKEND_ACTUAL_PORT -eq 0) {
-    Write-Host "$TAG_DEV backend did not come up on any candidate port; see $beErr" -ForegroundColor Red
-    if ($preExisting.Count -gt 0) {
-        # 快照里标记过的端口被跳过：若那个实例恰好在窗口期内退出、我们的后端
-        # 顺延到了它的端口上，就会误报「没起来」。重跑一次即可（快照会重取）。
-        Write-Host "$TAG_DEV note: ports $(($preExisting.Keys | Sort-Object) -join ',') answered ping before backend start and were skipped; if one was vacated in between, just re-run" -ForegroundColor DarkYellow
-    }
+    # 预检已清掉同数据目录的旧实例，走到这里仍没写日志，多半是实例锁还没随
+    # 旧进程咽气而释放（内核回收有几毫秒到几百毫秒延迟），重跑一次即可。
+    Write-Host "$TAG_DEV backend did not report its port within 15s; see $beErr" -ForegroundColor Red
+    Write-Host "$TAG_DEV if a previous run was just stopped, re-run once (the single-instance lock may still be releasing)." -ForegroundColor DarkYellow
     cmd /c "taskkill /F /IM $BACKEND_EXE >nul 2>&1"
     exit 1
 }
