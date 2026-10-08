@@ -2,6 +2,10 @@
 #   [backend]  green  - Go HTTP server (stdout/stderr + .devdata/logs/cloudprism.log)
 #   [frontend] yellow - Vite dev server (HMR)
 # Backend changes: rerun this script. Frontend changes: Vite HMR. Ctrl+C stops all.
+#
+# 首次运行（或 dist 被清掉后）：脚本会先跑一次前端构建生成 frontend\dist。
+# dist 是纯构建产物、不入库，而 //go:embed all:frontend/dist 要求目录存在，
+# 缺了它 go build 直接失败——见下面 [2/5] 的说明。
 $ErrorActionPreference = 'Stop'
 
 $ROOT          = Split-Path $PSScriptRoot -Parent
@@ -29,14 +33,40 @@ function Stop-DevPortListeners {
     [void](Stop-RepoPortListeners -ports $ports -repoRoot $ROOT)
 }
 
-# ---- [1/4] 结束旧后端 ----
-Write-Host "$TAG_DEV [1/4] stopping old backend..." -ForegroundColor Cyan
+# ---- [1/5] 结束旧后端 ----
+Write-Host "$TAG_DEV [1/5] stopping old backend..." -ForegroundColor Cyan
 cmd /c "taskkill /F /IM $BACKEND_EXE >nul 2>&1"
 # also free the dev ports: a crashed previous run may leave vite/node holding them
 Stop-DevPortListeners
 
-# ---- [2/4] 编译后端 ----
-Write-Host "$TAG_DEV [2/4] building backend..." -ForegroundColor Cyan
+# ---- [2/5] 前端依赖 + 内嵌产物 dist ----
+# main.go 用 //go:embed all:frontend/dist 吃这份产物，而 dist 是纯构建产物、
+# **不入库**（见根 .gitignore 的说明）。fresh clone / 清过 dist 之后它不存在，
+# go build 会直接报 "pattern all:frontend/dist: no matching files"，与前端代码
+# 无关，只是编译前提没备好。
+#
+# 这里刻意跑真实的 npm run build，而不是塞一个占位 index.html：占位会被 embed
+# 进 exe（开发态虽由 Vite 提供界面，但 7840 端口仍会 serve 出这个假页面），并且
+# 会让 build.ps1 的 S1 自检（拿 dist/index.html 里的产物名核对 exe）失去意义。
+#
+# 依赖安装也一并放在这里（原在启动 Vite 之前）：dist 构建与 Vite dev 共用同一份
+# node_modules，装一次即可；且此时后端尚未启动，失败直接退出无需清理进程。
+Push-Location $FRONTEND_DIR
+try {
+    if (-not (Test-Path 'node_modules')) {
+        Write-Host "$TAG_DEV [2/5] first run: npm install..." -ForegroundColor Cyan
+        npm install
+        if ($LASTEXITCODE -ne 0) { Write-Host "$TAG_DEV npm install failed." -ForegroundColor Red; exit 1 }
+    }
+    if (-not (Test-Path 'dist\index.html')) {
+        Write-Host "$TAG_DEV [2/5] frontend dist missing (build artifact, not in git): npm run build..." -ForegroundColor Cyan
+        npm run build
+        if ($LASTEXITCODE -ne 0) { Write-Host "$TAG_DEV npm run build failed." -ForegroundColor Red; exit 1 }
+    }
+} finally { Pop-Location }
+
+# ---- [3/5] 编译后端 ----
+Write-Host "$TAG_DEV [3/5] building backend..." -ForegroundColor Cyan
 Push-Location $BACKEND_DIR
 try {
     New-Item -ItemType Directory -Force 'build\bin' | Out-Null
@@ -89,7 +119,7 @@ if ($owner.State -eq "Ours") {
     Start-Sleep -Milliseconds 500
 }
 
-Write-Host "$TAG_DEV [3/4] starting backend (config port, falls forward from $BACKEND_PORT)..." -ForegroundColor Cyan
+Write-Host "$TAG_DEV [4/5] starting backend (config port, falls forward from $BACKEND_PORT)..." -ForegroundColor Cyan
 $env:CP_NO_BROWSER = '1'
 $env:CP_DEV_ORIGIN = "http://127.0.0.1:$FRONTEND_PORT"
 $beCmd = "`"$BACKEND_DIR\build\bin\$BACKEND_EXE`" > `"$beOut`" 2> `"$beErr`""
@@ -141,20 +171,9 @@ Write-Host "$TAG_DEV backend listening on 127.0.0.1:$BACKEND_ACTUAL_PORT" -Foreg
 # ProcessStartInfo(UseShellExecute=false) 默认继承本进程环境。
 $env:CP_BACKEND_ORIGIN = "http://127.0.0.1:$BACKEND_ACTUAL_PORT"
 
-# ---- [4/4] 前端依赖 + 启动 Vite ----
-Push-Location $FRONTEND_DIR
-try {
-    if (-not (Test-Path 'node_modules')) {
-        Write-Host "$TAG_DEV [4/4] first run: npm install..." -ForegroundColor Cyan
-        npm install
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "$TAG_DEV npm install failed." -ForegroundColor Red
-            cmd /c "taskkill /F /IM $BACKEND_EXE >nul 2>&1"   # don't orphan the running backend
-            exit 1
-        }
-    }
-} finally { Pop-Location }
-Write-Host "$TAG_DEV [4/4] starting frontend (http://127.0.0.1:$FRONTEND_PORT)..." -ForegroundColor Cyan
+# ---- [5/5] 启动 Vite ----
+# 依赖与 dist 已在 [2/5] 备好，这里只负责拉起 dev server。
+Write-Host "$TAG_DEV [5/5] starting frontend (http://127.0.0.1:$FRONTEND_PORT)..." -ForegroundColor Cyan
 $feCmd = "npm run dev -- --host 127.0.0.1 --port $FRONTEND_PORT --strictPort > `"$feOut`" 2> `"$feErr`""
 $fePsi = New-Object System.Diagnostics.ProcessStartInfo
 $fePsi.FileName = 'cmd.exe'
