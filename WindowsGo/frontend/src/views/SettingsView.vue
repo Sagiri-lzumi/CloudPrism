@@ -413,14 +413,39 @@ const bStatusText = computed(() =>
     : '未授权：填写下方应用凭证并完成授权后，方可使用百度网盘后端',
 )
 
-/* 凭证获取教程（浓缩自 WindowsPy assets/baidu_guide.md 关键步骤） */
-const GUIDE_LINES = [
-  '1. 百度账号需通过实名认证（个人开发者即可，开放平台入口：pan.baidu.com/union/console/home）。',
-  '2. 登录后创建「个人开发者」应用；应用若处于审核中，接口调用会失败。',
-  '3. 应用详情页可找到四项凭证：Appid（应用标识）、AppKey（即 client_id）、SecretKey（即 client_secret，严格保密）、SignKey（签名校验，可留空）。',
-  '4. 无需配置回调地址：CloudPrism 使用 oob 模式，授权页会直接展示 code。',
-  '5. 把四项凭证填入上方表单，点「打开授权页」用百度账号授权；将页面展示的 code 粘贴到「授权码」后点「完成授权」。',
-  '6. 凭证仅加密保存在本机 %APPDATA%\\CloudPrism\\baidu.json，不会上传；access_token 约 30 天过期，届时重新授权即可。',
+/** 教程里的可点击链接（展示文本与目标地址分开：省去 https:// 前缀以免撑爆行宽）。 */
+interface GuideLink {
+  label: string
+  url: string
+}
+
+/** 教程条目：纯文本，或「前缀 + 链接 + 后缀」的三段式。 */
+interface GuideLine {
+  text: string
+  link?: GuideLink
+  tail?: string
+}
+
+/* 凭证获取教程（浓缩自 WindowsPy assets/baidu_guide.md 关键步骤）。
+   开放平台入口必须是可点的超链接：用户拿不到那个地址就配不出凭证，而纯文本
+   既不能点、也没法整段复制到地址栏（前后裹着中文，选中容易夹带）。 */
+const GUIDE_LINES: GuideLine[] = [
+  {
+    text: '1. 百度账号需通过实名认证（个人开发者即可，开放平台入口：',
+    link: { label: 'pan.baidu.com/union/console/home', url: 'https://pan.baidu.com/union/console/home' },
+    tail: '）。',
+  },
+  { text: '2. 登录后创建「个人开发者」应用；应用若处于审核中，接口调用会失败。' },
+  {
+    text: '3. 应用详情页可找到四项凭证：Appid（应用标识）、AppKey（即 client_id）、SecretKey（即 client_secret，严格保密）、SignKey（签名校验，可留空）。',
+  },
+  { text: '4. 无需配置回调地址：CloudPrism 使用 oob 模式，授权页会直接展示 code。' },
+  {
+    text: '5. 把四项凭证填入上方表单，点「打开授权页」用百度账号授权；将页面展示的 code 粘贴到「授权码」后点「完成授权」。',
+  },
+  {
+    text: '6. 凭证仅加密保存在本机 %APPDATA%\\CloudPrism\\baidu.json，不会上传；access_token 约 30 天过期，届时重新授权即可。',
+  },
 ]
 
 /* -------------------------------------------------------- 局域网访问档 */
@@ -840,7 +865,20 @@ function readBuild() {
           </button>
           <Transition name="fade">
             <div v-if="showGuide" class="bf-guide">
-              <p v-for="(l, i) in GUIDE_LINES" :key="i">{{ l }}</p>
+              <!-- 用原生 <a target="_blank">：界面本就跑在浏览器里，交给浏览器开新标签
+                   即可，无需绕后端（win.OpenURL 会开在**主机**浏览器上，远端设备
+                   看到的是自己屏幕，反而错位）。rel 防 opener 反向控制本页。 -->
+              <p v-for="(l, i) in GUIDE_LINES" :key="i">
+                {{ l.text }}
+                <a
+                  v-if="l.link"
+                  class="bf-guide-link"
+                  :href="l.link.url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >{{ l.link.label }}</a
+                >{{ l.tail }}
+              </p>
             </div>
           </Transition>
 
@@ -1034,6 +1072,19 @@ function readBuild() {
 
 .bf-guide p:last-child {
   margin-bottom: 0;
+}
+
+/* 教程内链接：下划线常驻 —— 密集小字里只靠颜色不足以表明「可点」；
+   长 URL 允许在任意字符处断行，避免在窄栏里撑破卡片。 */
+.bf-guide-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  word-break: break-all;
+}
+
+.bf-guide-link:hover {
+  text-decoration-color: currentColor;
 }
 
 .bf-actions {
